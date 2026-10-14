@@ -1,0 +1,54 @@
+# CIPHER Continuous Integration
+#
+# This workflow runs on every push to main and on every pull request.
+# It builds the project and runs the test suite on two platforms:
+#   - ubuntu-latest  : uses GCC via the default Unix Makefiles/Ninja generator
+#   - windows-latest : uses the Visual Studio 2022 generator (MSVC)
+#
+# No AI providers, paid services, API keys, or model downloads are involved.
+# The entire build is self-contained: standard library only, no third-party
+# runtime dependencies.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false          # Let both platforms run even if one fails
+      matrix:
+        include:
+          - os: ubuntu-latest
+            preset: unix        # Used only as a label; we configure manually
+
+          - os: windows-latest
+            preset: windows
+
+    steps:
+      # 1. Check out the repository.
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      # 2. Configure the CMake build.
+      #    -DCMAKE_BUILD_TYPE=Release selects an optimised build.
+      #    BUILD_TESTING=ON (the default) ensures the test target is compiled.
+      - name: Configure (CMake)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      # 3. Compile every target (main library, executable, and test binary).
+      - name: Build
+        run: cmake --build build --config Release
+
+      # 4. Run the CTest suite.
+      #    --output-on-failure prints the test program's stdout/stderr only
+      #    when a test fails, keeping successful logs clean.
+      - name: Test (CTest)
+        run: ctest --test-dir build -C Release --output-on-failure

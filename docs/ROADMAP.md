@@ -7,9 +7,21 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
 - [x] Establish repository structure and founding principles.
 - [x] Create a C++17 core and basic command interface.
 - [x] Add a repeatable build and starter tests.
-- [ ] Build locally on the user's computer.
-- [ ] Create the GitHub repository and push the initial baseline.
+- [x] Build locally on the owner's computer (Windows, MSVC via VS 2022 Build Tools, Ninja generator).
+- [x] Create the GitHub repository and push the initial baseline (commit 5501749, branch main).
 - [ ] Review every source file and understand the execution path.
+      *(The owner must do this step; it cannot be marked done by the agent.)*
+
+## October 2026: v0.1.1 foundation hardening
+
+- [x] Add GitHub Actions CI (Ubuntu + Windows, build + CTest).
+      See `.github/workflows/ci.yml`.
+      Status: workflow pushed; first run pending on GitHub.
+      The result will appear at:
+      https://github.com/StevefromSpace/CIPHER/actions
+- [x] Fix MSVC localtime deprecation warning (localtime_s / localtime_r platform helper).
+- [x] Expand test coverage from 7 to 19 cases (empty input, whitespace, time,
+      echo edge cases, case sensitivity, leading-space stripping).
 
 ## Next milestones
 

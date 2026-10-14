@@ -10,6 +10,11 @@
 namespace cipher {
 namespace {
 
+// ---------------------------------------------------------------------------
+// trim_left
+// Removes leading ASCII whitespace (space, tab, carriage return, newline)
+// from a string and returns the result. Does not modify the original.
+// ---------------------------------------------------------------------------
 std::string trim_left(const std::string& value) {
     const auto first = value.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) {
@@ -18,30 +23,56 @@ std::string trim_left(const std::string& value) {
     return value.substr(first);
 }
 
+// ---------------------------------------------------------------------------
+// current_local_time
+// Returns the local wall-clock time formatted as "YYYY-MM-DD HH:MM:SS".
+//
+// Why the platform split?
+//   std::localtime() is not thread-safe (it uses a shared internal buffer)
+//   and MSVC marks it deprecated, producing a warning.  The replacements are:
+//     - localtime_s()  Windows / MSVC  (writes into caller-supplied tm struct)
+//     - localtime_r()  POSIX / GCC / Clang (same idea, different argument
+//                      order)
+//   Both functions are C++17-compatible and introduced no new dependencies.
+//   The #if guards are the standard way to detect the platform in C++.
+// ---------------------------------------------------------------------------
 std::string current_local_time() {
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t time = std::chrono::system_clock::to_time_t(now);
-    const std::tm* local = std::localtime(&time);
+    const auto now  = std::chrono::system_clock::now();
+    const std::time_t t = std::chrono::system_clock::to_time_t(now);
 
-    if (local == nullptr) {
+    std::tm local_tm{};   // Zero-initialise so every field starts clean.
+
+#if defined(_WIN32)
+    // Windows / MSVC: localtime_s writes the result into local_tm.
+    // It returns non-zero on error.
+    if (localtime_s(&local_tm, &t) != 0) {
         return "The local system time is unavailable.";
     }
+#else
+    // POSIX (Linux, macOS, etc.): localtime_r takes the time first, then
+    // writes into the supplied struct. Returns nullptr on error.
+    if (localtime_r(&t, &local_tm) == nullptr) {
+        return "The local system time is unavailable.";
+    }
+#endif
 
     std::ostringstream output;
-    output << std::put_time(local, "%Y-%m-%d %H:%M:%S");
+    output << std::put_time(&local_tm, "%Y-%m-%d %H:%M:%S");
     return output.str();
 }
 
 } // namespace
 
 CommandResponse CipherCore::execute(const std::string& input) const {
+    // Commands are case-sensitive: "Help" and "HELP" are not recognised.
+    // This is intentional and keeps parsing simple and predictable.
     const std::string trimmed = trim_left(input);
     if (trimmed.empty()) {
         return {"", false};
     }
 
     const auto separator = trimmed.find_first_of(" \t");
-    const std::string command = trimmed.substr(0, separator);
+    const std::string command   = trimmed.substr(0, separator);
     const std::string arguments = separator == std::string::npos
                                       ? ""
                                       : trim_left(trimmed.substr(separator + 1));
@@ -85,6 +116,8 @@ CommandResponse CipherCore::execute(const std::string& input) const {
     }
 
     if (command == "echo") {
+        // Deliberately returns an empty string when no argument is given.
+        // echo with no argument is a valid command; it produces no output.
         return {arguments, false};
     }
 
