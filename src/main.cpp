@@ -58,14 +58,14 @@ int main() {
     // -----------------------------------------------------------------------
     log.info("CIPHER v" + std::string(cipher::CipherCore::version()) + " starting");
 
-    if (cfg_result.ok()) {
-        // Only note the config file if it was actually found (load() returns
-        // ok() with no errors for both "file not found" and "file parsed OK").
-        // We distinguish them by checking whether the file path is non-empty
-        // AND no errors were reported.
-        log.debug("Configuration loaded (log_level=" +
-                  std::string(cipher::log_level_name(cfg.log_level)) + ")");
-    }
+    // Log the effective configuration regardless of whether it came from a
+    // file or defaults.  We do not claim the file was loaded here because
+    // ConfigParser::load() returns ok() for both "file absent" (defaults) and
+    // "file parsed successfully" — we cannot distinguish them without adding
+    // extra state.  "Configuration active" is always accurate.
+    log.debug("Configuration active (log_level=" +
+              std::string(cipher::log_level_name(cfg.log_level)) + ")");
+
 
     // -----------------------------------------------------------------------
     // 4. Initialise core and run the command loop.

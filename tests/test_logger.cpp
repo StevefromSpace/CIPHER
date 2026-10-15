@@ -237,13 +237,19 @@ static void test_logger_bad_file_path_degrades_gracefully() {
     // The constructor prints a warning to stderr and continues.
     // We verify by checking that the Logger constructs without throwing
     // and that has_file_output() returns false.
+    //
+    // Portability note:
+    //   A path whose *parent directory does not exist* fails to open on both
+    //   Windows and Linux.  We use a deliberate non-existent subdirectory
+    //   prefix so the test is not tied to drive letters or OS-specific path
+    //   separators.  The directory name is chosen to be unlikely to exist.
     const std::string bad_path =
-        "Z:\\this\\path\\does\\not\\exist\\cipher_test.log";
+        "__cipher_no_such_dir__/cipher_test_bad_path.log";
     cipher::Logger log(cipher::LogLevel::INFO, bad_path);
     check(!log.has_file_output(),
           "bad file path: file output disabled",
           "Expected has_file_output() == false after bad path");
-    // Must still be usable.
+    // Must still be usable after the graceful failure.
     log.info("this goes to stderr only");
     pass("bad file path: Logger still usable after failure");
 }
