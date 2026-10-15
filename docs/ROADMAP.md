@@ -8,7 +8,9 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
 - [x] Create a C++17 core and basic command interface.
 - [x] Add a repeatable build and starter tests.
 - [x] Build locally on the owner's computer (Windows, MSVC via VS 2022 Build Tools, Ninja generator).
+      *(Confirmed: build succeeded locally before the initial push.)*
 - [x] Create the GitHub repository and push the initial baseline (commit 5501749, branch main).
+      *(Confirmed: repository is at https://github.com/StevefromSpace/CIPHER)*
 - [ ] Review every source file and understand the execution path.
       *(The owner must do this step; it cannot be marked done by the agent.)*
 
@@ -16,20 +18,29 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
 
 - [x] Add GitHub Actions CI (Ubuntu + Windows, build + CTest).
       See `.github/workflows/ci.yml`.
-      Status: workflow pushed; first run pending on GitHub.
-      The result will appear at:
-      https://github.com/StevefromSpace/CIPHER/actions
+      Runners pinned to ubuntu-24.04 and windows-2022.
 - [x] Fix MSVC localtime deprecation warning (localtime_s / localtime_r platform helper).
 - [x] Expand test coverage from 7 to 18 cases (empty input, whitespace, time,
       echo edge cases, case sensitivity, leading-space stripping).
 
+## October 2026: v0.2 — Configuration and diagnostics
+
+- [x] Add a configuration subsystem: optional `cipher.conf` (key = value format).
+      Supports `log_level` and `log_file`. Unknown keys and invalid values are
+      rejected with line-number error messages.
+- [x] Add a structured logger: four levels (DEBUG, INFO, WARN, ERROR), stderr by default,
+      optional file output, graceful degradation when the file cannot be opened.
+- [x] Integrate config and logger into the startup sequence in `main.cpp`.
+      Configuration errors stop startup with a clear message.
+      A missing config file uses sensible defaults — no error.
+- [x] Provide `cipher.conf.example` with documentation and a security reminder.
+      Exclude `cipher.conf` from Git; keep the example tracked.
+- [x] Add config tests (test_config.cpp) and logger tests (test_logger.cpp).
+      All 18 existing command tests continue to pass.
+- [ ] Review the v0.2 source files and understand the configuration and logging code.
+      *(The owner must do this step.)*
+
 ## Next milestones
-
-### v0.2: Configuration and diagnostics
-
-- Read a simple local configuration file.
-- Improve error reporting and command parsing.
-- Add structured logs without storing secrets.
 
 ### v0.3: Persistent memory foundation
 

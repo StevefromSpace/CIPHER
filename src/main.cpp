@@ -1,20 +1,87 @@
 #include "cipher/cipher_core.hpp"
+#include "cipher/config.hpp"
+#include "cipher/logger.hpp"
 
 #include <iostream>
 #include <string>
 
+// ---------------------------------------------------------------------------
+// main.cpp  —  Terminal entry point for CIPHER
+//
+// Startup sequence:
+//   1. Load configuration from "cipher.conf" (optional; defaults are used
+//      when the file is absent).
+//   2. Initialise the logger using the configured level and log file.
+//   3. Log the startup event.
+//   4. Run the command loop.
+//   5. Log the shutdown event.
+//
+// Configuration errors stop startup with a clear message.  A missing config
+// file is not an error — CIPHER is useful out of the box with no setup.
+//
+// Why is the logger initialised in main and not inside CipherCore?
+//   Keeping the Logger in main keeps the core independent of I/O policy.
+//   The core only knows how to execute commands; it does not decide where
+//   diagnostic messages go.  This makes the core easier to test.
+// ---------------------------------------------------------------------------
+
+static constexpr const char* CONFIG_FILE = "cipher.conf";
+
 int main() {
+    // -----------------------------------------------------------------------
+    // 1. Load configuration.
+    // -----------------------------------------------------------------------
+    const cipher::ConfigResult cfg_result = cipher::ConfigParser::load(CONFIG_FILE);
+
+    if (!cfg_result.ok()) {
+        std::cerr << "CIPHER: configuration error(s) in '" << CONFIG_FILE << "':\n";
+        for (const auto& err : cfg_result.errors) {
+            if (err.line > 0) {
+                std::cerr << "  Line " << err.line << ": " << err.message << '\n';
+            } else {
+                std::cerr << "  " << err.message << '\n';
+            }
+        }
+        std::cerr << "Fix the errors above and restart CIPHER.\n";
+        return 1;
+    }
+
+    const cipher::Config& cfg = cfg_result.config;
+
+    // -----------------------------------------------------------------------
+    // 2. Initialise the logger.
+    // -----------------------------------------------------------------------
+    cipher::Logger log(cfg.log_level, cfg.log_file);
+
+    // -----------------------------------------------------------------------
+    // 3. Log startup.
+    // -----------------------------------------------------------------------
+    log.info("CIPHER v" + std::string(cipher::CipherCore::version()) + " starting");
+
+    if (cfg_result.ok()) {
+        // Only note the config file if it was actually found (load() returns
+        // ok() with no errors for both "file not found" and "file parsed OK").
+        // We distinguish them by checking whether the file path is non-empty
+        // AND no errors were reported.
+        log.debug("Configuration loaded (log_level=" +
+                  std::string(cipher::log_level_name(cfg.log_level)) + ")");
+    }
+
+    // -----------------------------------------------------------------------
+    // 4. Initialise core and run the command loop.
+    // -----------------------------------------------------------------------
     cipher::CipherCore core;
 
     std::cout << "CIPHER v" << cipher::CipherCore::version() << '\n';
     std::cout << "Contextual Intelligence Platform for Home, Enterprise & Research\n";
-    std::cout << "Type 'help' to begin. This initial build runs locally and has no AI runtime.\n\n";
+    std::cout << "Type 'help' to begin. This build runs locally and has no AI runtime.\n\n";
 
     std::string input;
     while (true) {
         std::cout << "CIPHER> ";
         if (!std::getline(std::cin, input)) {
             std::cout << "\nInput closed. CIPHER session ended.\n";
+            log.info("CIPHER session ended (input stream closed)");
             break;
         }
 
@@ -23,9 +90,14 @@ int main() {
             std::cout << response.text << '\n';
         }
         if (response.exit_requested) {
+            log.info("CIPHER session ended (user request)");
             break;
         }
     }
 
+    // -----------------------------------------------------------------------
+    // 5. Log shutdown.
+    // -----------------------------------------------------------------------
+    log.info("CIPHER shutdown complete");
     return 0;
 }

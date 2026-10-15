@@ -20,6 +20,9 @@
 *.pdb
 
 # Local-only configuration and logs
+# cipher.conf is user-specific and must not be committed.
+# cipher.conf.example IS committed (it contains no secrets).
+cipher.conf
 .env
 .env.*
 !.env.example

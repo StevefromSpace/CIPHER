@@ -1,0 +1,54 @@
+# CIPHER configuration example
+# ============================================================
+# Copy this file to "cipher.conf" in the directory where you
+# run CIPHER, then edit it as needed.
+#
+# Rules:
+#   - Lines starting with '#' are comments (ignored).
+#   - Blank lines are ignored.
+#   - Each setting is:  key = value
+#   - Whitespace around '=' is trimmed automatically.
+#   - Unknown keys are rejected with an error message.
+#   - CIPHER stops if the configuration file contains errors.
+#     Fix the errors and restart.
+#
+# IMPORTANT: Do not store passwords, API keys, tokens, or any
+# other secrets in this file.  This file may be committed to
+# version control.  Keep secrets in environment variables or
+# a separate secrets manager, not in cipher.conf.
+# ============================================================
+
+
+# ---------------------------------------------------------------------------
+# log_level
+#
+# Controls the minimum severity of messages that are written to the log.
+# Messages below this level are silently discarded.
+#
+# Allowed values (case-insensitive):
+#   debug   — most verbose; prints internal state changes (use during development)
+#   info    — normal operation events (default)
+#   warn    — conditions that may indicate a problem but do not stop execution
+#   error   — failures that prevented an operation from completing
+#
+# Default: info
+# ---------------------------------------------------------------------------
+log_level = info
+
+
+# ---------------------------------------------------------------------------
+# log_file
+#
+# Optional path to a log file.  CIPHER appends to this file on every run.
+# If the path is relative, it is relative to the current working directory.
+# If this setting is absent or empty, all log output goes to stderr only.
+#
+# Rotate or delete the file manually when it grows large.
+# The file is created automatically on first use.
+#
+# Do not set this to a path inside the project repository unless you have
+# also added the file to .gitignore.
+#
+# Default: (empty — stderr only)
+# ---------------------------------------------------------------------------
+# log_file = cipher.log
