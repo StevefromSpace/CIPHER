@@ -8,10 +8,10 @@ This document is the authoritative summary of CIPHER's verified state. It provid
 
 * **Repository:** [https://github.com/StevefromSpace/CIPHER](https://github.com/StevefromSpace/CIPHER)
 * **Current Branch:** `main`
-* **Current Verified Commit:** `8f1a6ac89e2ea5e42e3b300c8109f421cf6a5bd8`
-* **Short Hash:** `8f1a6ac`
-* **Commit Message:** `fix: portable bad-path logger test and accurate startup message`
-* **Remote Synchronization:** Local `main` and `origin/main` are identical at `8f1a6ac`.
+* **Current Verified Commit:** `677e8455bd51f760288c122aed97c7cea88ec22b`
+* **Short Hash:** `677e845`
+* **Commit Message:** `fix: centralize application version reporting`
+* **Remote Synchronization:** Local `main` and `origin/main` are identical at `677e845`.
 * **Working Tree:** Clean (zero uncommitted or untracked changes).
 
 ---
@@ -21,9 +21,9 @@ This document is the authoritative summary of CIPHER's verified state. It provid
 * **Continuous Integration Provider:** GitHub Actions
 * **Workflow Configuration:** [.github/workflows/ci.yml](../.github/workflows/ci.yml)
 * **Triggers:** Push to `main`, Pull Requests targeting `main`.
-* **Latest Workflow Run:** [Run #4 (ID: 38702784150)](https://github.com/StevefromSpace/CIPHER/actions/runs/38702784150)
+* **Latest Workflow Run:** [Run #6 (ID: 38710534839)](https://github.com/StevefromSpace/CIPHER/actions/runs/38710534839)
 * **Overall CI Result:** **Success (Passing)**
-* **Total Run Duration:** 52 seconds
+* **Total Run Duration:** 42 seconds
 * **Matrix Jobs:**
   1. **Ubuntu 24.04 (`ubuntu-24.04`):** Passed (GCC on Ubuntu 24.04 LTS; CTest passed).
   2. **Windows 2022 (`windows-2022`):** Passed (MSVC on Windows Server 2022; CTest passed).
