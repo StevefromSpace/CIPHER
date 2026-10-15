@@ -4,29 +4,30 @@ This document is the authoritative summary of CIPHER's verified state. It provid
 
 ---
 
-## 1. Baseline & Repository Verification
+## 1. Verified Code Baseline & Repository State
 
 * **Repository:** [https://github.com/StevefromSpace/CIPHER](https://github.com/StevefromSpace/CIPHER)
-* **Current Branch:** `main`
-* **Current Verified Commit:** `677e8455bd51f760288c122aed97c7cea88ec22b`
-* **Short Hash:** `677e845`
-* **Commit Message:** `fix: centralize application version reporting`
-* **Remote Synchronization:** Local `main` and `origin/main` are identical at `677e845`.
-* **Working Tree:** Clean (zero uncommitted or untracked changes).
+* **Active Branch:** `main`
+* **Verified Code Baseline:** Commit `677e8455bd51f760288c122aed97c7cea88ec22b` (`677e845`)
+  * **Subject:** `fix: centralize application version reporting`
+  * **Scope:** Full C++17 core, configuration parser, leveled diagnostic logger, CMake centralized versioning (`version.hpp`), and comprehensive test suites.
+* **Documentation & Housekeeping Layer:** Subsequent documentation-only commits maintain project notes, roadmaps, and architecture guides without altering compiled source or application behavior.
+* **Working Tree:** Clean (zero uncommitted changes; obsolete temporary files removed).
 
 ---
 
-## 2. CI Status & Tested Platforms
+## 2. CI Verification for Code Baseline
 
 * **Continuous Integration Provider:** GitHub Actions
 * **Workflow Configuration:** [.github/workflows/ci.yml](../.github/workflows/ci.yml)
 * **Triggers:** Push to `main`, Pull Requests targeting `main`.
-* **Latest Workflow Run:** [Run #6 (ID: 38710534839)](https://github.com/StevefromSpace/CIPHER/actions/runs/38710534839)
-* **Overall CI Result:** **Success (Passing)**
-* **Total Run Duration:** 42 seconds
+* **Code Baseline Tested:** Commit `677e845` (`fix: centralize application version reporting`)
+* **Workflow Run:** [Run #6 (ID: 38710534839)](https://github.com/StevefromSpace/CIPHER/actions/runs/38710534839)
+* **Status:** **Success (Passing)** in 42 seconds
 * **Matrix Jobs:**
   1. **Ubuntu 24.04 (`ubuntu-24.04`):** Passed (GCC on Ubuntu 24.04 LTS; CTest passed).
   2. **Windows 2022 (`windows-2022`):** Passed (MSVC on Windows Server 2022; CTest passed).
+* **Note on Documentation Commits:** CI verifies the compiled code baseline; subsequent documentation-only commits on `main` do not alter the verified binaries or test suite outputs.
 
 ---
 

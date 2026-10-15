@@ -36,9 +36,20 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
 - [x] Provide `cipher.conf.example` with documentation and a security reminder.
       Exclude `cipher.conf` from Git; keep the example tracked.
 - [x] Add config tests (test_config.cpp) and logger tests (test_logger.cpp).
-      All 18 existing command tests continue to pass.
 - [ ] Review the v0.2 source files and understand the configuration and logging code.
       *(The owner must do this step.)*
+
+## October 2026: v0.2.1 — Version consistency and test alignment
+
+- [x] Centralize application version in `CMakeLists.txt` via CMake project `VERSION`.
+- [x] Generate `include/cipher/version.hpp` using `configure_file()` from `version.hpp.in`.
+- [x] Ensure `CipherCore::version()`, `help`, `about`, and `status` dynamically report `0.2.0`.
+- [x] Reconcile and expand test coverage across the repository:
+      * `cipher_core_tests`: 20 command cases + 1 direct version constant check (21 assertion checks).
+      * `cipher_config_tests`: 19 test functions (56 assertion checks).
+      * `cipher_logger_tests`: 11 test functions (28 assertion checks).
+      * Total: 51 test cases/functions and 105 individual assertions across 3 CTest targets (all passing).
+- [x] Document working-directory configuration loading assumption in `docs/ARCHITECTURE.md`.
 
 ## Next milestones
 
