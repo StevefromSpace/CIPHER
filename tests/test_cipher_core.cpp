@@ -9,8 +9,9 @@
 // No external dependencies. Each test case specifies:
 //   name             - label shown in output
 //   input            - raw string sent to CipherCore::execute()
-//   expected_substr  - substring that must appear in response.text
-//                      (empty string means we only check exit_requested)
+//   expected_substr  - substring that must appear in response.text;
+//                      ignored when must_be_empty is true
+//   must_be_empty    - when true, asserts response.text is exactly ""
 //   expected_exit    - expected value of response.exit_requested
 // ---------------------------------------------------------------------------
 
@@ -20,7 +21,8 @@ struct TestCase {
     std::string name;
     std::string input;
     std::string expected_substr;
-    bool        expected_exit = false;
+    bool        must_be_empty  = false;
+    bool        expected_exit  = false;
 };
 
 } // namespace
@@ -44,65 +46,63 @@ int main() {
         {"help command",
          "help",
          "Available commands:",
-         false},
+         false, false},
 
         {"about command",
          "about",
          "CIPHER v0.1.0",
-         false},
+         false, false},
 
         {"status command",
          "status",
          "External AI-provider dependency: none",
-         false},
+         false, false},
 
         {"echo with argument",
          "echo hello CIPHER",
          "hello CIPHER",
-         false},
+         false, false},
 
         {"unknown command",
          "not-a-command",
          "Unknown command:",
-         false},
+         false, false},
 
         {"exit command",
          "exit",
          "Session ended.",
-         true},
+         false, true},
 
         {"quit command",
          "quit",
          "Session ended.",
-         true},
+         false, true},
 
         // --- New: empty and whitespace-only input ---------------------------
-        // Empty input must return an empty text and NOT request exit.
+        // Empty input must return exactly empty text and NOT request exit.
+        // must_be_empty=true makes a non-empty response a test failure.
         {"empty input - text is empty",
          "",
-         "",         // expected_substr="" means any text (including empty) is OK
-         false},
+         "", true, false},
 
         // Whitespace-only input trims to an empty command and behaves the
         // same as truly empty input.
         {"whitespace-only input - text is empty",
          "   \t  ",
-         "",
-         false},
+         "", true, false},
 
         // --- New: echo edge cases -------------------------------------------
-        // "echo" with no argument is a valid command; it returns empty text
-        // and does not request exit.
+        // "echo" with no argument is a valid command; it must return exactly
+        // empty text and must not request exit.
         {"echo with no argument - empty response",
          "echo",
-         "",
-         false},
+         "", true, false},
 
         // echo preserves its argument including internal spaces.
         {"echo with multiple words",
          "echo one two three",
          "one two three",
-         false},
+         false, false},
 
         // --- New: time command ----------------------------------------------
         // The time command must return a non-empty string that begins with
@@ -111,14 +111,14 @@ int main() {
         {"time command - has prefix",
          "time",
          "Local system time:",
-         false},
+         false, false},
 
         // The year in the output must start with "20" (covers 2000-2099,
         // which is the expected operating lifetime of this software).
         {"time command - year looks modern",
          "time",
          "20",
-         false},
+         false, false},
 
         // --- New: case sensitivity ------------------------------------------
         // Commands are matched literally.  Mixed-case variants must fall
@@ -126,12 +126,12 @@ int main() {
         {"Help (capital H) is unknown",
          "Help",
          "Unknown command:",
-         false},
+         false, false},
 
         {"EXIT (all caps) is unknown",
          "EXIT",
          "Unknown command:",
-         false},
+         false, false},
 
         // --- New: unknown command details ------------------------------------
         // The error message must echo the unrecognised token so the user can
@@ -139,28 +139,35 @@ int main() {
         {"unknown command echoes the token",
          "frobulate",
          "frobulate",
-         false},
+         false, false},
 
         // --- New: leading whitespace stripped before dispatch ---------------
         {"help with leading spaces",
          "   help",
          "Available commands:",
-         false},
+         false, false},
 
         {"exit with leading tab",
          "\texit",
          "Session ended.",
-         true},
+         false, true},
     };
 
     int failures = 0;
     for (const TestCase& test : cases) {
         const cipher::CommandResponse response = core.execute(test.input);
 
-        // If expected_substr is empty, we only verify the exit flag.
-        const bool text_ok =
-            test.expected_substr.empty() ||
-            response.text.find(test.expected_substr) != std::string::npos;
+        // Text check: two modes.
+        //   must_be_empty=true  -> response.text must be exactly "".
+        //   must_be_empty=false -> response.text must contain expected_substr
+        //                         (or expected_substr is "" meaning no check).
+        bool text_ok = false;
+        if (test.must_be_empty) {
+            text_ok = response.text.empty();
+        } else {
+            text_ok = test.expected_substr.empty() ||
+                      response.text.find(test.expected_substr) != std::string::npos;
+        }
 
         const bool exit_ok = (response.exit_requested == test.expected_exit);
 
@@ -168,7 +175,11 @@ int main() {
             ++failures;
             std::cerr << "FAIL: " << test.name << '\n';
             if (!text_ok) {
-                std::cerr << "  Expected substring : \"" << test.expected_substr << "\"\n";
+                if (test.must_be_empty) {
+                    std::cerr << "  Expected text      : (exactly empty)\n";
+                } else {
+                    std::cerr << "  Expected substring : \"" << test.expected_substr << "\"\n";
+                }
                 std::cerr << "  Actual text        : \"" << response.text << "\"\n";
             }
             if (!exit_ok) {

@@ -2,8 +2,9 @@
 #
 # This workflow runs on every push to main and on every pull request.
 # It builds the project and runs the test suite on two platforms:
-#   - ubuntu-latest  : uses GCC via the default Unix Makefiles/Ninja generator
-#   - windows-latest : uses the Visual Studio 2022 generator (MSVC)
+#   - ubuntu-24.04   : GCC on Ubuntu 24.04 LTS (pinned to avoid ubuntu-latest
+#                      migration notices; stable until at least April 2029)
+#   - windows-2022   : MSVC via the Visual Studio 2022 generator (pinned)
 #
 # No AI providers, paid services, API keys, or model downloads are involved.
 # The entire build is self-contained: standard library only, no third-party
@@ -26,10 +27,10 @@ jobs:
       fail-fast: false          # Let both platforms run even if one fails
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             preset: unix        # Used only as a label; we configure manually
 
-          - os: windows-latest
+          - os: windows-2022
             preset: windows
 
     steps:

@@ -20,7 +20,7 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
       The result will appear at:
       https://github.com/StevefromSpace/CIPHER/actions
 - [x] Fix MSVC localtime deprecation warning (localtime_s / localtime_r platform helper).
-- [x] Expand test coverage from 7 to 19 cases (empty input, whitespace, time,
+- [x] Expand test coverage from 7 to 18 cases (empty input, whitespace, time,
       echo edge cases, case sensitivity, leading-space stripping).
 
 ## Next milestones
