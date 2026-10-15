@@ -123,7 +123,12 @@ CIPHER/
 │   ├── test_cipher_core.cpp
 │   ├── test_config.cpp    ← (v0.2)
 │   └── test_logger.cpp    ← (v0.2)
-└── docs/                  ← Vision, architecture, and roadmap
+└── docs/                  ← Architecture, decisions, state, roadmap, and vision
+    ├── ARCHITECTURE.md    ← Component boundaries and system design
+    ├── DECISIONS.md       ← Durable engineering and architectural decisions
+    ├── PROJECT_STATE.md   ← Current authoritative baseline and status
+    ├── ROADMAP.md         ← Milestones and progress tracking
+    └── VISION.md          ← Founding principles and long-term vision
 ```
 
 ## Principles
@@ -135,6 +140,19 @@ CIPHER/
 5. **Security by design:** tools receive explicit permissions; high-risk actions require approval.
 6. **Test before change:** upgrades must pass tests and preserve a rollback path.
 7. **Understand what we build:** use AI-assisted development, but review and learn from every core component.
+
+## Instructions for Future AI Coding Agents
+
+To maintain continuity across different models, sessions, and tools, every AI coding assistant working on CIPHER must follow these rules:
+
+1. **Read context before editing:** Always read [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md), [`docs/DECISIONS.md`](docs/DECISIONS.md), [`docs/VISION.md`](docs/VISION.md), and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before modifying code.
+2. **Verify live Git state:** Always run `git status`, `git branch --show-current`, and check remote synchronization instead of assuming a previous conversation report is current.
+3. **Update state on milestones:** Update [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md) whenever a significant, verified milestone or baseline change is achieved.
+4. **Record durable architectural choices:** When new long-term technical or design choices are made, document them in [`docs/DECISIONS.md`](docs/DECISIONS.md).
+5. **Distinguish local from remote results:** Clearly separate local build/test results from remote GitHub Actions CI outcomes.
+6. **Integrity in reporting:** Never fabricate build results, test outcomes, commit hashes, or successful pushes.
+7. **Preserve history:** Never overwrite uncommitted user work or rewrite Git history to hide mistakes.
+8. **Keep documentation lean:** Do not invent new documentation frameworks or add unnecessary files to the repository.
 
 ## Development status
 
