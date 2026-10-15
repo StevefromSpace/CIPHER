@@ -94,6 +94,9 @@ Unknown keys are rejected (not silently ignored) to surface typos.
 Invalid values produce a clear error with a line number.
 Returns `ConfigResult` — either a valid `Config` or a list of `ConfigError` items.
 A missing file returns default values and no errors (the file is optional).
+File location: `cipher.conf` is resolved strictly relative to the process's
+current working directory (the directory where CIPHER was launched). It does not
+search parent directories, system configuration paths, or the executable location.
 
 ### Logger
 
@@ -103,6 +106,14 @@ Uses the same platform-safe `localtime_s` / `localtime_r` pattern as `cipher_cor
 If the log file cannot be opened, the Logger reports the problem to stderr and
 continues with stderr-only output — it does not crash the application.
 Not thread-safe (CIPHER is currently single-threaded).
+
+### Versioning
+
+The single source of truth for the application version is declared in `CMakeLists.txt`
+via `project(CIPHER VERSION ...)`.  CMake generates `version.hpp` into the build tree
+from `include/cipher/version.hpp.in` via `configure_file()`.  `CipherCore::version()`
+and diagnostic outputs consume these constants (`CIPHER_VERSION`, `CIPHER_VERSION_MAJOR`,
+etc.), guaranteeing that the startup banner, command outputs, and logs remain synchronized.
 
 ## Current limitations
 

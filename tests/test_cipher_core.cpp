@@ -50,7 +50,7 @@ int main() {
 
         {"about command",
          "about",
-         "CIPHER v0.1.0",
+         "CIPHER v0.2.0",
          false, false},
 
         {"status command",
@@ -151,9 +151,46 @@ int main() {
          "\texit",
          "Session ended.",
          false, true},
+
+        // --- Version consistency tests --------------------------------------
+        {"help command reports current version",
+         "help",
+         "v0.2.0",
+         false, false},
+
+        {"status command reports current version",
+         "status",
+         "Version: 0.2.0",
+         false, false},
     };
 
     int failures = 0;
+
+    // 1. Direct verification of generated version constants and version() API.
+    const bool version_const_ok = (std::string(cipher::CIPHER_VERSION) == "0.2.0") &&
+                                  (cipher::CIPHER_VERSION_MAJOR == 0) &&
+                                  (cipher::CIPHER_VERSION_MINOR == 2) &&
+                                  (cipher::CIPHER_VERSION_PATCH == 0);
+    const bool version_fn_ok = (std::string(cipher::CipherCore::version()) == "0.2.0") &&
+                               (std::string(cipher::CipherCore::version()) == cipher::CIPHER_VERSION);
+
+    if (!version_const_ok || !version_fn_ok) {
+        ++failures;
+        std::cerr << "FAIL: version constants and CipherCore::version() consistency\n";
+        if (!version_const_ok) {
+            std::cerr << "  CIPHER_VERSION: \"" << cipher::CIPHER_VERSION << "\"\n";
+            std::cerr << "  MAJOR: " << cipher::CIPHER_VERSION_MAJOR
+                      << " MINOR: " << cipher::CIPHER_VERSION_MINOR
+                      << " PATCH: " << cipher::CIPHER_VERSION_PATCH << "\n";
+        }
+        if (!version_fn_ok) {
+            std::cerr << "  CipherCore::version(): \"" << cipher::CipherCore::version() << "\"\n";
+        }
+    } else {
+        std::cout << "PASS: version constants and CipherCore::version() match 0.2.0\n";
+    }
+
+    // 2. Command test cases.
     for (const TestCase& test : cases) {
         const cipher::CommandResponse response = core.execute(test.input);
 
@@ -196,6 +233,6 @@ int main() {
         return 1;
     }
 
-    std::cout << "\nAll " << cases.size() << " tests passed.\n";
+    std::cout << "\nAll " << cases.size() << " command tests and version consistency checks passed.\n";
     return 0;
 }

@@ -86,7 +86,7 @@ CommandResponse CipherCore::execute(const std::string& input) const {
             "  time              Show the local system time\n"
             "  echo <text>       Print text back to the console\n"
             "  exit / quit       Close CIPHER\n\n"
-            "No network, shell, file-writing, or AI-provider access is enabled in v0.1.0.",
+            "No network, shell, file-writing, or AI-provider access is enabled in v" + std::string(version()) + ".",
             false};
     }
 

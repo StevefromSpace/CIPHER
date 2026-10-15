@@ -113,7 +113,8 @@ CIPHER/
 ├── include/cipher/        ← Public interfaces
 │   ├── cipher_core.hpp
 │   ├── config.hpp         ← Configuration subsystem (v0.2)
-│   └── logger.hpp         ← Logger (v0.2)
+│   ├── logger.hpp         ← Logger (v0.2)
+│   └── version.hpp.in     ← Version template (CMake generated)
 ├── src/                   ← Implementation
 │   ├── main.cpp
 │   ├── cipher_core.cpp

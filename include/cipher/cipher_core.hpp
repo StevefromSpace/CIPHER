@@ -1,6 +1,8 @@
 #ifndef CIPHER_CIPHER_CORE_HPP
 #define CIPHER_CIPHER_CORE_HPP
 
+#include "cipher/version.hpp"
+
 #include <string>
 
 namespace cipher {
@@ -15,7 +17,7 @@ struct CommandResponse {
 class CipherCore {
 public:
     static constexpr const char* version() noexcept {
-        return "0.1.0";
+        return CIPHER_VERSION;
     }
 
     CommandResponse execute(const std::string& input) const;

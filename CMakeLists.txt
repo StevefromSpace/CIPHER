@@ -7,12 +7,24 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ---------------------------------------------------------------------------
-# cipher_core  —  command handling (unchanged from v0.1)
+# Generated version header (single source of truth from project VERSION)
+# ---------------------------------------------------------------------------
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/cipher/version.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/include/cipher/version.hpp
+    @ONLY
+)
+
+# ---------------------------------------------------------------------------
+# cipher_core  —  command handling
 # ---------------------------------------------------------------------------
 add_library(cipher_core
     src/cipher_core.cpp
 )
-target_include_directories(cipher_core PUBLIC include)
+target_include_directories(cipher_core PUBLIC
+    include
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/include
+)
 
 if(MSVC)
     target_compile_options(cipher_core PRIVATE /W4 /permissive-)

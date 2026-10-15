@@ -54,6 +54,7 @@ The codebase currently contains three modular C++17 libraries and a command-line
    * Built-in commands: `help`, `about`, `status`, `time`, `echo`, `quit`, `exit`.
    * Whitespace handling (leading/trailing whitespace trimming), case-sensitive command matching.
    * Platform-portable timestamp formatting using `localtime_s` (MSVC/Windows) and `localtime_r` (POSIX/Linux).
+   * Centralized application version reporting via CMake-generated `cipher/version.hpp` (`0.2.0`).
    * Completely decoupled from configuration and logging.
 
 2. **Configuration Subsystem (`cipher_config`):**
@@ -95,7 +96,8 @@ CIPHER/
 ├── include/cipher/
 │   ├── cipher_core.hpp        # Core command processor interface
 │   ├── config.hpp             # Configuration parser data structures and API
-│   └── logger.hpp             # Leveled logger interface
+│   ├── logger.hpp             # Leveled logger interface
+│   └── version.hpp.in         # Template for CMake-generated version header
 ├── src/
 │   ├── cipher_core.cpp        # Command execution implementation
 │   ├── config.cpp             # Configuration parsing and validation
@@ -146,14 +148,14 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## 7. Current Test Suites & Counts
 
-CTest registers 3 distinct test binaries, covering 47 test functions/cases and 102 individual assertions with a 100% pass rate:
+CTest registers 3 distinct test binaries, covering 51 test functions/cases and 105 individual assertions with a 100% pass rate:
 
 | Test Target | Source File | Functions / Cases | Assertions / Checks | Purpose |
 | :--- | :--- | :--- | :--- | :--- |
-| `cipher_core_tests` | `tests/test_cipher_core.cpp` | 18 cases | 18 | Command responses, whitespace trimming, time format, exit flags |
-| `cipher_config_tests` | `tests/test_config.cpp` | 18 functions | 56 | Parsing, comments, line numbers, error collection, unknown keys, CRLF |
+| `cipher_core_tests` | `tests/test_cipher_core.cpp` | 20 command cases + 1 version check | 21 | Command responses, whitespace trimming, time format, exit flags, version consistency |
+| `cipher_config_tests` | `tests/test_config.cpp` | 19 functions | 56 | Parsing, comments, line numbers, error collection, unknown keys, CRLF |
 | `cipher_logger_tests` | `tests/test_logger.cpp` | 11 functions | 28 | Levels, labels, timestamping, file append, degradation on bad path |
-| **Total** | | **47 cases/functions** | **102 assertions** | **All 3 test targets pass** |
+| **Total** | | **51 cases/functions** | **105 assertions** | **All 3 test targets pass** |
 
 ---
 
