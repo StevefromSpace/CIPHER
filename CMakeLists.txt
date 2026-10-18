@@ -62,6 +62,20 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# cipher_memory  —  persistent memory subsystem (v0.3 foundation)
+# ---------------------------------------------------------------------------
+add_library(cipher_memory
+    src/memory.cpp
+)
+target_include_directories(cipher_memory PUBLIC include)
+
+if(MSVC)
+    target_compile_options(cipher_memory PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(cipher_memory PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# ---------------------------------------------------------------------------
 # cipher  —  main executable
 # ---------------------------------------------------------------------------
 add_executable(cipher src/main.cpp)
@@ -86,4 +100,9 @@ if(BUILD_TESTING)
     add_executable(cipher_logger_tests tests/test_logger.cpp)
     target_link_libraries(cipher_logger_tests PRIVATE cipher_logger)
     add_test(NAME cipher_logger_tests COMMAND cipher_logger_tests)
+
+    # Persistent memory subsystem tests.
+    add_executable(cipher_memory_tests tests/test_memory.cpp)
+    target_link_libraries(cipher_memory_tests PRIVATE cipher_memory)
+    add_test(NAME cipher_memory_tests COMMAND cipher_memory_tests)
 endif()

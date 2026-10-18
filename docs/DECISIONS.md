@@ -17,6 +17,7 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
 7. [Automated Verification and Release Governance](#7-automated-verification-and-release-governance)
 8. [Strict Isolation and Rollback for Potential Self-Modification](#8-strict-isolation-and-rollback-for-potential-self-modification)
 9. [Owner Comprehension and Human Agency](#9-owner-comprehension-and-human-agency)
+10. [Persistent Memory Foundation](#10-persistent-memory-foundation)
 
 ---
 
@@ -107,3 +108,23 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
 * **Rationale:** CIPHER is a personal platform for learning and long-term empowerment. An AI assistant should never introduce complex abstractions that the owner cannot comprehend, maintain, or debug.
 * **Current Implementation:** Each milestone includes explicit owner review tasks in [ROADMAP.md](ROADMAP.md) and straightforward, readable C++ without unnecessary template metaprogramming or obscure libraries.
 * **Future Intent:** Maintain clear documentation, readable naming conventions, and simple patterns as capabilities expand.
+
+---
+
+### 10. Persistent Memory Foundation and Win32 Atomic Replacement
+
+* **Status:** Accepted (Milestone v0.3 Foundation)
+* **Principle:** Runtime memory persistence must be local-first, transparent, human-inspectable, and recoverable without external service dependencies. Initially, it stores only explicit owner-provided memory entries.
+* **Rationale:** A transparent, sectioned plain-text key-value format (`cipher-memory-v1`) avoids introducing heavy external dependencies like SQLite, vector databases, or complex third-party JSON frameworks into CIPHER's pure C++17 build. Corruptions or malformed entries are immediately visible and debuggable with line-number diagnostics.
+* **Current Implementation:** `cipher_memory` (`include/cipher/memory.hpp`, `src/memory.cpp`) implements an atomic replacement write pattern. On Windows, standard `std::filesystem::rename` fails or lacks atomic replacement semantics when the destination already exists; CIPHER invokes Win32 `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH` to ensure guaranteed atomic overwrites and data flushing to persistent storage. If a write fails or the destination is locked, the original valid file remains intact. Supports full UTF-8 multilingual text, lossless preservation of whitespace, strict schema version validation, and automatic migration from legacy schema version 0 to version 1.
+* **Future Intent:** When model inference (v0.4) and permissioned tools (v0.5) arrive, persistent memory will serve as the backing store for user context, preferences, and verified project guidelines without coupling core command processing directly to storage internals.
+
+---
+
+### 11. Codex-Free Dual-Claude Development Pipeline with Read-Only Reviewer Isolation
+
+* **Status:** Accepted
+* **Principle:** Developer pipeline automation must be local-first, provider-isolated, and strictly bounded by human-in-the-loop gates. External reviewer agents must be physically restricted to read-only operations without permission to execute arbitrary shell commands or mutate candidate files.
+* **Rationale:** Codex was completely removed to preserve usage budgets and eliminate mandatory cloud authentication dependencies. To ensure true peer review integrity, the independent reviewer (Claude Agent B) must not be able to modify the candidate code it reviews. Prompts alone are not security controls; tool-level confinement and process isolation must be enforced.
+* **Current Implementation:** `tools/pipeline/` orchestrates Gemini Flash (planner), Claude Agent A (implementer), and Claude Agent B (read-only reviewer). Agent B is executed via Claude Code CLI configured strictly with `--tools Read,Glob,Grep`, `--disallowed-tools Bash,PowerShell,Write,Edit`, and `--permission-mode dontAsk`. Prompts are piped via stdin to prevent Win32 command-line buffer overflows. Local commit confirmation (`tools.pipeline.confirm_commit`) is an explicit, interactive owner gate requiring terminal TTY interaction, strictly decoupled from remote git push.
+* **Future Intent:** Maintain strict separation between CIPHER runtime C++ code and developer tooling Python utilities. Pipeline tooling remains a development aid and is never a runtime dependency of CIPHER.

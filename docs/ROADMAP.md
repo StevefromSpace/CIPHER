@@ -51,13 +51,35 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
       * Total: 51 test cases/functions and 105 individual assertions across 3 CTest targets (all passing).
 - [x] Document working-directory configuration loading assumption in `docs/ARCHITECTURE.md`.
 
+## October 2026: v0.3 — Persistent memory foundation (Foundation Complete)
+
+- [x] Define what should and should not be remembered (explicit owner entries only; secrets, tokens, transcripts, and unapproved observations prohibited).
+- [x] Select a transparent, exportable local storage format with strict schema versioning (`cipher-memory-v1` sectioned format) and atomic recoverable writes.
+- [x] Implement standalone `cipher_memory` library (`include/cipher/memory.hpp`, `src/memory.cpp`) decoupled from core, config, and logger.
+- [x] Add comprehensive memory test suite (`tests/test_memory.cpp`, `cipher_memory_tests` CTest target) verifying 97 assertions (94 on POSIX) across 14 categories:
+      * Missing storage file
+      * Empty storage
+      * Save-and-load round trips
+      * Multiple entries and deterministic update behavior
+      * Delete behavior and persistence across reloads
+      * Unicode and special-character preservation (UTF-8, multiline, backslashes, quotes)
+      * Invalid input and duplicate-entry rejection
+      * Corrupted storage detection with line-number reporting
+      * Unsupported schema version rejection
+      * Supported schema migration from Legacy Schema 0 to Schema 1
+      * Failed writes preserving last valid data (atomic write)
+      * Repeatable save/load operations
+      * Windows existing destination atomic replacement & locked destination preservation
+      * Hardening regressions: lossless whitespace, category validation, entry count mismatch, stoi overflow safety
+- [x] Expand CTest suite to 4 test targets, 65 functions/cases, and 202 assertions (100% passing).
+- [x] Implement Codex-free Dual-Claude Developer Pipeline (`tools/pipeline/`) with read-only reviewer isolation and owner confirmation gates (49 unit tests, 100% passing).
+
+- [ ] Review the v0.3 source files and understand the memory subsystem and pipeline tools.
+      *(The owner must do this step.)*
+- [ ] Integrate persistent memory into command REPL and permission gate (Next incremental milestone).
+
 ## Next milestones
 
-### v0.3: Persistent memory foundation
-
-- Define what should and should not be remembered.
-- Start with an exportable local format and schema versioning.
-- Add tests for saving, loading, and migrating memory.
 
 ### v0.4: Replaceable AI runtime interface
 

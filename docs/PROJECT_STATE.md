@@ -7,12 +7,12 @@ This document is the authoritative summary of CIPHER's verified state. It provid
 ## 1. Verified Code Baseline & Repository State
 
 * **Repository:** [https://github.com/StevefromSpace/CIPHER](https://github.com/StevefromSpace/CIPHER)
-* **Active Branch:** `main`
+* **Active Branch:** `feature/v0.3-memory-foundation-and-pipeline` (Feature branch based on verified baseline `677e845`)
 * **Verified Code Baseline:** Commit `677e8455bd51f760288c122aed97c7cea88ec22b` (`677e845`)
   * **Subject:** `fix: centralize application version reporting`
   * **Scope:** Full C++17 core, configuration parser, leveled diagnostic logger, CMake centralized versioning (`version.hpp`), and comprehensive test suites.
-* **Documentation & Housekeeping Layer:** Subsequent documentation-only commits maintain project notes, roadmaps, and architecture guides without altering compiled source or application behavior.
-* **Working Tree:** Clean (zero uncommitted changes; obsolete temporary files removed).
+* **v0.3 Persistent Memory & Pipeline Extension:** Incorporates standalone `cipher_memory` persistent storage subsystem and the Dual-Claude developer automation pipeline (`tools/pipeline`).
+* **Working Tree:** Controlled feature branch state with verified C++ persistent memory foundation and development pipeline.
 
 ---
 
@@ -27,7 +27,7 @@ This document is the authoritative summary of CIPHER's verified state. It provid
 * **Matrix Jobs:**
   1. **Ubuntu 24.04 (`ubuntu-24.04`):** Passed (GCC on Ubuntu 24.04 LTS; CTest passed).
   2. **Windows 2022 (`windows-2022`):** Passed (MSVC on Windows Server 2022; CTest passed).
-* **Note on Documentation Commits:** CI verifies the compiled code baseline; subsequent documentation-only commits on `main` do not alter the verified binaries or test suite outputs.
+* **Note on v0.3 Extension:** v0.3 persistent memory and pipeline additions are locally verified (202 CTest assertions, 49 Python pipeline tests passing); CI verification on GitHub will occur upon PR submission.
 
 ---
 
@@ -73,10 +73,25 @@ The codebase currently contains three modular C++17 libraries and a command-line
    * Writes to `stderr` and optionally appends to a user-configured file.
    * Graceful degradation: if the log file path cannot be opened, a warning is printed to `stderr` and logging continues on `stderr` without crashing.
 
-4. **Executable Application (`cipher`):**
+4. **Persistent Memory Subsystem (`cipher_memory` — v0.3 Foundation):**
+   * Interface: `include/cipher/memory.hpp`, Implementation: `src/memory.cpp`
+   * Standalone, local-first key-value persistent storage engine with schema versioning (`cipher-memory-v1`).
+   * Explicit owner-provided memory entries (`id`, `category`, `content`, `created_at`, `updated_at`).
+   * Win32 atomic file replacement (`MoveFileExW` with `MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH`) preventing corruption or data loss on Windows.
+   * Full lossless preservation of UTF-8 multilingual characters, leading/trailing content whitespace, multiline text, tabs, quotes, and backslashes.
+   * Strict validation and line-numbered error diagnostics on corrupted or invalid files.
+   * Automatic backward-compatible migration from Legacy Schema 0 (flat format) to Schema 1.
+   * Completely decoupled from core, config, and logger.
+
+5. **Executable Application (`cipher`):**
    * Source: `src/main.cpp`
    * Orchestrates configuration loading, logger initialization, and the interactive session.
    * Emits accurate startup and shutdown diagnostics (`Configuration active (log_level=...)`, `CIPHER session ended (user request)`).
+
+6. **Development Pipeline (`tools/pipeline` — Developer Tooling):**
+   * Local development automation connecting Gemini (planner), Claude Agent A (implementer), and Claude Agent B (independent read-only reviewer).
+   * Strict security boundaries: read-only tool restrictions, fail-closed schema validation, and complete candidate fingerprinting.
+   * Mandatory owner commit confirmation gate (`tools.pipeline.confirm_commit`) strictly separated from remote push.
 
 ---
 
@@ -84,9 +99,13 @@ The codebase currently contains three modular C++17 libraries and a command-line
 
 ```text
 CIPHER/
+├── .agents/                   # Local agent configuration & subagent skills
+│   └── skills/cipher-subagents/SKILL.md
 ├── .github/workflows/
 │   └── ci.yml                 # Pinned runners: ubuntu-24.04, windows-2022
 ├── CMakeLists.txt             # CMake 3.16+, C++17 standard, strict compiler warnings
+├── AGENTS.md                  # Project directives and canonical guidance for AI agents
+├── GEMINI.md                  # Workspace directives for Gemini in Antigravity
 ├── cipher.conf.example        # Tracked example configuration with documentation
 ├── docs/
 │   ├── ARCHITECTURE.md        # Component relationships, boundaries, and design rules
@@ -98,16 +117,30 @@ CIPHER/
 │   ├── cipher_core.hpp        # Core command processor interface
 │   ├── config.hpp             # Configuration parser data structures and API
 │   ├── logger.hpp             # Leveled logger interface
+│   ├── memory.hpp             # Persistent memory data structures and API (v0.3)
 │   └── version.hpp.in         # Template for CMake-generated version header
 ├── src/
 │   ├── cipher_core.cpp        # Command execution implementation
 │   ├── config.cpp             # Configuration parsing and validation
 │   ├── logger.cpp             # Formatted diagnostic logging
+│   ├── memory.cpp             # Persistent memory storage and atomic write (v0.3)
 │   └── main.cpp               # Application entry point and REPL loop
 ├── tests/
 │   ├── test_cipher_core.cpp   # Core command test suite
 │   ├── test_config.cpp        # Configuration parser test suite
-│   └── test_logger.cpp        # Leveled logger test suite
+│   ├── test_logger.cpp        # Leveled logger test suite
+│   └── test_memory.cpp        # Persistent memory test suite (v0.3)
+├── tools/
+│   └── pipeline/              # Dual-Claude developer automation pipeline
+│       ├── adapters/          # Claude implementer, reviewer, and mock adapters
+│       ├── tests/             # Pipeline unit tests (49 passing tests)
+│       ├── config.py          # Pipeline configuration and safety thresholds
+│       ├── confirm_commit.py  # Owner-controlled local commit confirmation CLI
+│       ├── git_manager.py     # Git worktree isolation and candidate fingerprinting
+│       ├── job_store.py       # Atomic job record persistence
+│       ├── orchestrator.py    # Pipeline workflow orchestration
+│       ├── server.py          # FastMCP server interface
+│       └── verifier.py        # Independent candidate build and test execution
 └── README.md                  # Project overview, quickstart, and agent instructions
 ```
 
@@ -118,11 +151,12 @@ main.cpp
   ├── cipher_config
   └── cipher_logger ──> cipher_config (for LogLevel)
 
-test_cipher_core.cpp  ──> cipher_core only
-test_config.cpp       ──> cipher_config only
-test_logger.cpp       ──> cipher_logger (and cipher_config)
+test_cipher_core.cpp    ──> cipher_core only
+test_config.cpp         ──> cipher_config only
+test_logger.cpp         ──> cipher_logger (and cipher_config)
+test_memory.cpp         ──> cipher_memory only
 ```
-Neither `cipher_config` nor `cipher_logger` depends on `cipher_core`. `cipher_core` does not depend on `cipher_config` or `cipher_logger`.
+Neither `cipher_config`, `cipher_logger`, nor `cipher_memory` depends on `cipher_core`. `cipher_core` does not depend on `cipher_config`, `cipher_logger`, or `cipher_memory`.
 
 ---
 
@@ -149,14 +183,16 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## 7. Current Test Suites & Counts
 
-CTest registers 3 distinct test binaries, covering 51 test functions/cases and 105 individual assertions with a 100% pass rate:
+CTest registers 4 distinct test binaries, covering 65 test functions/cases and 202 individual assertions (on Windows; 199 on POSIX due to platform-specific Win32 locking checks) with a 100% pass rate:
 
 | Test Target | Source File | Functions / Cases | Assertions / Checks | Purpose |
 | :--- | :--- | :--- | :--- | :--- |
 | `cipher_core_tests` | `tests/test_cipher_core.cpp` | 20 command cases + 1 version check | 21 | Command responses, whitespace trimming, time format, exit flags, version consistency |
 | `cipher_config_tests` | `tests/test_config.cpp` | 19 functions | 56 | Parsing, comments, line numbers, error collection, unknown keys, CRLF |
 | `cipher_logger_tests` | `tests/test_logger.cpp` | 11 functions | 28 | Levels, labels, timestamping, file append, degradation on bad path |
-| **Total** | | **51 cases/functions** | **105 assertions** | **All 3 test targets pass** |
+| `cipher_memory_tests` | `tests/test_memory.cpp` | 14 functions | 97 (94 on POSIX) | Missing/empty storage, CRUD round-trips, unicode/multilingual, validation/duplicate handling, corrupt storage line reporting, unsupported schema versions, v0->v1 migration, atomic write failure recovery, repeatable save/load, Windows existing file replacement & locked destination preservation, lossless whitespace, category validation, entry count mismatch, stoi overflow safety |
+| **Total (CTest)** | | **65 cases/functions** | **202 assertions (97 memory)** | **All 4 test targets pass (100%)** |
+| `pipeline_unit_tests` | `tools/pipeline/tests/` | 49 test cases | 49 | Verifier, Git manager, Job store, MCP server, Orchestrator, Reviewer adapter |
 
 ---
 
@@ -164,7 +200,7 @@ CTest registers 3 distinct test binaries, covering 51 test functions/cases and 1
 
 To prevent confusion or hallucination by future AI agents, the following capabilities have **NOT** been implemented:
 * **No AI Inference Engine:** No language models, no local runtime (e.g., llama.cpp/ONNX), and no external API integration.
-* **No Persistent Memory:** No SQLite, vector store, embedding database, or cross-session persistence.
+* **No Vector Search or Embeddings:** Persistent memory stores explicit, human-readable entries in local files; no vector database, semantic embeddings, or autonomous background memory extraction.
 * **No Voice / Audio:** No speech-to-text, text-to-speech, or audio capture.
 * **No Operating System Automation:** No arbitrary shell execution, browser control, or GUI manipulation.
 * **No Networking:** No web server, REST API, socket listener, or outbound HTTP client.
@@ -183,8 +219,8 @@ To prevent confusion or hallucination by future AI agents, the following capabil
 
 ## 10. Next Recommended Tasks
 
-1. **Owner Review (v0.2):** The project owner should review `src/config.cpp`, `src/logger.cpp`, and the test suites to maintain understanding of the v0.2 changes (as listed in [ROADMAP.md](ROADMAP.md)).
-2. **Next Development Milestone (v0.3 — Persistent Memory Foundation):**
-   * Define the scope of memory (what CIPHER should remember vs. discard).
-   * Select a transparent, exportable local storage format with schema versioning.
-   * Implement save, load, and migration functions with comprehensive unit tests before integrating into core.
+1. **Owner Review (v0.3 Foundation & Pipeline):** The project owner should review `include/cipher/memory.hpp`, `src/memory.cpp`, `tests/test_memory.cpp`, and the Dual-Claude pipeline tooling (`tools/pipeline/`) to maintain understanding of the v0.3 foundation.
+2. **Next Development Milestone (v0.3 REPL Integration):**
+   * Integrate `cipher_memory` into the CIPHER core interactive REPL (e.g. `remember`, `recall`, `forget` commands).
+   * Integrate persistent memory storage path into `cipher_config` (`memory_file` key in `cipher.conf`).
+   * Preserve strict decoupling: `cipher_core` coordinates via clean interfaces without memory coupling to logger or config.
