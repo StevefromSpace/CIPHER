@@ -25,6 +25,7 @@ from integrations.openclaw.assistant_contract import (
     AssistantResponse,
     AssistantStatus,
     BaseAssistantBackend,
+    ProcessingRoute,
 )
 from integrations.openclaw.bridge import OpenClawBridge
 from integrations.openclaw.config import OpenClawConfig
@@ -41,7 +42,8 @@ class TestOpenClawBridge(unittest.TestCase):
             gateway_url="ws://127.0.0.1:18789",
             default_model="ollama/llama3.2",
             timeout_seconds=10.0,
-            strict_local=True
+            strict_local=True,
+            verified_local=True,
         )
 
     # -------------------------------------------------------------------------
@@ -79,7 +81,7 @@ class TestOpenClawBridge(unittest.TestCase):
     @patch("integrations.openclaw.bridge.shutil.which", return_value=None)
     def test_openclaw_not_installed_or_unavailable(self, mock_which):
         """Verifies graceful handling when the OpenClaw executable cannot be found."""
-        config = OpenClawConfig(enabled=True, cli_path=None)
+        config = OpenClawConfig(enabled=True, cli_path=None, verified_local=True)
         bridge = OpenClawBridge(config)
 
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
@@ -290,7 +292,8 @@ class TestOpenClawBridge(unittest.TestCase):
             enabled=True,
             cli_path=self.mock_cli_path,
             gateway_url="ws://192.168.1.50:18789",  # Remote network IP
-            default_model="ollama/llama3.2"
+            default_model="ollama/llama3.2",
+            verified_local=True,
         )
         bridge = OpenClawBridge(non_loopback_config)
         with patch.object(Path, "exists", return_value=True):
@@ -343,7 +346,8 @@ class TestOpenClawBridge(unittest.TestCase):
             cli_path=self.mock_cli_path,
             gateway_url="ws://127.0.0.1:18789",
             default_model="ollama/llama3.2",
-            tool_profile="full"  # Unsafe profile with tools active
+            tool_profile="full",  # Unsafe profile with tools active
+            verified_local=True,
         )
         bridge = OpenClawBridge(non_minimal_config)
         with patch.object(Path, "exists", return_value=True):
@@ -385,13 +389,95 @@ class TestOpenClawBridge(unittest.TestCase):
             enabled=True,
             cli_path=self.mock_cli_path,
             gateway_url="ws://127.0.0.1.attacker.com:18789",
-            default_model="ollama/llama3.2"
+            default_model="ollama/llama3.2",
+            verified_local=True,
         )
         bridge = OpenClawBridge(spoofed_cfg)
         with patch.object(Path, "exists", return_value=True):
             resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
         self.assertEqual(resp.status, AssistantStatus.ERROR)
         self.assertIn("not bound to a loopback address", resp.error.lower())
+
+    # -------------------------------------------------------------------------
+    # 12. Agent 3 Security Hardening: Tool denial, output limits, route provenance
+    # -------------------------------------------------------------------------
+    def test_unverified_local_route_rejected_under_require_local(self):
+        """Verifies default unverified route fails closed when require_local is True."""
+        unverified_cfg = OpenClawConfig(
+            enabled=True,
+            cli_path=self.mock_cli_path,
+            gateway_url="ws://127.0.0.1:18789",
+            default_model="ollama/llama3.2",
+            verified_local=False,  # Unverified route
+        )
+        bridge = OpenClawBridge(unverified_cfg)
+        self.assertEqual(bridge.capabilities.default_route, ProcessingRoute.UNKNOWN)
+        with patch.object(Path, "exists", return_value=True):
+            resp = bridge.submit_prompt(AssistantRequest(prompt="Hello", require_local=True))
+        self.assertEqual(resp.status, AssistantStatus.REJECTED_CLOUD_MODEL)
+        self.assertIn("unknown", resp.error.lower())
+
+    def test_explicit_tool_denial_required(self):
+        """Verifies config with explicit_tool_denial=False fails closed."""
+        cfg = OpenClawConfig(
+            enabled=True,
+            cli_path=self.mock_cli_path,
+            gateway_url="ws://127.0.0.1:18789",
+            default_model="ollama/llama3.2",
+            explicit_tool_denial=False,
+            verified_local=True,
+        )
+        bridge = OpenClawBridge(cfg)
+        with patch.object(Path, "exists", return_value=True):
+            resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
+        self.assertIn("explicit tool denial", resp.error.lower())
+
+    @patch("integrations.openclaw.bridge.subprocess.run")
+    def test_tool_denial_args_in_subprocess_argv(self, mock_run):
+        """Verifies --deny-tools * are included in subprocess argv."""
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps({"reply": "Response", "model": "ollama/llama3.2"}),
+            stderr=""
+        )
+        bridge = OpenClawBridge(self.config)
+        with patch.object(Path, "exists", return_value=True):
+            resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.OK)
+        argv = mock_run.call_args[0][0]
+        self.assertIn("--deny-tools", argv)
+        self.assertIn("*", argv)
+
+    @patch("integrations.openclaw.bridge.subprocess.run")
+    def test_output_size_limit_exceeded(self, mock_run):
+        """Verifies stdout exceeding 1MB is rejected fail-closed with AssistantStatus.ERROR."""
+        huge_output = "x" * (1048576 + 50)
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=huge_output,
+            stderr=""
+        )
+        bridge = OpenClawBridge(self.config)
+        with patch.object(Path, "exists", return_value=True):
+            resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.ERROR)
+        self.assertIn("maximum permitted byte limit", resp.error.lower())
+
+    def test_gateway_url_userinfo_rejected(self):
+        """Verifies that gateway URLs containing credentials fail closed."""
+        cred_cfg = OpenClawConfig(
+            enabled=True,
+            cli_path=self.mock_cli_path,
+            gateway_url="ws://user:secret@127.0.0.1:18789",
+            default_model="ollama/llama3.2",
+            verified_local=True,
+        )
+        bridge = OpenClawBridge(cred_cfg)
+        with patch.object(Path, "exists", return_value=True):
+            resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.ERROR)
+        self.assertIn("user credentials", resp.error.lower())
 
 
 if __name__ == "__main__":

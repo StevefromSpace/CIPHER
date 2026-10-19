@@ -6,15 +6,18 @@ Verifies:
 3. Timeout range bounds (1 to 300s).
 4. Cloud model rejection under strict_local.
 5. Tool execution rejection (allow_tools=True).
-6. Loopback binding enforcement.
-7. Successful response extraction (output.speech / output.text).
+6. Loopback binding enforcement and user-info rejection.
+7. Successful response extraction (output.speech / output.text / direct text).
 8. Connection error mapping.
 9. Authentication error mapping (HTTP 401/403).
 10. Request timeout handling.
 11. Malformed JSON handling.
 12. Sensitive API key and token masking.
-13. Health probe availability check.
-14. Version compatibility and metadata verification.
+13. Health probe availability check and redirect refusal.
+14. Version compatibility (1.x stable vs 2.x developer preview rejection).
+15. Strict redirect refusal fail-closed (safe_urlopen / NoRedirectHandler).
+16. Provenance route defaults to UNKNOWN unless verified.
+17. Response body size limit bounding (1MB max).
 """
 
 import io
@@ -44,7 +47,8 @@ class TestLeonBridge(unittest.TestCase):
             api_key="mock-leon-api-key",
             default_model="local/default",
             timeout_seconds=10.0,
-            strict_local=True
+            strict_local=True,
+            verified_local=True,
         )
 
     def test_disabled_by_default(self):
@@ -89,14 +93,15 @@ class TestLeonBridge(unittest.TestCase):
         remote_cfg = LeonConfig(
             enabled=True,
             api_url="http://10.0.0.5:1337",
-            default_model="local/default"
+            default_model="local/default",
+            verified_local=True,
         )
         bridge = LeonBridge(remote_cfg)
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hi"))
         self.assertEqual(resp.status, AssistantStatus.ERROR)
         self.assertIn("not bound to a loopback address", resp.error.lower())
 
-    @patch("integrations.leon.bridge.urllib.request.urlopen")
+    @patch("integrations.leon.bridge.safe_urlopen")
     def test_successful_mocked_completion_speech(self, mock_urlopen):
         """Verifies extraction of output.speech from Leon response."""
         mock_resp = MagicMock()
@@ -116,7 +121,11 @@ class TestLeonBridge(unittest.TestCase):
         self.assertEqual(resp.text, "Hello! I am Leon running locally.")
         self.assertEqual(resp.route, ProcessingRoute.VERIFIED_LOCAL)
 
-    @patch("integrations.leon.bridge.urllib.request.urlopen")
+        called_req = mock_urlopen.call_args[0][0]
+        self.assertTrue(called_req.full_url.endswith("/api/v1/query"))
+        self.assertEqual(called_req.headers.get("X-api-key"), "mock-leon-api-key")
+
+    @patch("integrations.leon.bridge.safe_urlopen")
     def test_successful_mocked_completion_direct_text(self, mock_urlopen):
         """Verifies extraction of direct text/reply fields."""
         mock_resp = MagicMock()
@@ -131,7 +140,7 @@ class TestLeonBridge(unittest.TestCase):
         self.assertEqual(resp.status, AssistantStatus.OK)
         self.assertEqual(resp.text, "Leon direct text response.")
 
-    @patch("integrations.leon.bridge.urllib.request.urlopen")
+    @patch("integrations.leon.bridge.safe_urlopen")
     def test_connection_failure(self, mock_urlopen):
         """Verifies URLError maps to CONNECTION_ERROR."""
         mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
@@ -141,11 +150,11 @@ class TestLeonBridge(unittest.TestCase):
         self.assertEqual(resp.status, AssistantStatus.CONNECTION_ERROR)
         self.assertIn("Connection refused", resp.error)
 
-    @patch("integrations.leon.bridge.urllib.request.urlopen")
+    @patch("integrations.leon.bridge.safe_urlopen")
     def test_auth_failure(self, mock_urlopen):
         """Verifies HTTP 401 maps to AUTH_ERROR."""
         mock_err = urllib.error.HTTPError(
-            url="http://127.0.0.1:1337",
+            url="http://127.0.0.1:1337/api/v1/query",
             code=401,
             msg="Unauthorized",
             hdrs={},
@@ -158,7 +167,24 @@ class TestLeonBridge(unittest.TestCase):
         self.assertEqual(resp.status, AssistantStatus.AUTH_ERROR)
         self.assertIn("401", resp.error)
 
-    @patch("integrations.leon.bridge.urllib.request.urlopen")
+    @patch("integrations.leon.bridge.safe_urlopen")
+    def test_redirect_rejection(self, mock_urlopen):
+        """Verifies HTTP 301/302 redirects are refused fail-closed."""
+        mock_err = urllib.error.HTTPError(
+            url="http://127.0.0.1:1337/redirect",
+            code=301,
+            msg="Automatic HTTP redirect (301) to 'http://attacker.com' is blocked for security.",
+            hdrs={},
+            fp=io.BytesIO(b'')
+        )
+        mock_urlopen.side_effect = mock_err
+
+        bridge = LeonBridge(self.config)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hi"))
+        self.assertEqual(resp.status, AssistantStatus.ERROR)
+        self.assertIn("redirect", resp.error.lower())
+
+    @patch("integrations.leon.bridge.safe_urlopen")
     def test_timeout_handling(self, mock_urlopen):
         """Verifies TimeoutError maps to TIMEOUT."""
         mock_urlopen.side_effect = TimeoutError()
@@ -168,7 +194,7 @@ class TestLeonBridge(unittest.TestCase):
         self.assertEqual(resp.status, AssistantStatus.TIMEOUT)
         self.assertIn("timed out", resp.error.lower())
 
-    @patch("integrations.leon.bridge.urllib.request.urlopen")
+    @patch("integrations.leon.bridge.safe_urlopen")
     def test_malformed_json_response(self, mock_urlopen):
         """Verifies invalid JSON is handled gracefully."""
         mock_resp = MagicMock()
@@ -189,17 +215,32 @@ class TestLeonBridge(unittest.TestCase):
         self.assertNotIn("token12345678", clean)
         self.assertIn("[REDACTED]", clean)
 
-    @patch("integrations.leon.bridge.urllib.request.urlopen")
+    @patch("integrations.leon.bridge.safe_urlopen")
     def test_is_available_probing(self, mock_urlopen):
-        """Verifies is_available queries info endpoint."""
+        """Verifies is_available queries info endpoint without following redirects."""
         mock_resp = MagicMock()
         mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps({"version": "1.0.0"}).encode("utf-8")
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         bridge = LeonBridge(self.config)
         self.assertTrue(bridge.is_available())
 
+        called_req = mock_urlopen.call_args[0][0]
+        self.assertTrue(called_req.full_url.endswith("/api/v1/info"))
+
         mock_urlopen.side_effect = Exception("offline")
+        self.assertFalse(bridge.is_available())
+
+    @patch("integrations.leon.bridge.safe_urlopen")
+    def test_is_available_rejects_developer_preview_2x(self, mock_urlopen):
+        """Verifies is_available rejects unstable Leon 2.0 developer preview."""
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps({"version": "2.0.0-preview.1"}).encode("utf-8")
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        bridge = LeonBridge(self.config)
         self.assertFalse(bridge.is_available())
 
     def test_rejection_of_non_finite_timeout(self):
@@ -217,12 +258,53 @@ class TestLeonBridge(unittest.TestCase):
         spoofed_cfg = LeonConfig(
             enabled=True,
             api_url="http://127.0.0.1.attacker.com:1337",
-            default_model="local/default"
+            default_model="local/default",
+            verified_local=True,
         )
         bridge = LeonBridge(spoofed_cfg)
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
         self.assertEqual(resp.status, AssistantStatus.ERROR)
         self.assertIn("not bound to a loopback address", resp.error.lower())
+
+    def test_userinfo_credentials_in_url_rejected(self):
+        """Verifies that URLs with embedded user credentials fail closed."""
+        cred_cfg = LeonConfig(
+            enabled=True,
+            api_url="http://user:secret@127.0.0.1:1337",
+            default_model="local/default",
+            verified_local=True,
+        )
+        bridge = LeonBridge(cred_cfg)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.ERROR)
+        self.assertIn("user credentials", resp.error.lower())
+
+    def test_route_provenance_unknown_by_default(self):
+        """Verifies route provenance defaults to UNKNOWN and fails closed under require_local=True."""
+        unverified_cfg = LeonConfig(
+            enabled=True,
+            api_url="http://127.0.0.1:1337",
+            default_model="local/default",
+            verified_local=False,
+        )
+        bridge = LeonBridge(unverified_cfg)
+        self.assertEqual(bridge.capabilities.default_route, ProcessingRoute.UNKNOWN)
+
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello", require_local=True))
+        self.assertEqual(resp.status, AssistantStatus.REJECTED_CLOUD_MODEL)
+        self.assertIn("unknown", resp.error.lower())
+
+    @patch("integrations.leon.bridge.safe_urlopen")
+    def test_response_size_limit_exceeded(self, mock_urlopen):
+        """Verifies response exceeding 1MB is rejected fail-closed."""
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b"x" * (1048576 + 50)
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        bridge = LeonBridge(self.config)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.ERROR)
+        self.assertIn("maximum permitted byte limit", resp.error.lower())
 
 
 if __name__ == "__main__":

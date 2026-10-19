@@ -41,7 +41,14 @@ class OVOSBridge(BaseAssistantBackend):
 
     @property
     def capabilities(self) -> AssistantCapabilities:
-        """Declares OVOS bridge capabilities and voice-event constraints."""
+        """Declares OVOS bridge capabilities and voice-event constraints.
+
+        Route provenance:
+        Loopback messagebus does not constitute proof of local model inference.
+        Route defaults to UNKNOWN unless verified_local is True.
+        Marked as mock-tested unless a live client factory is provided.
+        """
+        route = ProcessingRoute.VERIFIED_LOCAL if self.config.verified_local else ProcessingRoute.UNKNOWN
         return AssistantCapabilities(
             name="OpenVoiceOS",
             version="0.0.8",
@@ -50,8 +57,8 @@ class OVOSBridge(BaseAssistantBackend):
             supports_sessions=True,
             supports_voice_events=True,  # Voice/event bus integration
             supports_tools=False,        # System actions and skill controls locked down
-            default_route=ProcessingRoute.VERIFIED_LOCAL,
-            is_mock_only=False,
+            default_route=route,
+            is_mock_only=(self._bus_client_factory is None),
         )
 
     def is_available(self) -> bool:
@@ -84,6 +91,7 @@ class OVOSBridge(BaseAssistantBackend):
             "strict_local": self.config.strict_local,
             "timeout_seconds": self.config.timeout_seconds,
             "route": self.capabilities.default_route.value,
+            "is_mock_only": self.capabilities.is_mock_only,
             "broadcast_notice": "OVOS messagebus broadcasts frames to all connected clients. Prompt confidentiality must be guarded.",
         }
 
@@ -98,24 +106,25 @@ class OVOSBridge(BaseAssistantBackend):
         - Central policy validation (blank prompts, timeout, tool lockdown, local route).
         - Rejects immediately if integration is disabled.
         - Enforces loopback address binding.
-        - Warns / guards against emitting secrets to broadcast bus.
+        - Guards against emitting sensitive credentials over broadcast bus.
+        - Blocks privileged system actions (shutdown, reboot, install, shell).
         - Correlates asynchronous responses via session_id.
         - Sanitizes all returned text and errors.
         """
         start_time = time.perf_counter()
 
-        # 1. Central policy validation gate
-        is_valid, validation_resp = validate_assistant_request(request, self.capabilities)
-        if not is_valid and validation_resp:
-            return validation_resp
-
-        # 2. Gate: Integration enablement
+        # 1. Gate: Integration enablement
         if not self.config.enabled:
             return AssistantResponse(
                 status=AssistantStatus.DISABLED,
                 error="OpenVoiceOS integration is disabled in CIPHER configuration (CIPHER_OVOS_ENABLED=0).",
                 route=self.capabilities.default_route,
             )
+
+        # 2. Central policy validation gate
+        is_valid, validation_resp = validate_assistant_request(request, self.capabilities)
+        if not is_valid and validation_resp:
+            return validation_resp
 
         # 3. Gate: Loopback network check
         is_loopback, loopback_err = self.config.validate_bus_url()
@@ -126,20 +135,33 @@ class OVOSBridge(BaseAssistantBackend):
                 route=self.capabilities.default_route,
             )
 
-        # 4. Gate: Guard against system control / shutdown commands
+        # 4. Gate: Guard against system control / shutdown commands and privileged actions
         prompt_lower = request.prompt.lower().strip()
-        system_triggers = ("shutdown", "reboot", "restart system", "power off", "install package")
-        if any(trigger in prompt_lower for trigger in system_triggers):
+        system_triggers = (
+            "shutdown", "reboot", "restart", "power off", "install", "upgrade",
+            "package", "shell", "config", "kill", "rm -rf", "format"
+        )
+        if any(trigger in prompt_lower for trigger in system_triggers) or any(
+            request.metadata.get(act) for act in ("computer_use", "mission", "execute", "shell", "config", "install")
+        ):
             return AssistantResponse(
                 status=AssistantStatus.REJECTED_TOOLS_ENABLED,
-                error="System control commands (shutdown, reboot, install) are blocked from execution through CIPHER bridge.",
+                error="System control commands and privileged actions (shutdown, reboot, install, shell, config) are blocked from execution through CIPHER bridge.",
                 route=self.capabilities.default_route,
             )
 
-        # 5. Gate: Model / provider local verification
+        # 5. Gate: Broadcast confidentiality policy
+        if sanitize_sensitive_data(request.prompt) != request.prompt:
+            return AssistantResponse(
+                status=AssistantStatus.INVALID_REQUEST,
+                error="Prompt contains sensitive credentials (tokens, keys, passwords). Refusing to broadcast over OVOS public messagebus.",
+                route=self.capabilities.default_route,
+            )
+
+        # 6. Model / provider local verification
         model = request.model_override or self.config.default_model
 
-        # 6. Build the correlated utterance message
+        # 7. Build the correlated utterance message
         session_id = request.session_id or f"cipher-{int(time.time()*1000)}"
         utterance_msg = OVOSMessage.create_utterance(
             text=request.prompt,
@@ -149,7 +171,7 @@ class OVOSBridge(BaseAssistantBackend):
 
         timeout = request.timeout_seconds if request.timeout_seconds is not None else self.config.timeout_seconds
 
-        # 7. Bus Client Dispatch
+        # 8. Bus Client Dispatch
         # If a client factory or mock client is supplied, use it; otherwise probe connectivity
         if self._bus_client_factory:
             try:
@@ -161,7 +183,7 @@ class OVOSBridge(BaseAssistantBackend):
                     return AssistantResponse(
                         status=AssistantStatus.TIMEOUT,
                         model=model,
-                        route=ProcessingRoute.VERIFIED_LOCAL,
+                        route=self.capabilities.default_route,
                         duration_ms=duration_ms,
                         error=f"Timed out after {timeout:.1f}s waiting for correlated OVOS response."
                     )
@@ -170,7 +192,7 @@ class OVOSBridge(BaseAssistantBackend):
                     return AssistantResponse(
                         status=AssistantStatus.ERROR,
                         model=model,
-                        route=ProcessingRoute.VERIFIED_LOCAL,
+                        route=self.capabilities.default_route,
                         duration_ms=duration_ms,
                         error="OVOS reported complete intent failure: no skill handled the utterance."
                     )
@@ -183,7 +205,7 @@ class OVOSBridge(BaseAssistantBackend):
                     status=AssistantStatus.OK,
                     text=reply_text,
                     model=model,
-                    route=ProcessingRoute.VERIFIED_LOCAL,
+                    route=self.capabilities.default_route,
                     duration_ms=duration_ms,
                     raw_output=resp_msg.to_json()
                 )
@@ -193,7 +215,7 @@ class OVOSBridge(BaseAssistantBackend):
                 return AssistantResponse(
                     status=AssistantStatus.ERROR,
                     model=model,
-                    route=ProcessingRoute.VERIFIED_LOCAL,
+                    route=self.capabilities.default_route,
                     duration_ms=duration_ms,
                     error=f"OVOS bus communication error: {self._sanitize_error(str(e))}"
                 )
@@ -204,7 +226,7 @@ class OVOSBridge(BaseAssistantBackend):
             return AssistantResponse(
                 status=AssistantStatus.UNAVAILABLE,
                 model=model,
-                route=ProcessingRoute.VERIFIED_LOCAL,
+                route=self.capabilities.default_route,
                 duration_ms=duration_ms,
                 error="OVOS messagebus is not reachable on loopback port 8181. Ensure ovos-messagebus is running.",
             )
@@ -213,7 +235,7 @@ class OVOSBridge(BaseAssistantBackend):
         return AssistantResponse(
             status=AssistantStatus.UNAVAILABLE,
             model=model,
-            route=ProcessingRoute.VERIFIED_LOCAL,
+            route=self.capabilities.default_route,
             duration_ms=duration_ms,
             error="Live OVOS integration requires websocket transport client factory or running ovos-messagebus service.",
         )

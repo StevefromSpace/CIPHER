@@ -80,29 +80,117 @@ class AssistantResponse:
 
 
 def sanitize_sensitive_data(message: str) -> str:
-    """Strips credentials, tokens, API keys, or private authorization headers from logs/errors."""
+    """Strips credentials, tokens, API keys, basic auth, or private authorization headers from logs/errors."""
     if not message:
         return ""
-    sanitized = re.sub(r'(bearer\s+)[a-zA-Z0-9_\-\.]{8,}', r'\1[REDACTED]', message, flags=re.IGNORECASE)
-    sanitized = re.sub(r'(token\s*[:=]\s*)[a-zA-Z0-9_\-\.]{8,}', r'\1[REDACTED]', sanitized, flags=re.IGNORECASE)
-    sanitized = re.sub(r'(key\s*[:=]\s*)[a-zA-Z0-9_\-\.]{8,}', r'\1[REDACTED]', sanitized, flags=re.IGNORECASE)
-    sanitized = re.sub(r'(password\s*[:=]\s*)[^\s,;&]+', r'\1[REDACTED]', sanitized, flags=re.IGNORECASE)
-    sanitized = re.sub(r'(x-api-key\s*[:=]\s*)[a-zA-Z0-9_\-\.]{8,}', r'\1[REDACTED]', sanitized, flags=re.IGNORECASE)
+    # Redact URL embedded credentials (user:pass@host)
+    sanitized = re.sub(r'://([^:]+):([^@]+)@', r'://\1:[REDACTED]@', message)
+    # Redact authorization tokens and keys (with space, colon, or equals separator)
+    sanitized = re.sub(r'((?:bearer|token|key|password|x-api-key|api[_\-]?key)\s*[:=\s]\s*)[a-zA-Z0-9_\-\.]{8,}', r'\1[REDACTED]', sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r'(password\s*[:=\s]\s*)[^\s,;&]+', r'\1[REDACTED]', sanitized, flags=re.IGNORECASE)
     return sanitized.strip()
 
 
+def validate_loopback_url(
+    url: str,
+    allowed_schemes: Tuple[str, ...],
+    allowed_ports: Optional[Tuple[int, ...]] = None,
+    description: str = "URL"
+) -> Tuple[bool, Optional[str]]:
+    """Strictly validates that a URL is bound to local loopback without user credentials.
+
+    Invariants enforced:
+    1. URL must be non-empty string.
+    2. Scheme must match allowed_schemes exactly (case-insensitive).
+    3. URL must not contain user credentials (user-info).
+    4. Hostname must parse exactly to 127.0.0.1, localhost, or ::1.
+    5. Port must be valid (1..65535) and match allowed_ports if specified.
+    """
+    if not url or not isinstance(url, str) or not url.strip():
+        return False, f"{description} cannot be empty."
+
+    try:
+        import urllib.parse
+        parsed = urllib.parse.urlsplit(url.strip())
+    except Exception as e:
+        return False, f"Invalid {description}: {e}"
+
+    # 1. Scheme validation
+    scheme = (parsed.scheme or "").lower()
+    allowed_schemes_lower = [s.lower() for s in allowed_schemes]
+    if scheme not in allowed_schemes_lower:
+        return False, (
+            f"{description} '{url}' scheme '{scheme}' is not permitted "
+            f"(allowed: {', '.join(allowed_schemes)})."
+        )
+
+    # 2. Reject user-info (embedded username/password)
+    if parsed.username or parsed.password or "@" in parsed.netloc:
+        return False, f"{description} '{url}' must not contain user credentials (user-info)."
+
+    # 3. Exact loopback hostname validation
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in ("127.0.0.1", "localhost", "::1"):
+        return False, (
+            f"{description} '{url}' host '{hostname}' is not bound to a loopback address "
+            "(127.0.0.1, localhost, ::1)."
+        )
+
+    # 4. Port validation
+    try:
+        port = parsed.port
+    except ValueError as ve:
+        return False, f"{description} '{url}' contains an invalid port: {ve}"
+
+    if port is not None:
+        if port < 1 or port > 65535:
+            return False, f"{description} '{url}' port '{port}' is outside valid TCP range (1..65535)."
+        if allowed_ports is not None and port not in allowed_ports:
+            return False, (
+                f"{description} '{url}' port '{port}' is not permitted "
+                f"(allowed ports: {', '.join(str(p) for p in allowed_ports)})."
+            )
+
+    return True, None
+
+
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Rejects automatic HTTP redirects fail-closed to prevent SSRF and egress escapes."""
+    """Rejects automatic HTTP redirects fail-closed to prevent SSRF and loopback escape."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise urllib.error.HTTPError(
             newurl,
             code,
-            f"Automatic HTTP redirect to '{newurl}' is blocked for security.",
+            f"Automatic HTTP redirect ({code}) to '{newurl}' is blocked for security.",
             headers,
             fp
         )
 
+    def http_error_301(self, req, fp, code, msg, headers):
+        loc = headers.get("Location", "") if headers else ""
+        return self.redirect_request(req, fp, 301, msg, headers, loc)
+
+    def http_error_302(self, req, fp, code, msg, headers):
+        loc = headers.get("Location", "") if headers else ""
+        return self.redirect_request(req, fp, 302, msg, headers, loc)
+
+    def http_error_303(self, req, fp, code, msg, headers):
+        loc = headers.get("Location", "") if headers else ""
+        return self.redirect_request(req, fp, 303, msg, headers, loc)
+
+    def http_error_307(self, req, fp, code, msg, headers):
+        loc = headers.get("Location", "") if headers else ""
+        return self.redirect_request(req, fp, 307, msg, headers, loc)
+
+    def http_error_308(self, req, fp, code, msg, headers):
+        loc = headers.get("Location", "") if headers else ""
+        return self.redirect_request(req, fp, 308, msg, headers, loc)
+
+
+def safe_urlopen(req: urllib.request.Request, timeout: float = 30.0, **kwargs):
+    """Executes an HTTP request strictly refusing redirects and preventing network escapes."""
+    opener = urllib.request.build_opener(NoRedirectHandler)
+    return opener.open(req, timeout=timeout, **kwargs)
 
 
 def validate_assistant_request(
@@ -113,21 +201,29 @@ def validate_assistant_request(
     
     Invariants enforced:
     1. Blank or whitespace-only prompts rejected.
-    2. Timeouts bounded between 1.0s and 300.0s.
+    2. Timeouts bounded between 1.0s and 300.0s and strictly finite.
     3. Tool execution fail-closed: rejected if requested or if backend has tools active.
     4. Local-only policy: reject if require_local=True but route is not VERIFIED_LOCAL.
     """
+    if not isinstance(request, AssistantRequest):
+        return False, AssistantResponse(
+            status=AssistantStatus.INVALID_REQUEST,
+            error="Request must be an instance of AssistantRequest.",
+            route=getattr(capabilities, "default_route", ProcessingRoute.UNKNOWN)
+        )
+
     # Invariant 1: Blank prompts
-    if not request.prompt or not request.prompt.strip():
+    if not isinstance(request.prompt, str) or not request.prompt or not request.prompt.strip():
         return False, AssistantResponse(
             status=AssistantStatus.INVALID_REQUEST,
             error="Prompt cannot be empty or whitespace only.",
             route=capabilities.default_route
         )
 
-    # Invariant 2: Timeout bounds & finiteness
+    # Invariant 2: Timeout bounds & finiteness (reject bools, non-numbers, NaN, Inf)
     if (
-        not isinstance(request.timeout_seconds, (int, float))
+        isinstance(request.timeout_seconds, bool)
+        or not isinstance(request.timeout_seconds, (int, float))
         or not math.isfinite(request.timeout_seconds)
         or request.timeout_seconds < 1.0
         or request.timeout_seconds > 300.0

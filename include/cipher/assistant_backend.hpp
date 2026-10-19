@@ -56,6 +56,13 @@ struct ActionDescriptor {
 
 /**
  * @brief Context window and prompt byte bounding (inspired by OpenClaw research).
+ *
+ * Scope in Milestone v0.4:
+ * - max_prompt_bytes is strictly enforced during validate_assistant_request() against request.prompt.size().
+ * - Setting max_prompt_bytes to 0 acts as a zero limit (rejecting any prompt with bytes > 0).
+ * - Multi-turn context/history fields (max_context_bytes, max_history_turns) are reserved schema
+ *   definitions for future milestones and are not actively enforced until conversation session
+ *   persistence and context-window management are integrated into the core platform.
  */
 struct ContextBudget {
     std::size_t max_prompt_bytes{32768};
@@ -76,8 +83,14 @@ struct EventMessage {
 };
 
 /**
- * @brief Evaluates action permissions following strict Dodaios hierarchy:
- * Priority: Blacklist (Block) > Whitelist (Safe) > Tool Default.
+ * @brief Evaluates action risk tiers following strict Dodaios hierarchy:
+ * Priority: Blacklist (Block) > Whitelist (Safe) > Tool Default > Policy Default.
+ *
+ * Architecture Notice:
+ * PermissionPolicy is a stateless risk classification and policy gate. It determines
+ * the assigned RiskTier (Safe, Monitor, Ask, Block) for a given ActionDescriptor.
+ * It is NOT an autonomous tool execution engine or an interactive user confirmation system;
+ * interactive approvals and audited tool execution are governed by Milestone v0.5.
  */
 class PermissionPolicy {
 public:

@@ -100,13 +100,13 @@ public:
 };
 
 // ---------------------------------------------------------------------------
-// Test Invariant 1: Prompt Validation
+// Test Invariant 1: Prompt Validation & UTF-8 Whitespace Trimming
 // ---------------------------------------------------------------------------
 void test_prompt_validation() {
     cipher::AssistantCapabilities caps;
     caps.processing_route = cipher::ProcessingRoute::VerifiedLocal;
 
-    // 1. Empty prompt rejected
+    // 1. Empty prompt rejected (safely handles empty string without iterator underflow)
     {
         cipher::AssistantRequest req;
         req.prompt = "";
@@ -119,7 +119,7 @@ void test_prompt_validation() {
     // 2. Whitespace-only prompt rejected
     {
         cipher::AssistantRequest req;
-        req.prompt = "   \t\n\r  ";
+        req.prompt = "   \t\n\r\f\v  ";
         auto res = cipher::validate_assistant_request(req, caps);
         check(!res.is_valid, "whitespace-only prompt rejected", "Expected invalid result");
     }
@@ -131,6 +131,22 @@ void test_prompt_validation() {
         auto res = cipher::validate_assistant_request(req, caps);
         check(res.is_valid, "valid prompt accepted", "Expected valid result: " + res.error_message);
     }
+
+    // 4. Multilingual UTF-8 prompt with whitespace trimmed cleanly
+    {
+        cipher::AssistantRequest req;
+        req.prompt = "   \xE2\x9C\x93 multilingual context \xF0\x9F\x9A\x80   ";
+        auto res = cipher::validate_assistant_request(req, caps);
+        check(res.is_valid, "UTF-8 multilingual prompt accepted", "Expected valid result");
+    }
+
+    // 5. Single multi-byte UTF-8 character with no whitespace
+    {
+        cipher::AssistantRequest req;
+        req.prompt = "\xE2\x9C\x93";
+        auto res = cipher::validate_assistant_request(req, caps);
+        check(res.is_valid, "single UTF-8 multi-byte symbol accepted", "Expected valid result");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -140,22 +156,40 @@ void test_timeout_bounds() {
     cipher::AssistantCapabilities caps;
     caps.processing_route = cipher::ProcessingRoute::VerifiedLocal;
 
-    // 1. Sub-second timeout rejected
+    // 1. Sub-second and negative timeouts rejected
     {
         cipher::AssistantRequest req;
         req.prompt = "Valid prompt";
+
         req.timeout_seconds = 0.5;
-        auto res = cipher::validate_assistant_request(req, caps);
-        check(!res.is_valid, "timeout < 1.0s rejected", "Expected invalid result");
+        check(!cipher::validate_assistant_request(req, caps).is_valid,
+              "timeout < 1.0s rejected", "Expected invalid result");
+
+        req.timeout_seconds = 0.0;
+        check(!cipher::validate_assistant_request(req, caps).is_valid,
+              "timeout 0.0s rejected", "Expected invalid result");
+
+        req.timeout_seconds = -1.0;
+        check(!cipher::validate_assistant_request(req, caps).is_valid,
+              "negative timeout rejected", "Expected invalid result");
+
+        req.timeout_seconds = -0.001;
+        check(!cipher::validate_assistant_request(req, caps).is_valid,
+              "small negative timeout rejected", "Expected invalid result");
     }
 
     // 2. Excessive timeout (> 300s) rejected
     {
         cipher::AssistantRequest req;
         req.prompt = "Valid prompt";
-        req.timeout_seconds = 301.0;
-        auto res = cipher::validate_assistant_request(req, caps);
-        check(!res.is_valid, "timeout > 300.0s rejected", "Expected invalid result");
+
+        req.timeout_seconds = 300.001;
+        check(!cipher::validate_assistant_request(req, caps).is_valid,
+              "timeout 300.001s rejected", "Expected invalid result");
+
+        req.timeout_seconds = 1000.0;
+        check(!cipher::validate_assistant_request(req, caps).is_valid,
+              "timeout 1000.0s rejected", "Expected invalid result");
     }
 
     // 3. Valid timeout boundary values
@@ -272,26 +306,68 @@ void test_local_only_routing_invariants() {
 }
 
 // ---------------------------------------------------------------------------
-// Test Invariant 5: Context Budget Prompt Bounding
+// Test Invariant 5: Context Budget Prompt Bounding & Zero Limits
 // ---------------------------------------------------------------------------
 void test_context_budget_prompt_bounding() {
     cipher::AssistantCapabilities caps;
     caps.processing_route = cipher::ProcessingRoute::VerifiedLocal;
 
-    cipher::AssistantRequest req;
-    req.budget.max_prompt_bytes = 100;
+    // 1. Small prompt within budget
+    {
+        cipher::AssistantRequest req;
+        req.budget.max_prompt_bytes = 100;
+        req.prompt = "Small prompt";
+        check(cipher::validate_assistant_request(req, caps).is_valid,
+              "prompt within budget accepted", "Expected valid");
+    }
 
-    // Small prompt within budget
-    req.prompt = "Small prompt";
-    check(cipher::validate_assistant_request(req, caps).is_valid,
-          "prompt within budget accepted", "Expected valid");
+    // 2. Oversized prompt exceeding budget
+    {
+        cipher::AssistantRequest req;
+        req.budget.max_prompt_bytes = 100;
+        req.prompt = std::string(150, 'X');
+        auto res_oversized = cipher::validate_assistant_request(req, caps);
+        check(!res_oversized.is_valid, "oversized prompt exceeding budget rejected", "Expected invalid");
+        check(res_oversized.error_message.find("Context budget violation") != std::string::npos,
+              "budget error message contains Context budget violation", "Unexpected message: " + res_oversized.error_message);
+    }
 
-    // Oversized prompt exceeding budget
-    req.prompt = std::string(150, 'X');
-    auto res_oversized = cipher::validate_assistant_request(req, caps);
-    check(!res_oversized.is_valid, "oversized prompt exceeding budget rejected", "Expected invalid");
-    check(res_oversized.error_message.find("Context budget violation") != std::string::npos,
-          "budget error message contains Context budget violation", "Unexpected message: " + res_oversized.error_message);
+    // 3. Exact boundary condition (size == limit passes, size == limit + 1 fails)
+    {
+        cipher::AssistantRequest req;
+        req.budget.max_prompt_bytes = 10;
+        req.prompt = "1234567890"; // 10 bytes
+        check(cipher::validate_assistant_request(req, caps).is_valid,
+              "prompt exactly at byte limit accepted", "Expected valid");
+
+        req.prompt = "12345678901"; // 11 bytes
+        check(!cipher::validate_assistant_request(req, caps).is_valid,
+              "prompt one byte above limit rejected", "Expected invalid");
+    }
+
+    // 4. Zero limits: max_prompt_bytes = 0 acts as a strict zero ceiling
+    {
+        cipher::AssistantRequest req;
+        req.budget.max_prompt_bytes = 0;
+        req.prompt = "Non-empty prompt";
+        auto res_zero = cipher::validate_assistant_request(req, caps);
+        check(!res_zero.is_valid, "zero limit budget rejects non-empty prompt", "Expected invalid");
+        check(res_zero.error_message.find("Context budget violation") != std::string::npos,
+              "zero limit error message contains Context budget violation", "Unexpected message: " + res_zero.error_message);
+    }
+
+    // 5. UTF-8 multi-byte boundary: ensures byte count, not code points, is bounded
+    {
+        cipher::AssistantRequest req;
+        req.prompt = "\xE2\x9C\x93"; // UTF-8 checkmark (3 bytes)
+        req.budget.max_prompt_bytes = 2; // Below 3 bytes
+        check(!cipher::validate_assistant_request(req, caps).is_valid,
+              "UTF-8 multi-byte symbol exceeding byte budget rejected", "Expected invalid");
+
+        req.budget.max_prompt_bytes = 3; // Exactly 3 bytes
+        check(cipher::validate_assistant_request(req, caps).is_valid,
+              "UTF-8 multi-byte symbol within byte budget accepted", "Expected valid");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -355,6 +431,7 @@ void test_risk_tier_and_permission_policy() {
     policy.add_blacklist_pattern("run_shell rm -rf*");
     policy.add_blacklist_pattern("exec*");
     policy.add_blacklist_pattern("format*");
+    policy.add_blacklist_pattern("*force_delete");
     policy.add_whitelist_pattern("read_file*");
     policy.add_whitelist_pattern("time");
 
@@ -382,6 +459,25 @@ void test_risk_tier_and_permission_policy() {
     cipher::ActionDescriptor unconfigured_action{"edit_memory", "key", "memory", cipher::RiskTier::Ask};
     check(policy.evaluate(unconfigured_action) == cipher::RiskTier::Ask,
           "unmatched action falls back to default Ask tier", "Expected Ask");
+
+    // 5. Prefix wildcard matching
+    cipher::ActionDescriptor prefix_action{"system_force_delete", "target", "system", cipher::RiskTier::Ask};
+    check(policy.evaluate(prefix_action) == cipher::RiskTier::Block,
+          "prefix wildcard *force_delete evaluates to Block", "Expected Block");
+
+    // 6. Conservative fail-closed behavior for empty action name
+    cipher::ActionDescriptor empty_action{"", "target", "system", cipher::RiskTier::Safe};
+    check(policy.evaluate(empty_action) == cipher::RiskTier::Block,
+          "empty action name fails closed to RiskTier::Block", "Expected Block");
+    check(!policy.is_permitted(empty_action),
+          "empty action name is not permitted", "Expected false");
+
+    // 7. Conservative permission gating (only Safe is permitted)
+    cipher::ActionDescriptor monitor_action{"audit_log", "target", "log", cipher::RiskTier::Monitor};
+    check(!policy.is_permitted(monitor_action),
+          "Monitor tier is not auto-permitted by is_permitted", "Expected false");
+    check(!policy.is_permitted(unconfigured_action),
+          "Ask tier is not auto-permitted by is_permitted", "Expected false");
 }
 
 // ---------------------------------------------------------------------------

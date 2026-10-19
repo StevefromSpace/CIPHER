@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 from typing import Optional, Tuple
 
+from integrations.contract import validate_loopback_url
+
 
 @dataclass
 class LeonConfig:
@@ -22,13 +24,20 @@ class LeonConfig:
     # Leon server URL (strictly loopback by default)
     api_url: str = "http://127.0.0.1:1337"
 
+    # Pinned target version (Leon 1.x stable contract)
+    pinned_version: str = "1.0.0"
+
+    # Verified stable endpoints for targeted release
+    query_endpoint: str = "/api/v1/query"
+    info_endpoint: str = "/api/v1/info"
+
+    # Provenance verification: False until verified local runtime confirmed
+    verified_local: bool = False
+
     # Profile API Key / Auth token (loaded from env, never hardcoded)
     api_key: Optional[str] = field(
         default_factory=lambda: os.environ.get("CIPHER_LEON_API_KEY")
     )
-
-    # Pinned target version (Leon 1.x stable contract)
-    pinned_version: str = "1.0.0"
 
     # Default model identifier
     default_model: str = "local/default"
@@ -90,13 +99,9 @@ class LeonConfig:
         return True, None
 
     def validate_api_url(self) -> Tuple[bool, Optional[str]]:
-        """Ensures server communication is strictly bound to loopback using parsed hostname."""
-        try:
-            import urllib.parse
-            parsed = urllib.parse.urlsplit(self.api_url)
-            hostname = (parsed.hostname or "").lower()
-            if hostname not in ("127.0.0.1", "localhost", "::1"):
-                return False, f"Leon API URL '{self.api_url}' host '{hostname}' is not bound to a loopback address (127.0.0.1, localhost, ::1)."
-            return True, None
-        except Exception as e:
-            return False, f"Invalid Leon API URL: {e}"
+        """Ensures server communication is strictly bound to loopback using shared validator."""
+        return validate_loopback_url(
+            self.api_url,
+            allowed_schemes=("http", "https"),
+            description="Leon API URL"
+        )

@@ -37,9 +37,14 @@ class OpenClawBridge(BaseAssistantBackend):
 
     @property
     def capabilities(self) -> AssistantCapabilities:
-        """Declares OpenClaw bridge capabilities and provenance constraints."""
-        is_local, _ = self.config.is_model_local(self.config.default_model)
-        route = ProcessingRoute.VERIFIED_LOCAL if is_local else ProcessingRoute.REMOTE_CLOUD
+        """Declares OpenClaw bridge capabilities and provenance constraints.
+
+        Route provenance:
+        OpenClaw runs as an external Node.js agent. Model name prefixes like 'ollama/'
+        do not constitute cryptographic proof of local inference. Route remains UNKNOWN
+        unless config.verified_local is explicitly enabled after in-process verification.
+        """
+        route = ProcessingRoute.VERIFIED_LOCAL if self.config.verified_local else ProcessingRoute.UNKNOWN
         return AssistantCapabilities(
             name="OpenClaw",
             version="1.0.0",
@@ -125,18 +130,18 @@ class OpenClawBridge(BaseAssistantBackend):
         """
         start_time = time.perf_counter()
 
-        # 1. Central policy validation gate
-        is_valid, validation_resp = validate_assistant_request(request, self.capabilities)
-        if not is_valid and validation_resp:
-            return validation_resp
-
-        # 2. Gate: Check if integration is enabled
+        # 1. Gate: Check if integration is enabled
         if not self.config.enabled:
             return AssistantResponse(
                 status=AssistantStatus.DISABLED,
                 error="OpenClaw integration is disabled in CIPHER configuration (CIPHER_OPENCLAW_ENABLED=0).",
                 route=self.capabilities.default_route,
             )
+
+        # 2. Central policy validation gate
+        is_valid, validation_resp = validate_assistant_request(request, self.capabilities)
+        if not is_valid and validation_resp:
+            return validation_resp
 
         # 3. Gate: Loopback network check
         is_loopback, loopback_err = self.config.validate_gateway_url()
@@ -173,7 +178,7 @@ class OpenClawBridge(BaseAssistantBackend):
             return AssistantResponse(
                 status=AssistantStatus.UNAVAILABLE,
                 model=model,
-                route=ProcessingRoute.VERIFIED_LOCAL,
+                route=self.capabilities.default_route,
                 error="OpenClaw CLI executable not found on PATH or configured location.",
             )
 
@@ -189,6 +194,9 @@ class OpenClawBridge(BaseAssistantBackend):
             "--json"
         ]
 
+        if self.config.explicit_tool_denial and self.config.tool_denial_args:
+            cmd.extend(list(self.config.tool_denial_args))
+
         if request.session_id:
             cmd.extend(["--session-id", request.session_id])
 
@@ -202,6 +210,17 @@ class OpenClawBridge(BaseAssistantBackend):
                 shell=False
             )
             duration_ms = (time.perf_counter() - start_time) * 1000.0
+
+            # Enforce output size bounding (1MB max to prevent memory exhaustion)
+            max_output_bytes = 1048576
+            if len((res.stdout or "").encode("utf-8", errors="replace")) > max_output_bytes:
+                return AssistantResponse(
+                    status=AssistantStatus.ERROR,
+                    model=model,
+                    route=self.capabilities.default_route,
+                    duration_ms=duration_ms,
+                    error=f"OpenClaw output exceeded maximum permitted byte limit ({max_output_bytes} bytes)."
+                )
 
             if res.returncode != 0:
                 raw_err = self._sanitize_error(res.stderr or res.stdout)
@@ -218,7 +237,7 @@ class OpenClawBridge(BaseAssistantBackend):
                 return AssistantResponse(
                     status=status,
                     model=model,
-                    route=ProcessingRoute.VERIFIED_LOCAL,
+                    route=self.capabilities.default_route,
                     duration_ms=duration_ms,
                     error=f"OpenClaw execution failed (exit code {res.returncode}): {raw_err[:300]}",
                     raw_output=raw_err
@@ -230,7 +249,7 @@ class OpenClawBridge(BaseAssistantBackend):
                 return AssistantResponse(
                     status=AssistantStatus.ERROR,
                     model=model,
-                    route=ProcessingRoute.VERIFIED_LOCAL,
+                    route=self.capabilities.default_route,
                     duration_ms=duration_ms,
                     error="OpenClaw returned empty output.",
                     raw_output=raw_out
@@ -263,7 +282,7 @@ class OpenClawBridge(BaseAssistantBackend):
                         return AssistantResponse(
                             status=AssistantStatus.ERROR,
                             model=model,
-                            route=ProcessingRoute.VERIFIED_LOCAL,
+                            route=self.capabilities.default_route,
                             duration_ms=duration_ms,
                             error=f"OpenClaw run reported failure: {data.get('error', 'unknown error')}",
                             raw_output=raw_out
@@ -273,7 +292,7 @@ class OpenClawBridge(BaseAssistantBackend):
                     return AssistantResponse(
                         status=AssistantStatus.ERROR,
                         model=model,
-                        route=ProcessingRoute.VERIFIED_LOCAL,
+                        route=self.capabilities.default_route,
                         duration_ms=duration_ms,
                         error="Malformed response from OpenClaw: missing assistant reply text field.",
                         raw_output=raw_out[:300]
@@ -283,7 +302,7 @@ class OpenClawBridge(BaseAssistantBackend):
                     status=AssistantStatus.OK,
                     text=reply_text,
                     model=model,
-                    route=ProcessingRoute.VERIFIED_LOCAL,
+                    route=self.capabilities.default_route,
                     duration_ms=duration_ms,
                     raw_output=raw_out
                 )
@@ -292,7 +311,7 @@ class OpenClawBridge(BaseAssistantBackend):
                 return AssistantResponse(
                     status=AssistantStatus.ERROR,
                     model=model,
-                    route=ProcessingRoute.VERIFIED_LOCAL,
+                    route=self.capabilities.default_route,
                     duration_ms=duration_ms,
                     error=f"Malformed response from OpenClaw (invalid JSON): {str(je)}",
                     raw_output=raw_out[:300]
@@ -303,7 +322,7 @@ class OpenClawBridge(BaseAssistantBackend):
             return AssistantResponse(
                 status=AssistantStatus.TIMEOUT,
                 model=model,
-                route=ProcessingRoute.VERIFIED_LOCAL,
+                route=self.capabilities.default_route,
                 duration_ms=duration_ms,
                 error=f"Request to OpenClaw timed out after {timeout:.1f} seconds."
             )
@@ -312,7 +331,7 @@ class OpenClawBridge(BaseAssistantBackend):
             return AssistantResponse(
                 status=AssistantStatus.ERROR,
                 model=model,
-                route=ProcessingRoute.VERIFIED_LOCAL,
+                route=self.capabilities.default_route,
                 duration_ms=duration_ms,
                 error=f"Unexpected error executing OpenClaw subprocess: {self._sanitize_error(str(e))}"
             )

@@ -9,16 +9,12 @@ namespace cipher {
 namespace {
 
 std::string trim_string(const std::string& str) {
-    auto start = str.begin();
-    while (start != str.end() && std::isspace(static_cast<unsigned char>(*start))) {
-        ++start;
+    const auto first = str.find_first_not_of(" \t\n\r\f\v");
+    if (first == std::string::npos) {
+        return "";
     }
-    auto end = str.end();
-    do {
-        --end;
-    } while (std::distance(start, end) > 0 && std::isspace(static_cast<unsigned char>(*end)));
-
-    return (start <= end) ? std::string(start, end + 1) : std::string();
+    const auto last = str.find_last_not_of(" \t\n\r\f\v");
+    return str.substr(first, (last - first + 1));
 }
 
 } // anonymous namespace
@@ -102,6 +98,11 @@ bool PermissionPolicy::matches_pattern(const std::string& text, const std::strin
 }
 
 RiskTier PermissionPolicy::evaluate(const ActionDescriptor& action) const {
+    // Conservative defense: empty/anonymous action fails closed immediately
+    if (action.name.empty()) {
+        return RiskTier::Block;
+    }
+
     std::string composite = action.name;
     if (!action.target.empty()) {
         composite += " " + action.target;
@@ -172,7 +173,11 @@ ValidationResult validate_assistant_request(
     }
 
     // Invariant 5: Context budget prompt byte bounding
-    if (request.budget.max_prompt_bytes > 0 && request.prompt.size() > request.budget.max_prompt_bytes) {
+    // Note: max_prompt_bytes enforces the byte ceiling on request.prompt.
+    // A max_prompt_bytes of 0 acts as a zero limit (rejects all prompts).
+    // Multi-turn context/history fields (max_context_bytes, max_history_turns) are reserved
+    // schema definitions and not enforced until conversation history persistence is implemented in future milestones.
+    if (request.prompt.size() > request.budget.max_prompt_bytes) {
         std::ostringstream oss;
         oss << "Context budget violation: prompt size (" << request.prompt.size()
             << " bytes) exceeds maximum configured prompt limit ("

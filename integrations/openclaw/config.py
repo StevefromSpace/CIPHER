@@ -41,7 +41,17 @@ class OpenClawConfig:
     # Enforce minimal tool profile to prevent tool execution
     enforce_minimal_tool_profile: bool = True
 
-    # Permitted local provider prefixes
+    # Explicit tool denial verification: 'minimal' alone still includes presence, session_status, gateway.
+    # explicit_tool_denial must be True to guarantee fail-closed tool isolation without modifying global config.
+    explicit_tool_denial: bool = True
+
+    # Arguments passed to enforce explicit tool denial on CLI without modifying global configuration
+    tool_denial_args: Tuple[str, ...] = ("--deny-tools", "*")
+
+    # Flag indicating whether local execution has been independently verified (default False -> UNKNOWN route)
+    verified_local: bool = False
+
+    # Permitted local provider prefixes (advisory only; model prefix is not proof of local inference)
     allowed_local_prefixes: Tuple[str, ...] = (
         "ollama/",
         "local/",
@@ -69,10 +79,10 @@ class OpenClawConfig:
     )
 
     def is_model_local(self, model_name: str) -> Tuple[bool, Optional[str]]:
-        """Validates whether a model specification is strictly local-first.
+        """Validates model identifier against known cloud patterns.
         
-        Returns:
-            Tuple of (is_local: bool, rejection_reason: Optional[str])
+        Notice: Having a local prefix like 'ollama/' is an advisory sanity check,
+        not cryptographic proof of local inference. Route remains UNKNOWN unless verified.
         """
         if not model_name or not model_name.strip():
             return False, "Model identifier is empty."
@@ -98,26 +108,35 @@ class OpenClawConfig:
         return True, None
 
     def validate_gateway_url(self) -> Tuple[bool, Optional[str]]:
-        """Ensures gateway communication is strictly bound to loopback using parsed hostname."""
-        try:
-            import urllib.parse
-            parsed = urllib.parse.urlsplit(self.gateway_url)
-            hostname = (parsed.hostname or "").lower()
-            if hostname not in ("127.0.0.1", "localhost", "::1"):
-                return False, f"Gateway URL '{self.gateway_url}' host '{hostname}' is not bound to a loopback address (127.0.0.1, localhost, ::1)."
-            return True, None
-        except Exception as e:
-            return False, f"Invalid Gateway URL: {e}"
+        """Ensures gateway communication is strictly bound to loopback using shared URL validator."""
+        from integrations.contract import validate_loopback_url
+        return validate_loopback_url(
+            self.gateway_url,
+            allowed_schemes=("ws", "wss"),
+            description="Gateway URL"
+        )
 
     def is_tool_policy_safe(self) -> Tuple[bool, Optional[str]]:
-        """Verifies that the active OpenClaw profile restricts tool execution."""
+        """Verifies that the active OpenClaw profile verifiably restricts tool execution.
+
+        A profile named 'minimal' is NOT proof that tools are disabled because upstream
+        minimal profile still includes presence, session_status, and gateway discovery tools.
+        Explicit tool denial (explicit_tool_denial=True) must be active.
+        """
         if not self.enforce_minimal_tool_profile:
-            return True, None
+            return False, "Tool policy enforcement cannot be disabled. CIPHER requires tools to be locked down."
 
         clean_profile = self.tool_profile.strip().lower()
         if clean_profile != "minimal":
             return False, (
                 f"Active OpenClaw tool profile is '{self.tool_profile}'. "
-                "Only the isolated 'minimal' profile (tools disabled) is permitted by CIPHER policy."
+                "Only the isolated 'minimal' profile with explicit tool denial is permitted by CIPHER policy."
             )
+
+        if not self.explicit_tool_denial:
+            return False, (
+                "OpenClaw profile 'minimal' alone does not guarantee tool lockdown (it permits internal "
+                "discovery and gateway tools). Explicit tool denial (explicit_tool_denial=True) is required."
+            )
+
         return True, None

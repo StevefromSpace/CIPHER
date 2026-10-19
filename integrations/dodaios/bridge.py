@@ -23,6 +23,7 @@ from integrations.contract import (
     BaseAssistantBackend,
     ProcessingRoute,
     NoRedirectHandler,
+    safe_urlopen,
     sanitize_sensitive_data,
     validate_assistant_request,
 )
@@ -37,9 +38,14 @@ class DodaiosBridge(BaseAssistantBackend):
 
     @property
     def capabilities(self) -> AssistantCapabilities:
-        """Declares Dodaios bridge capabilities and security constraints."""
-        is_local, _ = self.config.is_model_local(self.config.default_model)
-        route = ProcessingRoute.VERIFIED_LOCAL if is_local else ProcessingRoute.REMOTE_CLOUD
+        """Declares Dodaios bridge capabilities and security constraints.
+
+        Route provenance:
+        External REST service over loopback. Loopback binding does not prove
+        the runtime is not forwarding upstream to proprietary cloud models.
+        Route defaults to UNKNOWN unless verified_local is True.
+        """
+        route = ProcessingRoute.VERIFIED_LOCAL if self.config.verified_local else ProcessingRoute.UNKNOWN
         return AssistantCapabilities(
             name="Dodaios",
             version="0.1.0-preview",
@@ -53,7 +59,7 @@ class DodaiosBridge(BaseAssistantBackend):
         )
 
     def is_available(self) -> bool:
-        """Probes the Dodaios Control API health endpoint on loopback."""
+        """Probes the Dodaios Control API health endpoint on loopback rejecting redirects."""
         if not self.config.enabled:
             return False
 
@@ -62,12 +68,12 @@ class DodaiosBridge(BaseAssistantBackend):
             return False
 
         try:
-            health_url = urllib.parse.urljoin(self.config.api_url, "/health")
+            health_url = urllib.parse.urljoin(self.config.api_url, self.config.health_endpoint)
             req = urllib.request.Request(health_url, headers={"User-Agent": "CIPHER-Bridge/0.4"})
             if self.config.api_key:
                 req.add_header("Authorization", f"Bearer {self.config.api_key}")
 
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
+            with safe_urlopen(req, timeout=2.0) as resp:
                 return resp.status == 200
         except Exception:
             return False
@@ -102,18 +108,18 @@ class DodaiosBridge(BaseAssistantBackend):
         """
         start_time = time.perf_counter()
 
-        # 1. Central policy validation gate
-        is_valid, validation_resp = validate_assistant_request(request, self.capabilities)
-        if not is_valid and validation_resp:
-            return validation_resp
-
-        # 2. Gate: Integration enabled check
+        # 1. Gate: Integration enabled check
         if not self.config.enabled:
             return AssistantResponse(
                 status=AssistantStatus.DISABLED,
                 error="Dodaios integration is disabled in CIPHER configuration (CIPHER_DODAIOS_ENABLED=0).",
                 route=self.capabilities.default_route,
             )
+
+        # 2. Central policy validation gate
+        is_valid, validation_resp = validate_assistant_request(request, self.capabilities)
+        if not is_valid and validation_resp:
+            return validation_resp
 
         # 3. Gate: Loopback network check
         is_loopback, loopback_err = self.config.validate_api_url()
@@ -124,11 +130,15 @@ class DodaiosBridge(BaseAssistantBackend):
                 route=self.capabilities.default_route,
             )
 
-        # 4. Gate: Rejection of computer use, mission dispatch, or privileged actions
-        if request.metadata.get("computer_use") or request.metadata.get("mission") or request.metadata.get("execute"):
+        # 4. Gate: Rejection of computer use, mission dispatch, shell execution, config mutation, or installation
+        blocked_actions = (
+            "computer_use", "mission", "execute", "shell", "config", "install",
+            "mission_dispatch", "shell_execution", "config_mutation", "installation"
+        )
+        if any(request.metadata.get(act) for act in blocked_actions):
             return AssistantResponse(
                 status=AssistantStatus.REJECTED_TOOLS_ENABLED,
-                error="Privileged actions (computer use, mission dispatch, shell execution) are strictly blocked in Dodaios adapter.",
+                error="Privileged actions (computer use, mission dispatch, shell execution, config mutation, installation) are strictly blocked in Dodaios adapter.",
                 route=self.capabilities.default_route,
             )
 
@@ -145,7 +155,7 @@ class DodaiosBridge(BaseAssistantBackend):
 
         # 6. Build HTTP request payload for least-privileged chat endpoint
         timeout = request.timeout_seconds if request.timeout_seconds is not None else self.config.timeout_seconds
-        chat_url = urllib.parse.urljoin(self.config.api_url, "/api/v1/chat/completions")
+        chat_url = urllib.parse.urljoin(self.config.api_url, self.config.chat_endpoint)
 
         payload = {
             "model": model,
@@ -173,20 +183,26 @@ class DodaiosBridge(BaseAssistantBackend):
 
         # 7. Execute HTTP request with timeout and redirect rejection
         try:
-            if hasattr(urllib.request.urlopen, "mock_calls"):
-                response_ctx = urllib.request.urlopen(http_req, timeout=timeout)
-            else:
-                opener = urllib.request.build_opener(NoRedirectHandler)
-                response_ctx = opener.open(http_req, timeout=timeout)
-            with response_ctx as response:
+            with safe_urlopen(http_req, timeout=timeout) as response:
                 duration_ms = (time.perf_counter() - start_time) * 1000.0
                 raw_body = response.read().decode("utf-8")
+
+                # Enforce output size bounding (1MB)
+                max_output_bytes = 1048576
+                if len(raw_body.encode("utf-8", errors="replace")) > max_output_bytes:
+                    return AssistantResponse(
+                        status=AssistantStatus.ERROR,
+                        model=model,
+                        route=self.capabilities.default_route,
+                        duration_ms=duration_ms,
+                        error=f"Dodaios response exceeded maximum permitted byte limit ({max_output_bytes} bytes)."
+                    )
 
                 if not raw_body.strip():
                     return AssistantResponse(
                         status=AssistantStatus.ERROR,
                         model=model,
-                        route=ProcessingRoute.VERIFIED_LOCAL,
+                        route=self.capabilities.default_route,
                         duration_ms=duration_ms,
                         error="Dodaios returned empty response body."
                     )
@@ -212,7 +228,7 @@ class DodaiosBridge(BaseAssistantBackend):
                     return AssistantResponse(
                         status=AssistantStatus.ERROR,
                         model=model,
-                        route=ProcessingRoute.VERIFIED_LOCAL,
+                        route=self.capabilities.default_route,
                         duration_ms=duration_ms,
                         error="Malformed response from Dodaios: missing completion text.",
                         raw_output=raw_body[:300]
@@ -222,21 +238,35 @@ class DodaiosBridge(BaseAssistantBackend):
                     status=AssistantStatus.OK,
                     text=reply_text,
                     model=model,
-                    route=ProcessingRoute.VERIFIED_LOCAL,
+                    route=self.capabilities.default_route,
                     duration_ms=duration_ms,
                     raw_output=raw_body
                 )
 
         except urllib.error.HTTPError as he:
             duration_ms = (time.perf_counter() - start_time) * 1000.0
-            raw_err = self._sanitize_error(he.read().decode("utf-8", errors="replace") if hasattr(he, "read") else str(he))
-            status = AssistantStatus.AUTH_ERROR if he.code in (401, 403) else AssistantStatus.ERROR
+            raw_err = ""
+            if hasattr(he, "read"):
+                try:
+                    raw_err = he.read().decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+            if not raw_err.strip():
+                raw_err = str(getattr(he, "msg", "") or getattr(he, "reason", "") or he)
+            raw_err = self._sanitize_error(raw_err)
+            if he.code in (401, 403):
+                status = AssistantStatus.AUTH_ERROR
+            else:
+                status = AssistantStatus.ERROR
+            err_msg = f"Dodaios HTTP error {he.code}: {raw_err[:300]}"
+            if he.code in (301, 302, 303, 307, 308):
+                err_msg = f"Dodaios HTTP redirect {he.code} blocked for security: {raw_err[:300]}"
             return AssistantResponse(
                 status=status,
                 model=model,
-                route=ProcessingRoute.VERIFIED_LOCAL,
+                route=self.capabilities.default_route,
                 duration_ms=duration_ms,
-                error=f"Dodaios HTTP error {he.code}: {raw_err[:300]}",
+                error=err_msg,
                 raw_output=raw_err
             )
         except urllib.error.URLError as ue:
@@ -245,7 +275,7 @@ class DodaiosBridge(BaseAssistantBackend):
             return AssistantResponse(
                 status=AssistantStatus.CONNECTION_ERROR,
                 model=model,
-                route=ProcessingRoute.VERIFIED_LOCAL,
+                route=self.capabilities.default_route,
                 duration_ms=duration_ms,
                 error=f"Dodaios connection failure: {err_str}",
             )
@@ -254,7 +284,7 @@ class DodaiosBridge(BaseAssistantBackend):
             return AssistantResponse(
                 status=AssistantStatus.TIMEOUT,
                 model=model,
-                route=ProcessingRoute.VERIFIED_LOCAL,
+                route=self.capabilities.default_route,
                 duration_ms=duration_ms,
                 error=f"Request to Dodaios timed out after {timeout:.1f} seconds."
             )
@@ -263,7 +293,7 @@ class DodaiosBridge(BaseAssistantBackend):
             return AssistantResponse(
                 status=AssistantStatus.ERROR,
                 model=model,
-                route=ProcessingRoute.VERIFIED_LOCAL,
+                route=self.capabilities.default_route,
                 duration_ms=duration_ms,
                 error=f"Malformed response from Dodaios (invalid JSON): {str(je)}"
             )
@@ -272,7 +302,7 @@ class DodaiosBridge(BaseAssistantBackend):
             return AssistantResponse(
                 status=AssistantStatus.ERROR,
                 model=model,
-                route=ProcessingRoute.VERIFIED_LOCAL,
+                route=self.capabilities.default_route,
                 duration_ms=duration_ms,
                 error=f"Unexpected error communicating with Dodaios: {self._sanitize_error(str(e))}"
             )

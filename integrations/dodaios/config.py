@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 from typing import Optional, Tuple
 
+from integrations.contract import validate_loopback_url
+
 
 @dataclass
 class DodaiosConfig:
@@ -21,6 +23,13 @@ class DodaiosConfig:
 
     # Control REST API URL (strictly loopback by default)
     api_url: str = "http://127.0.0.1:8000"
+
+    # Verified endpoints for targeted release
+    chat_endpoint: str = "/api/runtime-gateway/v1/chat/completions"
+    health_endpoint: str = "/api/health"
+
+    # Provenance verification: False until verified local runtime confirmed
+    verified_local: bool = False
 
     # Optional bearer token / API key (loaded from env, never hardcoded)
     api_key: Optional[str] = field(
@@ -87,13 +96,9 @@ class DodaiosConfig:
         return True, None
 
     def validate_api_url(self) -> Tuple[bool, Optional[str]]:
-        """Ensures Control API communication is strictly bound to loopback using parsed hostname."""
-        try:
-            import urllib.parse
-            parsed = urllib.parse.urlsplit(self.api_url)
-            hostname = (parsed.hostname or "").lower()
-            if hostname not in ("127.0.0.1", "localhost", "::1"):
-                return False, f"Dodaios API URL '{self.api_url}' host '{hostname}' is not bound to a loopback address (127.0.0.1, localhost, ::1)."
-            return True, None
-        except Exception as e:
-            return False, f"Invalid Dodaios API URL: {e}"
+        """Ensures Control API communication is strictly bound to loopback using shared validator."""
+        return validate_loopback_url(
+            self.api_url,
+            allowed_schemes=("http", "https"),
+            description="Dodaios API URL"
+        )

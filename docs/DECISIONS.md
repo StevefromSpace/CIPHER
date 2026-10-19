@@ -17,7 +17,11 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
 7. [Automated Verification and Release Governance](#7-automated-verification-and-release-governance)
 8. [Strict Isolation and Rollback for Potential Self-Modification](#8-strict-isolation-and-rollback-for-potential-self-modification)
 9. [Owner Comprehension and Human Agency](#9-owner-comprehension-and-human-agency)
-10. [Persistent Memory Foundation](#10-persistent-memory-foundation)
+10. [Persistent Memory Foundation and Win32 Atomic Replacement](#10-persistent-memory-foundation-and-win32-atomic-replacement)
+11. [Codex-Free Dual-Claude Development Pipeline with Read-Only Reviewer Isolation](#11-codex-free-dual-claude-development-pipeline-with-read-only-reviewer-isolation)
+12. [Replaceable Assistant Capability Providers](#12-replaceable-assistant-capability-providers-assistant-interoperability-architecture-openclaw-dodaios-openvoiceos-leon)
+13. [Clean-Room Multi-Agent Source Intelligence Extraction](#13-clean-room-multi-agent-source-intelligence-extraction-risk-tiered-permission-policy-and-defense-in-depth-loopback-hardening)
+14. [Operation Hardening Gate: Comprehensive Multi-Agent Security Isolation and Zero-Trust Loopback Boundaries](#14-operation-hardening-gate-comprehensive-multi-agent-security-isolation-and-zero-trust-loopback-boundaries)
 
 ---
 
@@ -170,3 +174,36 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
     - Redirect blocking: HTTP bridges reject redirects to external hosts.
     - Verified by 69 unit tests across all adapter test suites.
 * **Future Intent:** When native tool execution (Milestone v0.5) is implemented in CIPHER, the native C++17 `PermissionPolicy` and `RiskTier` evaluation engine will serve as the mandatory, authoritative security gate preceding any tool invocation.
+
+---
+
+### 14. Operation Hardening Gate: Comprehensive Multi-Agent Security Isolation and Zero-Trust Loopback Boundaries
+
+* **Status:** Accepted (Operation Hardening Gate, Milestone v0.4)
+* **Principle:** External assistant adapters must operate under zero-trust assumptions. Network bindings must strictly enforce local loopback addresses, reject HTTP redirects, lockdown all external tool invocation capabilities, default route provenance to `UNKNOWN` until cryptographically or in-process verified, pin exact upstream API endpoints, and guard broadcast channels against credential leakage.
+* **Rationale:** Integrating third-party assistants introduces multiple attack surfaces if loose assumptions are made:
+  1. Loose URL checks can be spoofed (e.g. `127.0.0.1.attacker.com` or embedded user credentials `user:pass@127.0.0.1`).
+  2. Automatic HTTP redirection allows external services to redirect requests outside the loopback perimeter (SSRF) and leak headers.
+  3. Upstream "minimal" profiles in OpenClaw still ship discovery tools; explicit denial flags (`--deny-tools *`) must be supplied.
+  4. Model names (such as `ollama/llama3`) do not prove local execution; external agents can transparently route through cloud providers.
+  5. Shared broadcast channels (such as the OpenVoiceOS messagebus) expose sensitive API tokens to all listeners unless explicitly sanitized and filtered.
+  6. In C++, undefined behavior in string trimming (iterator decrement underflow) or zero prompt budget edge cases could lead to memory corruption or bypasses.
+* **Current Implementation:**
+  - `cipher_assistant` (C++17 library):
+    - Fixed `trim_string` implementation using `find_first_not_of` and `find_last_not_of` to eliminate reverse iterator decrement undefined behavior on empty/whitespace inputs.
+    - Centralized validation strictly rejects non-empty prompts when `max_prompt_bytes == 0` (zero prompt budget enforcement).
+    - Hardened `PermissionPolicy` to fail-closed (`RiskTier::Block`) on empty action names.
+    - Verified by 62 C++ assertions in `tests/test_assistant_backend.cpp` (all 5 CTest targets pass with 264 total assertions).
+  - `integrations/contract.py` (Shared Python Contract):
+    - Implemented `validate_loopback_url()`: strictly validates scheme, rejects embedded credentials, parses hostname via `urlsplit().hostname` with exact membership in `{"127.0.0.1", "localhost", "::1"}`, and enforces port range [1, 65535].
+    - Implemented `NoRedirectHandler` subclassing `urllib.request.HTTPRedirectHandler` rejecting HTTP status codes 301, 302, 303, 307, 308 fail-closed.
+    - Implemented `safe_urlopen()` applying both loopback validation and redirect blocking.
+    - Sanitizes sensitive tokens, API keys, passwords, and URL-embedded credentials in `sanitize_sensitive_data()`.
+    - Tested by 12 dedicated contract unit tests in `integrations/tests/test_contract.py`.
+  - Adapter Lockdown (`integrations/`):
+    - **OpenClaw:** Enforces `explicit_tool_denial: bool = True` with CLI parameter `--deny-tools *`; caps process output to 1MB; defaults route to `UNKNOWN` unless `verified_local=True` (26 unit tests).
+    - **Dodaios:** Verified against real upstream source `/api/runtime-gateway/v1/chat/completions` and `/api/health`; uses `safe_urlopen`; blocks privileged action names (`computer_use`, `mission`, `shell`, `config`, etc.); defaults route to `UNKNOWN` (20 unit tests).
+    - **Leon:** Pinned to Leon 1.x stable REST API (`/api/v1/query`, `/api/v1/info`) and explicitly rejects 2.x preview; uses `safe_urlopen`; redacts `X-API-Key` headers; defaults route to `UNKNOWN` (21 unit tests).
+    - **OpenVoiceOS:** Clarified voice event bus role; flags mock-only status via `is_mock_only`; blocks system control commands (`shutdown`, `reboot`, `install`, `shell`); enforces broadcast confidentiality guard rejecting credential-laden prompts before bus publication; defaults route to `UNKNOWN` (20 unit tests).
+    - Total: 99 unit tests passing across all integration suites.
+* **Future Intent:** These zero-trust boundaries ensure that any future live integration testing or production invocation of local models occurs within a tightly audited, fail-closed perimeter that preserves user privacy and system integrity.

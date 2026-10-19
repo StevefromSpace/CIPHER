@@ -5,8 +5,8 @@ Verifies:
 2. Blank prompt rejection fail-closed.
 3. Timeout range bounds (1 to 300s).
 4. Tool execution rejection (allow_tools=True).
-5. System control / privileged command rejection (shutdown, reboot).
-6. Loopback binding enforcement.
+5. System control / privileged command rejection (shutdown, reboot, install, shell, metadata flags).
+6. Loopback binding enforcement and user-info credential rejection.
 7. Message envelope construction.
 8. Response correlation via session_id.
 9. Successful mocked speech event resolution.
@@ -15,11 +15,15 @@ Verifies:
 12. Unavailable status when bus is offline.
 13. Socket availability probe.
 14. Broadcast notice present in health status.
+15. Broadcast confidentiality guard: sensitive credentials rejected.
+16. Provenance route defaults to UNKNOWN unless verified.
+17. is_mock_only flag reflects whether live factory is attached.
 """
 
 import json
 import socket
 import unittest
+from typing import Optional
 from unittest.mock import MagicMock, patch
 
 from integrations.contract import (
@@ -58,7 +62,8 @@ class TestOVOSBridge(unittest.TestCase):
             bus_url="ws://127.0.0.1:8181/core",
             language="en-us",
             timeout_seconds=10.0,
-            strict_local=True
+            strict_local=True,
+            verified_local=True,
         )
 
     def test_disabled_by_default(self):
@@ -92,24 +97,50 @@ class TestOVOSBridge(unittest.TestCase):
         self.assertEqual(resp.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
 
     def test_system_control_command_rejection(self):
-        """Verifies privileged system control commands are blocked."""
+        """Verifies privileged system control commands and metadata actions are blocked."""
         bridge = OVOSBridge(self.config)
         resp1 = bridge.submit_prompt(AssistantRequest(prompt="Shutdown the computer now"))
         resp2 = bridge.submit_prompt(AssistantRequest(prompt="Reboot system"))
+        resp3 = bridge.submit_prompt(AssistantRequest(prompt="Tell me the time", metadata={"shell": True}))
+        resp4 = bridge.submit_prompt(AssistantRequest(prompt="Tell me the time", metadata={"computer_use": True}))
+
         self.assertEqual(resp1.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
         self.assertEqual(resp2.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
+        self.assertEqual(resp3.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
+        self.assertEqual(resp4.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
         self.assertIn("blocked", resp1.error.lower())
+
+    def test_broadcast_confidentiality_sensitive_prompt_rejection(self):
+        """Verifies prompts containing credentials are not emitted onto the broadcast messagebus."""
+        bridge = OVOSBridge(self.config)
+        sensitive_prompt = "My api_key: sk-ant-api03-1234567890abcdef please save it"
+        resp = bridge.submit_prompt(AssistantRequest(prompt=sensitive_prompt))
+        self.assertEqual(resp.status, AssistantStatus.INVALID_REQUEST)
+        self.assertIn("sensitive credentials", resp.error.lower())
 
     def test_loopback_binding_enforcement(self):
         """Verifies rejection of non-loopback URLs."""
         remote_cfg = OVOSConfig(
             enabled=True,
-            bus_url="ws://10.200.1.1:8181/core"
+            bus_url="ws://10.200.1.1:8181/core",
+            verified_local=True,
         )
         bridge = OVOSBridge(remote_cfg)
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hi"))
         self.assertEqual(resp.status, AssistantStatus.ERROR)
         self.assertIn("not bound to a loopback address", resp.error.lower())
+
+    def test_userinfo_credentials_in_url_rejected(self):
+        """Verifies rejection of URLs containing credentials."""
+        cred_cfg = OVOSConfig(
+            enabled=True,
+            bus_url="ws://user:secret@127.0.0.1:8181/core",
+            verified_local=True,
+        )
+        bridge = OVOSBridge(cred_cfg)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hi"))
+        self.assertEqual(resp.status, AssistantStatus.ERROR)
+        self.assertIn("user credentials", resp.error.lower())
 
     def test_message_envelope_creation(self):
         """Verifies OVOSMessage envelope structure and context propagation."""
@@ -230,12 +261,36 @@ class TestOVOSBridge(unittest.TestCase):
         """Verifies that parsed hostname prevents spoofed loopback addresses."""
         spoofed_cfg = OVOSConfig(
             enabled=True,
-            bus_url="ws://127.0.0.1.attacker.com:8181/core"
+            bus_url="ws://127.0.0.1.attacker.com:8181/core",
+            verified_local=True,
         )
         bridge = OVOSBridge(spoofed_cfg)
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
         self.assertEqual(resp.status, AssistantStatus.ERROR)
         self.assertIn("not bound to a loopback address", resp.error.lower())
+
+    def test_route_provenance_unknown_by_default(self):
+        """Verifies route provenance defaults to UNKNOWN and fails closed under require_local=True."""
+        unverified_cfg = OVOSConfig(
+            enabled=True,
+            bus_url="ws://127.0.0.1:8181/core",
+            verified_local=False,
+        )
+        bridge = OVOSBridge(unverified_cfg)
+        self.assertEqual(bridge.capabilities.default_route, ProcessingRoute.UNKNOWN)
+
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello", require_local=True))
+        self.assertEqual(resp.status, AssistantStatus.REJECTED_CLOUD_MODEL)
+        self.assertIn("unknown", resp.error.lower())
+
+    def test_is_mock_only_capability(self):
+        """Verifies is_mock_only capability is True without live client factory."""
+        bridge_no_factory = OVOSBridge(self.config)
+        self.assertTrue(bridge_no_factory.capabilities.is_mock_only)
+
+        mock_client = MockBusClient()
+        bridge_with_factory = OVOSBridge(self.config, bus_client_factory=lambda: mock_client)
+        self.assertFalse(bridge_with_factory.capabilities.is_mock_only)
 
 
 if __name__ == "__main__":

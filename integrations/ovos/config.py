@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 from typing import Optional, Tuple
 
+from integrations.contract import validate_loopback_url
+
 
 @dataclass
 class OVOSConfig:
@@ -31,6 +33,9 @@ class OVOSConfig:
     # Local-first enforcement
     strict_local: bool = True
 
+    # Provenance verification: False until verified local runtime confirmed
+    verified_local: bool = False
+
     # Default identifier
     default_model: str = "local/ovos-intent"
 
@@ -38,13 +43,9 @@ class OVOSConfig:
     broadcast_privacy_acknowledged: bool = True
 
     def validate_bus_url(self) -> Tuple[bool, Optional[str]]:
-        """Ensures messagebus communication is strictly bound to loopback using parsed hostname."""
-        try:
-            import urllib.parse
-            parsed = urllib.parse.urlsplit(self.bus_url)
-            hostname = (parsed.hostname or "").lower()
-            if hostname not in ("127.0.0.1", "localhost", "::1"):
-                return False, f"OVOS Messagebus URL '{self.bus_url}' host '{hostname}' is not bound to a loopback address (127.0.0.1, localhost, ::1)."
-            return True, None
-        except Exception as e:
-            return False, f"Invalid OVOS Messagebus URL: {e}"
+        """Ensures messagebus communication is strictly bound to loopback using shared validator."""
+        return validate_loopback_url(
+            self.bus_url,
+            allowed_schemes=("ws", "wss"),
+            description="OVOS Messagebus URL"
+        )
