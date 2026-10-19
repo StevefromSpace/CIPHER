@@ -42,11 +42,18 @@ class OpenClawConfig:
     enforce_minimal_tool_profile: bool = True
 
     # Explicit tool denial verification: 'minimal' alone still includes presence, session_status, gateway.
-    # explicit_tool_denial must be True to guarantee fail-closed tool isolation without modifying global config.
+    # explicit_tool_denial must be True to guarantee fail-closed tool isolation.
     explicit_tool_denial: bool = True
 
-    # Arguments passed to enforce explicit tool denial on CLI without modifying global configuration
-    tool_denial_args: Tuple[str, ...] = ("--deny-tools", "*")
+    # Tool denial patterns written to the isolated configuration (tools.deny schema)
+    tool_deny_patterns: Tuple[str, ...] = ("*",)
+
+    # Force isolated configuration and state directory (OPENCLAW_CONFIG_PATH / OPENCLAW_STATE_DIR)
+    # to prevent inheriting or mutating ambient global configuration (~/.openclaw/config.json).
+    enforce_isolated_config: bool = True
+
+    # Maximum stdout/stderr output bytes collected from subprocess
+    max_output_bytes: int = 1048576
 
     # Flag indicating whether local execution has been independently verified (default False -> UNKNOWN route)
     verified_local: bool = False
@@ -133,10 +140,16 @@ class OpenClawConfig:
                 "Only the isolated 'minimal' profile with explicit tool denial is permitted by CIPHER policy."
             )
 
-        if not self.explicit_tool_denial:
+        if not self.explicit_tool_denial or "*" not in self.tool_deny_patterns:
             return False, (
                 "OpenClaw profile 'minimal' alone does not guarantee tool lockdown (it permits internal "
-                "discovery and gateway tools). Explicit tool denial (explicit_tool_denial=True) is required."
+                "discovery and gateway tools). Explicit tool denial with '*' pattern is required."
+            )
+
+        if not self.enforce_isolated_config:
+            return False, (
+                "OpenClaw execution must use an isolated configuration (enforce_isolated_config=True) "
+                "to prevent inheriting arbitrary tools or settings from ambient global configuration."
             )
 
         return True, None

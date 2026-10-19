@@ -2,22 +2,24 @@
 
 Verifies:
 1. Disabled state handling.
-2. Blank prompt rejection fail-closed.
-3. Timeout range bounds (1 to 300s).
-4. Cloud model rejection under strict_local.
-5. Tool execution rejection (allow_tools=True).
-6. Loopback binding enforcement and user-info rejection.
-7. Successful response extraction (output.speech / output.text / direct text).
-8. Connection error mapping.
-9. Authentication error mapping (HTTP 401/403).
-10. Request timeout handling.
-11. Malformed JSON handling.
-12. Sensitive API key and token masking.
-13. Health probe availability check and redirect refusal.
-14. Version compatibility (1.x stable vs 2.x developer preview rejection).
-15. Strict redirect refusal fail-closed (safe_urlopen / NoRedirectHandler).
-16. Provenance route defaults to UNKNOWN unless verified.
-17. Response body size limit bounding (1MB max).
+2. Tool/skill isolation fail-closed policy (live execution disabled by default).
+3. Blank prompt rejection fail-closed.
+4. Timeout range bounds (1 to 300s).
+5. Cloud model rejection under strict_local.
+6. Tool execution rejection (allow_tools=True).
+7. Loopback binding enforcement and user-info rejection.
+8. Successful response extraction (output.speech / output.text / direct text).
+9. Connection error mapping.
+10. Authentication error mapping (HTTP 401/403).
+11. Request timeout handling.
+12. Malformed JSON handling.
+13. Sensitive API key and token masking.
+14. Health probe availability check and redirect refusal.
+15. Version compatibility (1.x stable vs 2.x developer preview rejection).
+16. Strict redirect refusal fail-closed (safe_urlopen / NoRedirectHandler).
+17. Provenance route defaults to UNKNOWN unless verified.
+18. Response body size limit bounding (bounded reading aborts and terminates stream).
+19. Error body size limit bounding (bounded reading of HTTPError.fp).
 """
 
 import io
@@ -37,6 +39,24 @@ from integrations.leon.bridge import LeonBridge
 from integrations.leon.config import LeonConfig
 
 
+class ChunkStream(io.BytesIO):
+    """Test stream that records bytes read and close calls to prove bounded reads."""
+
+    def __init__(self, data: bytes):
+        super().__init__(data)
+        self.bytes_read = 0
+        self.closed_called = False
+
+    def read(self, size=-1):
+        chunk = super().read(size)
+        self.bytes_read += len(chunk)
+        return chunk
+
+    def close(self):
+        self.closed_called = True
+        super().close()
+
+
 class TestLeonBridge(unittest.TestCase):
     """Test suite covering Leon integration constraints and security gates."""
 
@@ -49,6 +69,7 @@ class TestLeonBridge(unittest.TestCase):
             timeout_seconds=10.0,
             strict_local=True,
             verified_local=True,
+            enable_live_execution=True,  # Enabled specifically for mocked transport tests
         )
 
     def test_disabled_by_default(self):
@@ -58,6 +79,20 @@ class TestLeonBridge(unittest.TestCase):
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
         self.assertEqual(resp.status, AssistantStatus.DISABLED)
         self.assertFalse(bridge.is_available())
+
+    def test_tool_isolation_unproven_disables_live_execution_fail_closed(self):
+        """Verifies that default config without proven tool isolation disables execution."""
+        safe_cfg = LeonConfig(
+            enabled=True,
+            api_url="http://127.0.0.1:1337",
+            default_model="local/default",
+            enable_live_execution=False,  # Default
+        )
+        bridge = LeonBridge(safe_cfg)
+        self.assertFalse(bridge.is_available())
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.UNAVAILABLE)
+        self.assertIn("tool/skill isolation cannot be proven", resp.error.lower())
 
     def test_blank_prompt_rejection(self):
         """Verifies empty or whitespace prompts fail closed."""
@@ -95,6 +130,7 @@ class TestLeonBridge(unittest.TestCase):
             api_url="http://10.0.0.5:1337",
             default_model="local/default",
             verified_local=True,
+            enable_live_execution=True,
         )
         bridge = LeonBridge(remote_cfg)
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hi"))
@@ -104,14 +140,14 @@ class TestLeonBridge(unittest.TestCase):
     @patch("integrations.leon.bridge.safe_urlopen")
     def test_successful_mocked_completion_speech(self, mock_urlopen):
         """Verifies extraction of output.speech from Leon response."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = json.dumps({
+        data = json.dumps({
             "action": "greeting",
             "output": {
                 "speech": "Hello! I am Leon running locally.",
                 "text": "Hello! I am Leon running locally."
             }
         }).encode("utf-8")
+        mock_resp = ChunkStream(data)
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         bridge = LeonBridge(self.config)
@@ -128,10 +164,10 @@ class TestLeonBridge(unittest.TestCase):
     @patch("integrations.leon.bridge.safe_urlopen")
     def test_successful_mocked_completion_direct_text(self, mock_urlopen):
         """Verifies extraction of direct text/reply fields."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = json.dumps({
+        data = json.dumps({
             "reply": "Leon direct text response."
         }).encode("utf-8")
+        mock_resp = ChunkStream(data)
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         bridge = LeonBridge(self.config)
@@ -153,12 +189,13 @@ class TestLeonBridge(unittest.TestCase):
     @patch("integrations.leon.bridge.safe_urlopen")
     def test_auth_failure(self, mock_urlopen):
         """Verifies HTTP 401 maps to AUTH_ERROR."""
+        err_stream = ChunkStream(b'{"message":"Unauthorized: Invalid API key"}')
         mock_err = urllib.error.HTTPError(
             url="http://127.0.0.1:1337/api/v1/query",
             code=401,
             msg="Unauthorized",
             hdrs={},
-            fp=io.BytesIO(b'{"message":"Unauthorized: Invalid API key"}')
+            fp=err_stream
         )
         mock_urlopen.side_effect = mock_err
 
@@ -166,6 +203,7 @@ class TestLeonBridge(unittest.TestCase):
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hi"))
         self.assertEqual(resp.status, AssistantStatus.AUTH_ERROR)
         self.assertIn("401", resp.error)
+        self.assertTrue(err_stream.closed_called)
 
     @patch("integrations.leon.bridge.safe_urlopen")
     def test_redirect_rejection(self, mock_urlopen):
@@ -175,7 +213,7 @@ class TestLeonBridge(unittest.TestCase):
             code=301,
             msg="Automatic HTTP redirect (301) to 'http://attacker.com' is blocked for security.",
             hdrs={},
-            fp=io.BytesIO(b'')
+            fp=ChunkStream(b'')
         )
         mock_urlopen.side_effect = mock_err
 
@@ -197,8 +235,7 @@ class TestLeonBridge(unittest.TestCase):
     @patch("integrations.leon.bridge.safe_urlopen")
     def test_malformed_json_response(self, mock_urlopen):
         """Verifies invalid JSON is handled gracefully."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = b"<html>500 Internal Error</html>"
+        mock_resp = ChunkStream(b"<html>500 Internal Error</html>")
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         bridge = LeonBridge(self.config)
@@ -218,9 +255,8 @@ class TestLeonBridge(unittest.TestCase):
     @patch("integrations.leon.bridge.safe_urlopen")
     def test_is_available_probing(self, mock_urlopen):
         """Verifies is_available queries info endpoint without following redirects."""
-        mock_resp = MagicMock()
+        mock_resp = ChunkStream(json.dumps({"version": "1.0.0"}).encode("utf-8"))
         mock_resp.status = 200
-        mock_resp.read.return_value = json.dumps({"version": "1.0.0"}).encode("utf-8")
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         bridge = LeonBridge(self.config)
@@ -235,9 +271,8 @@ class TestLeonBridge(unittest.TestCase):
     @patch("integrations.leon.bridge.safe_urlopen")
     def test_is_available_rejects_developer_preview_2x(self, mock_urlopen):
         """Verifies is_available rejects unstable Leon 2.0 developer preview."""
-        mock_resp = MagicMock()
+        mock_resp = ChunkStream(json.dumps({"version": "2.0.0-preview.1"}).encode("utf-8"))
         mock_resp.status = 200
-        mock_resp.read.return_value = json.dumps({"version": "2.0.0-preview.1"}).encode("utf-8")
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         bridge = LeonBridge(self.config)
@@ -260,6 +295,7 @@ class TestLeonBridge(unittest.TestCase):
             api_url="http://127.0.0.1.attacker.com:1337",
             default_model="local/default",
             verified_local=True,
+            enable_live_execution=True,
         )
         bridge = LeonBridge(spoofed_cfg)
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
@@ -273,6 +309,7 @@ class TestLeonBridge(unittest.TestCase):
             api_url="http://user:secret@127.0.0.1:1337",
             default_model="local/default",
             verified_local=True,
+            enable_live_execution=True,
         )
         bridge = LeonBridge(cred_cfg)
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
@@ -286,6 +323,7 @@ class TestLeonBridge(unittest.TestCase):
             api_url="http://127.0.0.1:1337",
             default_model="local/default",
             verified_local=False,
+            enable_live_execution=True,
         )
         bridge = LeonBridge(unverified_cfg)
         self.assertEqual(bridge.capabilities.default_route, ProcessingRoute.UNKNOWN)
@@ -295,16 +333,37 @@ class TestLeonBridge(unittest.TestCase):
         self.assertIn("unknown", resp.error.lower())
 
     @patch("integrations.leon.bridge.safe_urlopen")
-    def test_response_size_limit_exceeded(self, mock_urlopen):
-        """Verifies response exceeding 1MB is rejected fail-closed."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = b"x" * (1048576 + 50)
-        mock_urlopen.return_value.__enter__.return_value = mock_resp
+    def test_bounded_response_size_terminates_promptly(self, mock_urlopen):
+        """Verifies response exceeding 1MB terminates during stream reading and closes stream."""
+        stream = ChunkStream(b"x" * (1048576 + 500000))
+        mock_urlopen.return_value.__enter__.return_value = stream
 
         bridge = LeonBridge(self.config)
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
         self.assertEqual(resp.status, AssistantStatus.ERROR)
         self.assertIn("maximum permitted byte limit", resp.error.lower())
+        self.assertTrue(stream.closed_called)
+        self.assertLessEqual(stream.bytes_read, 1048576 + 1)
+
+    @patch("integrations.leon.bridge.safe_urlopen")
+    def test_bounded_error_body_terminates_promptly(self, mock_urlopen):
+        """Verifies oversized HTTP error body terminates during stream reading and closes stream."""
+        err_stream = ChunkStream(b"E" * 102400)
+        mock_err = urllib.error.HTTPError(
+            url="http://127.0.0.1:1337/api/v1/query",
+            code=500,
+            msg="Internal Error",
+            hdrs={},
+            fp=err_stream
+        )
+        mock_urlopen.side_effect = mock_err
+
+        bridge = LeonBridge(self.config)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.ERROR)
+        self.assertIn("exceeded 4096 bytes", resp.error)
+        self.assertTrue(err_stream.closed_called)
+        self.assertLessEqual(err_stream.bytes_read, 4096 + 1)
 
 
 if __name__ == "__main__":

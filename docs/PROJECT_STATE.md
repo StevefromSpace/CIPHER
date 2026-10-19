@@ -12,8 +12,13 @@ This document is the authoritative summary of CIPHER's verified state. It provid
   * **Subject:** `fix: centralize application version reporting`
   * **Scope:** Full C++17 core, configuration parser, leveled diagnostic logger, CMake centralized versioning (`version.hpp`), and comprehensive test suites.
 * **v0.3 Persistent Memory & Pipeline Extension:** Incorporates standalone `cipher_memory` persistent storage subsystem and the Dual-Claude developer automation pipeline (`tools/pipeline`).
-* **v0.4 Assistant Interoperability, Source Intelligence & Hardening Gate:** Incorporates C++17 replaceable assistant interface (`IAssistantBackend`), risk-tiered permission policy (`RiskTier`, `PermissionPolicy`), context budget byte bounding (`ContextBudget`), message event envelopes (`EventMessage`), hardened decoupled adapters (`integrations/` for OpenClaw, Dodaios, Leon, OpenVoiceOS), and completed Operation Hardening Gate (fail-closed loopback validation, HTTP redirect blocking, OpenClaw explicit tool denial, UNKNOWN route provenance defaulting, upstream endpoint verification, broadcast confidentiality guards, safe string trimming, zero-budget bounding).
-* **Working Tree:** Controlled research branch state with verified C++ core enhancements, full CTest suite, and adapter tests passing 100%.
+* **v0.4 Assistant Interoperability, Source Intelligence & Hardening Gates 1 & 2:** Incorporates C++17 replaceable assistant interface (`IAssistantBackend`), risk-tiered permission policy (`RiskTier`, `PermissionPolicy`), context budget byte bounding (`ContextBudget`), message event envelopes (`EventMessage`), hardened decoupled adapters (`integrations/` for OpenClaw, Dodaios, Leon, OpenVoiceOS), and completed Operation Hardening Gate 2:
+  - Reusable bounded I/O primitive (`read_bounded`) halting stream consumption at `max_bytes + 1` and aborting/closing streams immediately.
+  - Genuine OpenClaw tool isolation via isolated temporary configuration schema (`tools: {profile: "minimal", deny: ["*"]}`), environment variable binding (`OPENCLAW_CONFIG_PATH`, `OPENCLAW_STATE_DIR`, `OPENCLAW_GATEWAY_URL`, `OPENCLAW_PROFILE`), and bounded subprocess streaming killing processes on limit breach.
+  - Alignment of Dodaios contract as an agent-runtime gateway proxy with unverified live compatibility and bounded response/error body streams.
+  - Fail-closed tool isolation boundary for Leon, disabling live execution while safe text-only mode cannot be established.
+  - Defensible boundary for OpenVoiceOS removing keyword denylists, keeping general assistant submission mock-only/unavailable, and requiring explicit `session_id` response correlation.
+* **Working Tree:** Controlled research branch state with verified C++ core enhancements, full CTest suite, and 115 adapter tests passing 100%.
 
 ---
 
@@ -221,8 +226,8 @@ CTest registers 5 distinct test binaries, covering 75 test functions/cases and 2
 | `cipher_memory_tests` | `tests/test_memory.cpp` | 14 functions | 97 (94 on POSIX) | Missing/empty storage, CRUD round-trips, unicode/multilingual, validation/duplicate handling, corrupt storage line reporting, unsupported schema versions, v0->v1 migration, atomic write failure recovery, repeatable save/load, Windows existing file replacement & locked destination preservation, lossless whitespace, category validation, entry count mismatch, stoi overflow safety |
 | `cipher_assistant_tests` | `tests/test_assistant_backend.cpp` | 14 functions | 62 | Replaceable assistant interface, central request validation, blank prompt rejection, timeout bounds, non-finite float rejection, tool execution lockdown, local route verification, zero budget rejection, RiskTier, PermissionPolicy priority, ContextBudget prompt byte bounding, EventMessage wire envelope, mock backend |
 | **Total (CTest)** | | **75 cases/functions** | **264 assertions (97 memory, 62 assistant)** | **All 5 test targets pass (100%)** |
-| `pipeline_unit_tests` | `tools/pipeline/tests/` | 49 test cases | 49 | Verifier, Git manager, Job store, MCP server, Orchestrator, Reviewer adapter |
-| `assistant_integrations_tests` | `integrations/` | 99 test cases | 99 | Contract (12), OpenClaw (26), Dodaios (20), Leon (21), OpenVoiceOS (20) |
+| `pipeline_unit_tests` | `tools/pipeline/tests/` | 46 test cases | 45 passing (1 error: optional `mcp` library not installed in standard environment) | Verifier, Git manager, Job store, MCP server, Orchestrator, Reviewer adapter |
+| `assistant_integrations_tests` | `integrations/` | 115 test cases | 115 passing (100%) | Contract (22), OpenClaw (29), Dodaios (21), Leon (23), OpenVoiceOS (20) |
 
 
 ---

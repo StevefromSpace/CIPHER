@@ -2,7 +2,13 @@
 
 Implements the request/response bridge via Dodaios Control REST API,
 enforcing loopback network binding, local-first isolation, least-privileged text interaction,
-and strict rejection of computer use or mission dispatch.
+bounded I/O on all HTTP streams, and strict rejection of computer use or mission dispatch.
+
+Notice on Runtime Gateway and Tool Boundaries:
+The Dodaios runtime gateway (/api/runtime-gateway/v1/chat/completions) is designed for
+agent-runtime model calls and can proxy to tools, functions, or external providers upstream.
+It is NOT a verified no-tools endpoint. In the absence of a live, verified local Dodaios
+instance, live compatibility is explicitly classified as UNVERIFIED.
 """
 
 from datetime import datetime
@@ -21,8 +27,10 @@ from integrations.contract import (
     AssistantResponse,
     AssistantStatus,
     BaseAssistantBackend,
-    ProcessingRoute,
     NoRedirectHandler,
+    ProcessingRoute,
+    ResponseTooLargeError,
+    read_bounded,
     safe_urlopen,
     sanitize_sensitive_data,
     validate_assistant_request,
@@ -42,8 +50,9 @@ class DodaiosBridge(BaseAssistantBackend):
 
         Route provenance:
         External REST service over loopback. Loopback binding does not prove
-        the runtime is not forwarding upstream to proprietary cloud models.
+        the runtime is not forwarding upstream to proprietary cloud models or tools.
         Route defaults to UNKNOWN unless verified_local is True.
+        Without a live local test deployment, live compatibility is unverified.
         """
         route = ProcessingRoute.VERIFIED_LOCAL if self.config.verified_local else ProcessingRoute.UNKNOWN
         return AssistantCapabilities(
@@ -74,6 +83,11 @@ class DodaiosBridge(BaseAssistantBackend):
                 req.add_header("Authorization", f"Bearer {self.config.api_key}")
 
             with safe_urlopen(req, timeout=2.0) as resp:
+                # Bounded read to avoid hanging on oversized health payload
+                try:
+                    read_bounded(resp, max_bytes=1024)
+                except Exception:
+                    pass
                 return resp.status == 200
         except Exception:
             return False
@@ -89,6 +103,7 @@ class DodaiosBridge(BaseAssistantBackend):
             "strict_local": self.config.strict_local,
             "timeout_seconds": self.config.timeout_seconds,
             "route": self.capabilities.default_route.value,
+            "live_compatibility": "verified" if self.config.verified_local else "unverified",
         }
 
     def _sanitize_error(self, message: str) -> str:
@@ -101,9 +116,9 @@ class DodaiosBridge(BaseAssistantBackend):
         Guarantees:
         - Central policy validation (blank prompt, timeout, tool lockdown, local route).
         - Rejects immediately if integration is disabled.
-        - Rejects privileged computer use or mission dispatch requests.
+        - Rejects privileged computer use, mission dispatch, or tool execution.
         - Restricts communication strictly to loopback addresses.
-        - Communicates via least-privileged OpenAPI chat/query endpoint.
+        - Enforces bounded stream consumption during I/O on both success and error responses.
         - Sanitizes all errors and credentials.
         """
         start_time = time.perf_counter()
@@ -130,15 +145,16 @@ class DodaiosBridge(BaseAssistantBackend):
                 route=self.capabilities.default_route,
             )
 
-        # 4. Gate: Rejection of computer use, mission dispatch, shell execution, config mutation, or installation
+        # 4. Gate: Rejection of computer use, mission dispatch, shell execution, config mutation, tools or installation
         blocked_actions = (
             "computer_use", "mission", "execute", "shell", "config", "install",
-            "mission_dispatch", "shell_execution", "config_mutation", "installation"
+            "mission_dispatch", "shell_execution", "config_mutation", "installation",
+            "tools", "functions", "tool_choice"
         )
         if any(request.metadata.get(act) for act in blocked_actions):
             return AssistantResponse(
                 status=AssistantStatus.REJECTED_TOOLS_ENABLED,
-                error="Privileged actions (computer use, mission dispatch, shell execution, config mutation, installation) are strictly blocked in Dodaios adapter.",
+                error="Privileged actions (computer use, mission dispatch, shell execution, config mutation, installation, tools) are strictly blocked in Dodaios adapter.",
                 route=self.capabilities.default_route,
             )
 
@@ -181,23 +197,23 @@ class DodaiosBridge(BaseAssistantBackend):
         if self.config.api_key:
             http_req.add_header("Authorization", f"Bearer {self.config.api_key}")
 
-        # 7. Execute HTTP request with timeout and redirect rejection
+        # 7. Execute HTTP request with timeout, redirect rejection, and bounded stream collection
         try:
             with safe_urlopen(http_req, timeout=timeout) as response:
                 duration_ms = (time.perf_counter() - start_time) * 1000.0
-                raw_body = response.read().decode("utf-8")
 
-                # Enforce output size bounding (1MB)
-                max_output_bytes = 1048576
-                if len(raw_body.encode("utf-8", errors="replace")) > max_output_bytes:
+                try:
+                    raw_bytes = read_bounded(response, max_bytes=self.config.max_output_bytes)
+                except ResponseTooLargeError:
                     return AssistantResponse(
                         status=AssistantStatus.ERROR,
                         model=model,
                         route=self.capabilities.default_route,
                         duration_ms=duration_ms,
-                        error=f"Dodaios response exceeded maximum permitted byte limit ({max_output_bytes} bytes)."
+                        error=f"Dodaios response exceeded maximum permitted byte limit ({self.config.max_output_bytes} bytes)."
                     )
 
+                raw_body = raw_bytes.decode("utf-8", errors="replace")
                 if not raw_body.strip():
                     return AssistantResponse(
                         status=AssistantStatus.ERROR,
@@ -208,7 +224,6 @@ class DodaiosBridge(BaseAssistantBackend):
                     )
 
                 data = json.loads(raw_body)
-                # Parse OpenAI-compatible or Dodaios response shape
                 reply_text = ""
                 if isinstance(data, dict):
                     if "choices" in data and len(data["choices"]) > 0:
@@ -246,11 +261,24 @@ class DodaiosBridge(BaseAssistantBackend):
         except urllib.error.HTTPError as he:
             duration_ms = (time.perf_counter() - start_time) * 1000.0
             raw_err = ""
-            if hasattr(he, "read"):
+            if hasattr(he, "fp") and he.fp is not None:
                 try:
-                    raw_err = he.read().decode("utf-8", errors="replace")
+                    err_bytes = read_bounded(he.fp, max_bytes=self.config.max_error_bytes)
+                    raw_err = err_bytes.decode("utf-8", errors="replace")
+                except ResponseTooLargeError:
+                    raw_err = f"[Error response body exceeded {self.config.max_error_bytes} bytes]"
                 except Exception:
                     pass
+                finally:
+                    try:
+                        he.close()
+                    except Exception:
+                        pass
+                    try:
+                        if hasattr(he, "fp") and he.fp is not None:
+                            he.fp.close()
+                    except Exception:
+                        pass
             if not raw_err.strip():
                 raw_err = str(getattr(he, "msg", "") or getattr(he, "reason", "") or he)
             raw_err = self._sanitize_error(raw_err)

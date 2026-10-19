@@ -1,7 +1,12 @@
 """CIPHER — OpenVoiceOS (OVOS) Message Protocol.
 
 Defines the standard OVOS messagebus envelope structure, session context,
-and response correlation logic.
+and explicit response correlation logic.
+
+Notice on Destination Semantics:
+The 'recognizer_loop:utterance' message sets destination: ['skills'], routing
+utterances to active OVOS skills that can trigger actions on the host OS.
+This route cannot be treated as a passive, tool-free text endpoint.
 """
 
 from dataclasses import dataclass, field
@@ -43,7 +48,10 @@ class OVOSMessage:
         session_id: Optional[str] = None,
         lang: str = "en-us"
     ) -> "OVOSMessage":
-        """Builds a recognizer_loop:utterance envelope for intent processing."""
+        """Builds a recognizer_loop:utterance envelope for intent processing.
+
+        Notice: destination is explicitly ['skills'], routing to active OVOS skills.
+        """
         sid = session_id or f"cipher-session-{uuid.uuid4().hex[:12]}"
         return cls(
             type="recognizer_loop:utterance",
@@ -60,13 +68,20 @@ class OVOSMessage:
         )
 
     def is_correlated_response_to(self, request_msg: "OVOSMessage") -> bool:
-        """Determines if this message is a correlated response to a sent request."""
-        # Check matching session_id in context
-        req_session = request_msg.context.get("session_id")
-        resp_session = self.context.get("session_id")
+        """Determines if this message is an explicitly correlated response to a sent request.
 
-        if req_session and resp_session and req_session == resp_session:
-            return self.type in ("speak", "ovos.utterance.handled", "complete_intent_failure")
+        Requires:
+        1. Both messages have valid context dictionaries.
+        2. Both messages have non-empty, exactly matching session_id fields.
+        3. Response type is an expected intent/speech response event.
+        """
+        if not isinstance(request_msg, OVOSMessage):
+            return False
 
-        # Fallback check on target or source
-        return False
+        req_session = request_msg.context.get("session_id") if isinstance(request_msg.context, dict) else None
+        resp_session = self.context.get("session_id") if isinstance(self.context, dict) else None
+
+        if not req_session or not resp_session or req_session != resp_session:
+            return False
+
+        return self.type in ("speak", "ovos.utterance.handled", "complete_intent_failure")

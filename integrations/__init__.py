@@ -17,6 +17,8 @@ from .contract import (
     AssistantStatus,
     BaseAssistantBackend,
     ProcessingRoute,
+    ResponseTooLargeError,
+    read_bounded,
     sanitize_sensitive_data,
     validate_assistant_request,
 )
@@ -33,6 +35,8 @@ __all__ = [
     "AssistantStatus",
     "BaseAssistantBackend",
     "ProcessingRoute",
+    "ResponseTooLargeError",
+    "read_bounded",
     "sanitize_sensitive_data",
     "validate_assistant_request",
     # Adapters & Configs

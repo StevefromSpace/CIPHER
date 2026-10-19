@@ -97,11 +97,15 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
 - [x] Operation Hardening Gate (Six-Agent Security & Isolation Sprint):
   * C++ Safe String Trimming & Zero Prompt Budget Bounding: Replaced unsafe reverse iterator decrement in `trim_string` with safe `find_first_not_of`/`find_last_not_of`; enforced zero-budget fail-closed bounding; empty action names fail-closed to `RiskTier::Block` (62 CTest assertions, 100% passing).
   * Shared Loopback & Redirect Contract: Validated scheme, stripped credentials, port range check, fail-closed `NoRedirectHandler` (codes 301, 302, 303, 307, 308) via `safe_urlopen()`, and sensitive token scrubbing (12 contract unit tests).
-  * OpenClaw Lockdown: Enforced `explicit_tool_denial=True` with CLI parameter `--deny-tools *`; capped output to 1MB; defaulted route provenance to `UNKNOWN` (26 unit tests).
-  * Dodaios Upstream Verification: Switched to verified `/api/runtime-gateway/v1/chat/completions` endpoint and `/api/health`; blocked privileged actions; defaulted route provenance to `UNKNOWN` (20 unit tests).
-  * Leon Version Pinning: Pinned stable 1.x REST API (`/api/v1/query`, `/api/v1/info`) and rejected 2.x preview; sanitized API keys; defaulted route provenance to `UNKNOWN` (21 unit tests).
-  * OpenVoiceOS Safety Boundary: Documented voice event bus role; added mock-only flag check (`is_mock_only`); filtered system commands; added broadcast confidentiality guard against credential leakage; defaulted route provenance to `UNKNOWN` (20 unit tests).
-- [x] Test Suite Expansion: 5 CTest targets (75 cases, 264 assertions, 100% passing), 99 adapter unit tests (100% passing), 49 pipeline unit tests (100% passing).
+  * OpenClaw Lockdown: Audited CLI, replaced unverified `--deny-tools` with isolated config (`tools: {profile: "minimal", deny: ["*"]}`) and environment binding; bounded streaming subprocess execution.
+  * Dodaios Upstream Verification: Classified runtime gateway endpoint as an agent-runtime gateway proxy with unverified live compatibility; bounded success and error body streams.
+  * Leon Tool Isolation Boundary: Pinned stable 1.x REST API; disabled live execution fail-closed due to unproven tool-free query path; bounded success and error streams.
+  * OpenVoiceOS Safety Boundary: Enforced mock-only assistant submission boundary; explicit session correlation on response frames; best-effort confidentiality notice.
+- [x] Operation Hardening Gate 2 (Bounded I/O and Effective Isolation):
+  * Bounded I/O Primitive: Created reusable `read_bounded()` stopping at `max_bytes + 1` with immediate stream abort and close.
+  * Authentic Tool Lockdown: Verified OpenClaw Commander options, implemented isolated config generation, bound loopback Gateway, and streamed process I/O with kill on limit breach.
+  * Downstream Boundaries: Classified Dodaios runtime gateway as agent-runtime model call endpoint; enforced fail-closed tool isolation policy for Leon; enforced mock-only safety boundary for OVOS skills dispatch with explicit correlation.
+  * Test Suite Expansion: 5 CTest targets (75 cases, 264 assertions, 100% passing), 115 adapter unit tests (100% passing), 45 pipeline unit tests passing (100% pass rate).
 - [x] Configure dedicated CI test job for assistant integrations and developer pipeline.
 - [ ] Prototype direct in-process local runtime adapter (e.g., `llama.cpp` or embedded model) when local inference milestone begins.
 - [ ] Keep the core useful when no model or assistant is available.

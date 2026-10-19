@@ -1,7 +1,14 @@
 """CIPHER — Leon Integration Configuration.
 
 Enforces local-first constraints, loopback network binding, rejection of cloud models,
-and version pinning (Leon 1.x stable vs unstable 2.0 developer preview).
+version pinning (Leon 1.x stable vs unstable 2.0 developer preview), and tool/skill
+isolation verification.
+
+Notice on Tool/Skill Boundaries:
+Upstream Leon's /api/v1/query endpoint dispatches utterances to skill actions ('run-action')
+on the host operating system. Because Leon does not provide a proven text-only or tool-isolated
+execution mode, tool/skill isolation cannot be proven. Under CIPHER safety policy, live
+execution is disabled and unavailable by default (enable_live_execution=False).
 """
 
 from dataclasses import dataclass, field
@@ -34,6 +41,10 @@ class LeonConfig:
     # Provenance verification: False until verified local runtime confirmed
     verified_local: bool = False
 
+    # Live execution enablement: False by default because Leon /api/v1/query
+    # dispatches to host skill actions and cannot prove tool-free text isolation.
+    enable_live_execution: bool = False
+
     # Profile API Key / Auth token (loaded from env, never hardcoded)
     api_key: Optional[str] = field(
         default_factory=lambda: os.environ.get("CIPHER_LEON_API_KEY")
@@ -47,6 +58,12 @@ class LeonConfig:
 
     # Local-first enforcement
     strict_local: bool = True
+
+    # Maximum response body bytes to read from stream (1MB default)
+    max_output_bytes: int = 1048576
+
+    # Maximum error body bytes to read from HTTP error stream (4KB default)
+    max_error_bytes: int = 4096
 
     # Permitted local provider prefixes
     allowed_local_prefixes: Tuple[str, ...] = (
@@ -74,6 +91,22 @@ class LeonConfig:
         "fireworks",
         "deepseek-cloud",
     )
+
+    def is_tool_policy_safe(self) -> Tuple[bool, Optional[str]]:
+        """Verifies whether Leon execution can guarantee tool/skill isolation.
+
+        Leon's /api/v1/query route dispatches utterances directly to skill actions
+        (run-action) on the host operating system. Because Leon provides no mechanism
+        for a pure text-only or isolated execution mode, tool/skill isolation CANNOT
+        be proven. Under CIPHER safety policy, live execution is disabled fail-closed.
+        """
+        if not self.enable_live_execution:
+            return False, (
+                "Leon tool/skill isolation cannot be proven: /api/v1/query dispatches "
+                "to arbitrary host skill actions. Safe text-only mode cannot be established. "
+                "Live execution is disabled under CIPHER safety policy."
+            )
+        return True, None
 
     def is_model_local(self, model_name: str) -> Tuple[bool, Optional[str]]:
         """Validates whether a model specification is strictly local-first."""

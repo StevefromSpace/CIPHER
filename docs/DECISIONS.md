@@ -207,3 +207,43 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
     - **OpenVoiceOS:** Clarified voice event bus role; flags mock-only status via `is_mock_only`; blocks system control commands (`shutdown`, `reboot`, `install`, `shell`); enforces broadcast confidentiality guard rejecting credential-laden prompts before bus publication; defaults route to `UNKNOWN` (20 unit tests).
     - Total: 99 unit tests passing across all integration suites.
 * **Future Intent:** These zero-trust boundaries ensure that any future live integration testing or production invocation of local models occurs within a tightly audited, fail-closed perimeter that preserves user privacy and system integrity.
+
+---
+
+### 15. Operation Hardening Gate 2: Bounded I/O Primitives, Genuine Tool Lockdown, and Downstream Safety Boundaries
+
+* **Status:** Accepted (Operation Hardening Gate 2, Milestone v0.4)
+* **Principle:** Bounded I/O limits must be enforced during stream consumption, not after unbounded buffering into memory. Tool denial mechanisms must reflect authentic upstream contracts rather than unverified CLI flags. When downstream assistants execute host actions without a guaranteed pure text mode, live execution must remain disabled and unavailable fail-closed.
+* **Rationale:** A security review of Operation Hardening Gate 1 identified four structural vulnerabilities:
+  1. Output size limits in HTTP and subprocess adapters were checked after full unbounded reads (`read()` or `subprocess.run(capture_output=True)`), exposing CIPHER to denial-of-service via memory exhaustion from malicious or runaway local streams.
+  2. OpenClaw Commander CLI has no `--deny-tools` argument; mock tests accepted this string without proving actual tool policy enforcement. Authentic tool lockdown is configured via `openclaw.json` (`tools: { profile: "minimal", deny: ["*"] }`), and ambient user configuration (`~/.openclaw`) was inherited without explicit Gateway URL binding.
+  3. Dodaios's `/api/runtime-gateway/v1/chat/completions` is an agent-runtime gateway designed for model and tool calls; it cannot be characterized as a verified tool-free endpoint, and live compatibility is unverified without a running local deployment.
+  4. Leon's `/api/v1/query` dispatches utterances to skills that execute arbitrary code (`run-action`) on the host; no proven text-only mode exists.
+  5. OpenVoiceOS's `destination: ["skills"]` utterance route dispatches to arbitrary skills; keyword denylists cannot provide safety.
+* **Current Implementation:**
+  - `integrations/contract.py` (Bounded I/O Primitive):
+    - Implemented `read_bounded(stream, max_bytes, chunk_size)` which reads in chunks of `min(chunk_size, max_bytes - total + 1)`.
+    - If total consumed exceeds `max_bytes`, it immediately aborts, calls `stream.close()`, and raises `ResponseTooLargeError`, preventing memory exhaustion.
+    - Verified by 10 dedicated unit tests in `test_contract.py` covering exact limit, 1-byte over limit abort & close, 10MB stream consuming only 1001 bytes, chunked reads, short reads, stream exceptions, and `HTTPError.fp` streams (22 total contract tests).
+  - `integrations/openclaw/` (Genuine Isolation & Bounded Subprocess Streaming):
+    - Replaced unverified `--deny-tools *` with verified isolated configuration schema: writes `openclaw.json` with `"gateway": {"url": self.config.gateway_url}` and `"tools": {"profile": "minimal", "deny": ["*"]}` inside a dedicated temporary directory.
+    - Binds `OPENCLAW_CONFIG_PATH`, `OPENCLAW_STATE_DIR`, `OPENCLAW_GATEWAY_URL`, and `OPENCLAW_PROFILE` in the subprocess environment, preventing ambient global configuration inheritance.
+    - Implemented `_execute_bounded_process()` using `subprocess.Popen` and streaming reader threads running `read_bounded()` on `proc.stdout` and `proc.stderr`.
+    - If output exceeds `max_output_bytes`, the process is terminated/killed immediately and stream consumption ceases.
+    - Verified by 29 unit tests in `test_bridge.py`, including real subprocess tests for bounded streams, process termination, and timeout kill.
+  - `integrations/dodaios/` (Contract Alignment & Bounded Transport):
+    - Explicitly documents `/api/runtime-gateway/v1/chat/completions` as an agent-runtime gateway proxy, not a verified no-tools endpoint.
+    - Classifies live compatibility as unverified (`verified_local=False`, route `UNKNOWN`).
+    - Enforces `read_bounded` on success responses (1MB limit) and `HTTPError.fp` error bodies (4KB limit), closing streams promptly.
+    - Blocks tool/function definitions, computer use, and mission dispatch fail-closed (21 unit tests).
+  - `integrations/leon/` (Tool Isolation Fail-Closed Boundary & Bounded Transport):
+    - Documents that `/api/v1/query` dispatches to host skill actions and safe text-only mode cannot be established.
+    - Enforces tool isolation policy check: live execution is disabled and unavailable fail-closed (`enable_live_execution=False`).
+    - Enforces `read_bounded` on success bodies and `HTTPError.fp` error bodies, closing streams promptly.
+    - Verified by 23 unit tests in `test_bridge.py`.
+  - `integrations/ovos/` (Safety Boundary & Explicit Correlation):
+    - Replaced keyword denylist with structural safety boundary: live utterance dispatch to skills is disabled fail-closed; general assistant prompt submission is strictly mock-only (`is_mock_only=True`).
+    - Implemented strict explicit response correlation in `OVOSMessage.is_correlated_response_to()` requiring non-empty, exactly matching `session_id` in context and valid response event types (`speak`, `ovos.utterance.handled`, `complete_intent_failure`). Uncorrelated messages fail closed.
+    - Clarified outbound sensitive data detection as a best-effort pattern heuristic before broadcast, not complete secret protection (20 unit tests).
+  - Total Test Suite: 115 unit tests passing across all Python integration suites (100% pass rate).
+* **Future Intent:** Live assistant integration tests require an isolated sandbox, a verified local route, and explicit owner authorization. All four bridges default to fail-closed behavior when tool safety or route provenance cannot be proven.

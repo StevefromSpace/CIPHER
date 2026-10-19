@@ -12,8 +12,10 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import tempfile
+import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from integrations.contract import (
     AssistantCapabilities,
@@ -22,6 +24,8 @@ from integrations.contract import (
     AssistantStatus,
     BaseAssistantBackend,
     ProcessingRoute,
+    ResponseTooLargeError,
+    read_bounded,
     sanitize_sensitive_data,
     validate_assistant_request,
 )
@@ -117,6 +121,90 @@ class OpenClawBridge(BaseAssistantBackend):
         """Strips potential credentials, tokens, or private paths from error output."""
         return sanitize_sensitive_data(message)
 
+    def _execute_bounded_process(
+        self,
+        cmd: List[str],
+        env: Dict[str, str],
+        timeout: float,
+        max_bytes: int
+    ) -> Tuple[int, bytes, bytes, Optional[str]]:
+        """Executes a subprocess with bounded stream collection.
+
+        Enforces output byte limits during collection by reading in chunks with read_bounded.
+        If stdout or stderr exceeds max_bytes, the subprocess is killed immediately
+        and input consumption ceases.
+        """
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            shell=False
+        )
+
+        stdout_chunks: List[bytes] = []
+        stderr_chunks: List[bytes] = []
+        stream_errors: List[Exception] = []
+
+        def _reader(stream, storage):
+            try:
+                storage.append(read_bounded(stream, max_bytes=max_bytes))
+            except Exception as ex:
+                stream_errors.append(ex)
+
+        t_out = threading.Thread(target=_reader, args=(proc.stdout, stdout_chunks))
+        t_err = threading.Thread(target=_reader, args=(proc.stderr, stderr_chunks))
+        t_out.daemon = True
+        t_err.daemon = True
+        t_out.start()
+        t_err.start()
+
+        try:
+            timed_out = False
+            try:
+                proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                proc.wait()
+
+            t_out.join(timeout=1.0)
+            t_err.join(timeout=1.0)
+
+            if timed_out:
+                return -1, b"", b"", f"OpenClaw execution timed out after {timeout:.1f}s."
+
+            for err in stream_errors:
+                if isinstance(err, ResponseTooLargeError):
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    proc.wait()
+                    return -1, b"", b"", f"OpenClaw output exceeded maximum permitted byte limit ({max_bytes} bytes)."
+
+            if stream_errors:
+                return -1, b"", b"", f"I/O error reading process streams: {stream_errors[0]}"
+
+            out_b = stdout_chunks[0] if stdout_chunks else b""
+            err_b = stderr_chunks[0] if stderr_chunks else b""
+            return proc.returncode, out_b, err_b, None
+        finally:
+            try:
+                if proc.stdout:
+                    proc.stdout.close()
+            except Exception:
+                pass
+            try:
+                if proc.stderr:
+                    proc.stderr.close()
+            except Exception:
+                pass
+
     def submit_prompt(self, request: AssistantRequest) -> AssistantResponse:
         """Submits a single text prompt to OpenClaw and returns the structured response.
 
@@ -194,36 +282,62 @@ class OpenClawBridge(BaseAssistantBackend):
             "--json"
         ]
 
-        if self.config.explicit_tool_denial and self.config.tool_denial_args:
-            cmd.extend(list(self.config.tool_denial_args))
-
         if request.session_id:
             cmd.extend(["--session-id", request.session_id])
 
-        # 8. Execute subprocess with strict timeout
+        # 8. Configure isolated environment and execute subprocess with bounded streaming
+        env = os.environ.copy()
+        temp_dir_obj = None
         try:
-            res = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
+            if self.config.enforce_isolated_config:
+                temp_dir_obj = tempfile.TemporaryDirectory(prefix="cipher_openclaw_")
+                temp_dir = Path(temp_dir_obj.name)
+                config_file = temp_dir / "openclaw.json"
+                state_dir = temp_dir / "state"
+                state_dir.mkdir(parents=True, exist_ok=True)
+
+                isolated_conf = {
+                    "gateway": {
+                        "url": self.config.gateway_url
+                    },
+                    "tools": {
+                        "profile": self.config.tool_profile,
+                        "deny": list(self.config.tool_deny_patterns)
+                    }
+                }
+                with open(config_file, "w", encoding="utf-8") as f:
+                    json.dump(isolated_conf, f)
+
+                env["OPENCLAW_CONFIG_PATH"] = str(config_file)
+                env["OPENCLAW_STATE_DIR"] = str(state_dir)
+                env["OPENCLAW_GATEWAY_URL"] = self.config.gateway_url
+                env["OPENCLAW_PROFILE"] = self.config.tool_profile
+
+            retcode, stdout_b, stderr_b, err_msg = self._execute_bounded_process(
+                cmd=cmd,
+                env=env,
                 timeout=timeout,
-                shell=False
+                max_bytes=self.config.max_output_bytes,
             )
             duration_ms = (time.perf_counter() - start_time) * 1000.0
 
-            # Enforce output size bounding (1MB max to prevent memory exhaustion)
-            max_output_bytes = 1048576
-            if len((res.stdout or "").encode("utf-8", errors="replace")) > max_output_bytes:
+            if err_msg:
+                if "timed out" in err_msg.lower():
+                    status = AssistantStatus.TIMEOUT
+                else:
+                    status = AssistantStatus.ERROR
                 return AssistantResponse(
-                    status=AssistantStatus.ERROR,
+                    status=status,
                     model=model,
                     route=self.capabilities.default_route,
                     duration_ms=duration_ms,
-                    error=f"OpenClaw output exceeded maximum permitted byte limit ({max_output_bytes} bytes)."
+                    error=err_msg,
                 )
 
-            if res.returncode != 0:
-                raw_err = self._sanitize_error(res.stderr or res.stdout)
+            if retcode != 0:
+                raw_err = self._sanitize_error(
+                    stderr_b.decode("utf-8", errors="replace") or stdout_b.decode("utf-8", errors="replace")
+                )
                 lower_err = raw_err.lower()
 
                 # Classify connection vs authentication vs general error
@@ -239,12 +353,12 @@ class OpenClawBridge(BaseAssistantBackend):
                     model=model,
                     route=self.capabilities.default_route,
                     duration_ms=duration_ms,
-                    error=f"OpenClaw execution failed (exit code {res.returncode}): {raw_err[:300]}",
+                    error=f"OpenClaw execution failed (exit code {retcode}): {raw_err[:300]}",
                     raw_output=raw_err
                 )
 
             # 9. Parse JSON output
-            raw_out = res.stdout.strip()
+            raw_out = stdout_b.decode("utf-8", errors="replace").strip()
             if not raw_out:
                 return AssistantResponse(
                     status=AssistantStatus.ERROR,
@@ -317,15 +431,6 @@ class OpenClawBridge(BaseAssistantBackend):
                     raw_output=raw_out[:300]
                 )
 
-        except subprocess.TimeoutExpired:
-            duration_ms = (time.perf_counter() - start_time) * 1000.0
-            return AssistantResponse(
-                status=AssistantStatus.TIMEOUT,
-                model=model,
-                route=self.capabilities.default_route,
-                duration_ms=duration_ms,
-                error=f"Request to OpenClaw timed out after {timeout:.1f} seconds."
-            )
         except Exception as e:
             duration_ms = (time.perf_counter() - start_time) * 1000.0
             return AssistantResponse(
@@ -335,3 +440,9 @@ class OpenClawBridge(BaseAssistantBackend):
                 duration_ms=duration_ms,
                 error=f"Unexpected error executing OpenClaw subprocess: {self._sanitize_error(str(e))}"
             )
+        finally:
+            if temp_dir_obj is not None:
+                try:
+                    temp_dir_obj.cleanup()
+                except Exception:
+                    pass

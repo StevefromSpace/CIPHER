@@ -187,6 +187,61 @@ class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         return self.redirect_request(req, fp, 308, msg, headers, loc)
 
 
+class ResponseTooLargeError(ValueError):
+    """Raised when an I/O stream exceeds its configured byte limit during read."""
+    pass
+
+
+def read_bounded(stream: Any, max_bytes: int, chunk_size: int = 65536) -> bytes:
+    """Reads from a stream up to max_bytes in chunks without unbounded reads.
+
+    Contract & Invariants:
+    1. Stops immediately at max_bytes + 1 with at most minimal detection overhead (1 chunk or 1 byte).
+    2. Does NOT call stream.read() with no arguments or read the entire stream before checking length.
+    3. If total bytes exceed max_bytes:
+       - Closes or aborts the underlying stream to release sockets/file descriptors immediately.
+       - Raises ResponseTooLargeError(f"Response size exceeded limit of {max_bytes} bytes").
+    4. Supports streams with a callable read(n) method (HTTPResponse, io.BytesIO, pipes, etc.).
+    5. Returns exact bytes consumed if within max_bytes.
+    """
+    if max_bytes < 0:
+        raise ValueError(f"max_bytes must be non-negative, got {max_bytes}")
+
+    if not hasattr(stream, "read"):
+        raise TypeError("stream must provide a callable read(n) method")
+
+    chunks = []
+    total = 0
+
+    while True:
+        remaining = max_bytes - total
+        read_size = min(chunk_size, remaining + 1)
+        if read_size <= 0:
+            break
+
+        chunk = stream.read(read_size)
+        if not chunk:
+            break
+
+        if isinstance(chunk, str):
+            chunk = chunk.encode("utf-8")
+
+        total += len(chunk)
+        if total > max_bytes:
+            if hasattr(stream, "close"):
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+            raise ResponseTooLargeError(
+                f"Response size exceeded limit of {max_bytes} bytes."
+            )
+
+        chunks.append(chunk)
+
+    return b"".join(chunks)
+
+
 def safe_urlopen(req: urllib.request.Request, timeout: float = 30.0, **kwargs):
     """Executes an HTTP request strictly refusing redirects and preventing network escapes."""
     opener = urllib.request.build_opener(NoRedirectHandler)

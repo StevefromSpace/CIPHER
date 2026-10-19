@@ -2,6 +2,11 @@
 
 Enforces local-first constraints, loopback network binding, rejection of cloud models,
 and least-privileged access (strictly blocking computer use and mission dispatch).
+
+Notice: The Dodaios runtime gateway (/api/runtime-gateway/v1/chat/completions) is designed
+for agent-runtime model calls and can proxy to tools or hosted providers upstream.
+It is NOT a verified no-tools endpoint. Live compatibility is classified as unverified
+until an isolated, verified local runtime is validated with explicit proof.
 """
 
 from dataclasses import dataclass, field
@@ -24,11 +29,13 @@ class DodaiosConfig:
     # Control REST API URL (strictly loopback by default)
     api_url: str = "http://127.0.0.1:8000"
 
-    # Verified endpoints for targeted release
+    # Targeted runtime gateway endpoints
+    # NOTICE: The runtime gateway is an agent runtime endpoint, NOT a verified tool-free endpoint.
     chat_endpoint: str = "/api/runtime-gateway/v1/chat/completions"
     health_endpoint: str = "/api/health"
 
-    # Provenance verification: False until verified local runtime confirmed
+    # Provenance verification: False until verified local runtime confirmed.
+    # Without a live, verified local instance, live compatibility remains unverified.
     verified_local: bool = False
 
     # Optional bearer token / API key (loaded from env, never hardcoded)
@@ -44,6 +51,12 @@ class DodaiosConfig:
 
     # Local-first enforcement
     strict_local: bool = True
+
+    # Maximum response body bytes to read from stream (1MB default)
+    max_output_bytes: int = 1048576
+
+    # Maximum error body bytes to read from HTTP error stream (4KB default)
+    max_error_bytes: int = 4096
 
     # Permitted local provider prefixes
     allowed_local_prefixes: Tuple[str, ...] = (

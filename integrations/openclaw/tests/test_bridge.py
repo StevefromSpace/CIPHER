@@ -11,16 +11,20 @@ Verifies:
 8. Existing CIPHER functionality operating without OpenClaw.
 9. No accidental invocation of a shell command or unrelated external tool.
 10. Loopback binding verification and credential masking.
+11. Tool policy invariants and fail-closed denial.
+12. Isolated configuration and state environment isolation.
+13. Subprocess bounded stream collection, termination on limit breach, and timeout kill.
 """
 
 import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
-from integrations.openclaw.assistant_contract import (
+from integrations.contract import (
     AssistantRequest,
     AssistantResponse,
     AssistantStatus,
@@ -32,7 +36,7 @@ from integrations.openclaw.config import OpenClawConfig
 
 
 class TestOpenClawBridge(unittest.TestCase):
-    """Test suite covering the 9 required integration verification gates."""
+    """Test suite covering the required integration verification gates."""
 
     def setUp(self):
         self.mock_cli_path = Path("/mock/bin/openclaw")
@@ -50,23 +54,20 @@ class TestOpenClawBridge(unittest.TestCase):
     # 1. Successful request and response
     # -------------------------------------------------------------------------
     @patch("integrations.openclaw.bridge.shutil.which")
-    @patch("integrations.openclaw.bridge.subprocess.run")
-    def test_successful_request_and_response(self, mock_run, mock_which):
+    def test_successful_request_and_response(self, mock_which):
         """Validates normal text prompt submission and response extraction."""
         mock_which.return_value = str(self.mock_cli_path)
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps({
-                "status": "ok",
-                "reply": "CIPHER is an independent contextual intelligence platform.",
-                "model": "ollama/llama3.2",
-                "usage": {"total_tokens": 42}
-            }),
-            stderr=""
-        )
-
         bridge = OpenClawBridge(self.config)
-        with patch.object(Path, "exists", return_value=True):
+
+        mock_payload = json.dumps({
+            "status": "ok",
+            "reply": "CIPHER is an independent contextual intelligence platform.",
+            "model": "ollama/llama3.2",
+            "usage": {"total_tokens": 42}
+        }).encode("utf-8")
+
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(0, mock_payload, b"", None)):
             resp = bridge.submit_prompt(AssistantRequest(prompt="What is CIPHER?"))
 
         self.assertEqual(resp.status, AssistantStatus.OK)
@@ -92,86 +93,64 @@ class TestOpenClawBridge(unittest.TestCase):
     # -------------------------------------------------------------------------
     # 3. Connection failure and authentication failure
     # -------------------------------------------------------------------------
-    @patch("integrations.openclaw.bridge.subprocess.run")
-    def test_connection_failure(self, mock_run):
+    def test_connection_failure(self):
         """Verifies handling when the Gateway daemon is unreachable."""
-        mock_run.return_value = MagicMock(
-            returncode=1,
-            stdout="",
-            stderr="Error: connect ECONNREFUSED 127.0.0.1:18789\nGateway daemon is offline."
-        )
-
         bridge = OpenClawBridge(self.config)
-        with patch.object(Path, "exists", return_value=True):
+        stderr_text = "Error: connect ECONNREFUSED 127.0.0.1:18789\nGateway daemon is offline.".encode("utf-8")
+
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(1, b"", stderr_text, None)):
             resp = bridge.submit_prompt(AssistantRequest(prompt="Ping"))
 
         self.assertEqual(resp.status, AssistantStatus.CONNECTION_ERROR)
         self.assertIn("failed", resp.error.lower())
         self.assertIn("ECONNREFUSED", resp.error)
 
-    @patch("integrations.openclaw.bridge.subprocess.run")
-    def test_authentication_failure(self, mock_run):
+    def test_authentication_failure(self):
         """Verifies handling when the Gateway token or credentials are rejected."""
-        mock_run.return_value = MagicMock(
-            returncode=1,
-            stdout="",
-            stderr="Error: 401 Unauthorized: invalid or expired gateway token bearer secret_token_xyz123"
-        )
-
         bridge = OpenClawBridge(self.config)
-        with patch.object(Path, "exists", return_value=True):
+        stderr_text = "Error: 401 Unauthorized: invalid or expired gateway token bearer secret_token_xyz123".encode("utf-8")
+
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(1, b"", stderr_text, None)):
             resp = bridge.submit_prompt(AssistantRequest(prompt="Ping"))
 
         self.assertEqual(resp.status, AssistantStatus.AUTH_ERROR)
-        # Verify credentials were sanitized
         self.assertNotIn("secret_token_xyz123", resp.error)
         self.assertIn("[REDACTED]", resp.error)
 
     # -------------------------------------------------------------------------
     # 4. Request timeout
     # -------------------------------------------------------------------------
-    @patch("integrations.openclaw.bridge.subprocess.run")
-    def test_request_timeout(self, mock_run):
+    def test_request_timeout(self):
         """Verifies subprocess timeout enforcement without process hang."""
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd=["openclaw"], timeout=5.0)
-
         bridge = OpenClawBridge(self.config)
-        with patch.object(Path, "exists", return_value=True):
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(-1, b"", b"", "OpenClaw execution timed out after 5.0s.")):
             resp = bridge.submit_prompt(AssistantRequest(prompt="Compute something slow", timeout_seconds=5.0))
 
         self.assertEqual(resp.status, AssistantStatus.TIMEOUT)
-        self.assertIn("timed out after 5.0 seconds", resp.error)
+        self.assertIn("timed out after 5.0s", resp.error)
 
     # -------------------------------------------------------------------------
     # 5. Invalid or malformed responses
     # -------------------------------------------------------------------------
-    @patch("integrations.openclaw.bridge.subprocess.run")
-    def test_malformed_invalid_json_response(self, mock_run):
+    def test_malformed_invalid_json_response(self):
         """Verifies handling when OpenClaw returns non-JSON garbled output."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="<HTML><BODY>Internal Server Error</BODY></HTML>",
-            stderr=""
-        )
-
         bridge = OpenClawBridge(self.config)
-        with patch.object(Path, "exists", return_value=True):
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(0, b"<HTML><BODY>Internal Server Error</BODY></HTML>", b"", None)):
             resp = bridge.submit_prompt(AssistantRequest(prompt="Test"))
 
         self.assertEqual(resp.status, AssistantStatus.ERROR)
         self.assertIn("invalid json", resp.error.lower())
 
-    @patch("integrations.openclaw.bridge.subprocess.run")
-    def test_malformed_missing_reply_field(self, mock_run):
+    def test_malformed_missing_reply_field(self):
         """Verifies handling when OpenClaw returns valid JSON missing the reply text."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps({"status": "completed", "tokens": 100}),  # No reply or text
-            stderr=""
-        )
-
         bridge = OpenClawBridge(self.config)
-        with patch.object(Path, "exists", return_value=True):
+        no_reply_payload = json.dumps({"status": "completed", "tokens": 100}).encode("utf-8")
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(0, no_reply_payload, b"", None)):
             resp = bridge.submit_prompt(AssistantRequest(prompt="Test"))
 
         self.assertEqual(resp.status, AssistantStatus.ERROR)
@@ -192,7 +171,7 @@ class TestOpenClawBridge(unittest.TestCase):
             "ollama-cloud/llama3",
             "google/gemini-pro",
             "mistral-ai/mistral-large",
-            "custom-unknown-model",  # lacks local prefix under strict_local
+            "custom-unknown-model",
         ]
 
         for model in cloud_models:
@@ -235,53 +214,44 @@ class TestOpenClawBridge(unittest.TestCase):
     # -------------------------------------------------------------------------
     def test_cipher_core_unaffected_by_integration(self):
         """Verifies that CIPHER runtime types have no coupling to OpenClaw."""
-        # OpenClawBridge implements BaseAssistantBackend independently
         self.assertTrue(issubclass(OpenClawBridge, BaseAssistantBackend))
-
-        # Config defaults to disabled
         default_config = OpenClawConfig()
-        # Unless environment variable is set, it defaults to False
         if "CIPHER_OPENCLAW_ENABLED" not in os.environ:
             self.assertFalse(default_config.enabled)
 
     # -------------------------------------------------------------------------
     # 9. No accidental invocation of a shell command or unrelated external tool
     # -------------------------------------------------------------------------
-    @patch("integrations.openclaw.bridge.subprocess.run")
-    def test_no_shell_expansion_and_no_tools(self, mock_run):
-        """Verifies subprocess is strictly called with shell=False and safe argv array."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps({"reply": "Response", "model": "ollama/llama3.2"}),
-            stderr=""
-        )
-
+    def test_no_shell_expansion_and_safe_arguments(self):
+        """Verifies argv array contains literal arguments without shell expansion."""
         bridge = OpenClawBridge(self.config)
-        with patch.object(Path, "exists", return_value=True):
-            # Attempt a prompt with command-injection-like characters
+        captured_cmd = []
+
+        def mock_exec(cmd, env, timeout, max_bytes):
+            captured_cmd.extend(cmd)
+            return 0, json.dumps({"reply": "Response", "model": "ollama/llama3.2"}).encode("utf-8"), b"", None
+
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_execute_bounded_process", side_effect=mock_exec):
             injection_prompt = "What is CIPHER? ; rm -rf / ; cat /etc/passwd | echo 'hacked'"
-            bridge.submit_prompt(AssistantRequest(prompt=injection_prompt, session_id="test-session"))
+            resp = bridge.submit_prompt(AssistantRequest(prompt=injection_prompt, session_id="test-session"))
 
-        self.assertTrue(mock_run.called)
-        called_args, called_kwargs = mock_run.call_args
+        self.assertEqual(resp.status, AssistantStatus.OK)
+        self.assertEqual(captured_cmd[0], str(self.mock_cli_path))
+        self.assertEqual(captured_cmd[1], "agent")
+        self.assertIn("--message", captured_cmd)
+        msg_idx = captured_cmd.index("--message")
+        self.assertEqual(captured_cmd[msg_idx + 1], injection_prompt)
+        self.assertIn("--session-id", captured_cmd)
+        self.assertIn("--profile", captured_cmd)
+        self.assertEqual(captured_cmd[captured_cmd.index("--profile") + 1], "minimal")
 
-        # Critical security check 1: shell MUST be False
-        self.assertFalse(called_kwargs.get("shell", True), "Subprocess must NOT execute via shell.")
-
-        # Critical security check 2: argv must be an array of literal strings
-        argv = called_args[0]
-        self.assertIsInstance(argv, list)
-        self.assertEqual(argv[0], str(self.mock_cli_path))
-        self.assertEqual(argv[1], "agent")
-        self.assertIn("--message", argv)
-        msg_idx = argv.index("--message")
-        self.assertEqual(argv[msg_idx + 1], injection_prompt)  # Literal string, unexpanded
-
-        # Critical security check 3: no tool enablement or message delivery flags
-        self.assertNotIn("--deliver", argv)
-        self.assertNotIn("--tool", argv)
-        self.assertNotIn("--enable-tools", argv)
-        self.assertNotIn("--dangerously-skip-permissions", argv)
+        # Crucial security checks: no tool enablement or delivery flags
+        self.assertNotIn("--deliver", captured_cmd)
+        self.assertNotIn("--tool", captured_cmd)
+        self.assertNotIn("--enable-tools", captured_cmd)
+        self.assertNotIn("--dangerously-skip-permissions", captured_cmd)
+        self.assertNotIn("--deny-tools", captured_cmd)  # Verified not a real Commander CLI option
 
     # -------------------------------------------------------------------------
     # 10. Security: Loopback binding enforcement and credential masking
@@ -291,7 +261,7 @@ class TestOpenClawBridge(unittest.TestCase):
         non_loopback_config = OpenClawConfig(
             enabled=True,
             cli_path=self.mock_cli_path,
-            gateway_url="ws://192.168.1.50:18789",  # Remote network IP
+            gateway_url="ws://192.168.1.50:18789",
             default_model="ollama/llama3.2",
             verified_local=True,
         )
@@ -346,7 +316,7 @@ class TestOpenClawBridge(unittest.TestCase):
             cli_path=self.mock_cli_path,
             gateway_url="ws://127.0.0.1:18789",
             default_model="ollama/llama3.2",
-            tool_profile="full",  # Unsafe profile with tools active
+            tool_profile="full",
             verified_local=True,
         )
         bridge = OpenClawBridge(non_minimal_config)
@@ -354,23 +324,6 @@ class TestOpenClawBridge(unittest.TestCase):
             resp = bridge.submit_prompt(AssistantRequest(prompt="Hi"))
         self.assertEqual(resp.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
         self.assertIn("minimal", resp.error.lower())
-
-    @patch("integrations.openclaw.bridge.subprocess.run")
-    def test_minimal_profile_flag_present_in_argv(self, mock_run):
-        """Verifies --profile minimal is passed in subprocess argv."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps({"reply": "Response", "model": "ollama/llama3.2"}),
-            stderr=""
-        )
-        bridge = OpenClawBridge(self.config)
-        with patch.object(Path, "exists", return_value=True):
-            resp = bridge.submit_prompt(AssistantRequest(prompt="Hi"))
-        self.assertEqual(resp.status, AssistantStatus.OK)
-        argv = mock_run.call_args[0][0]
-        self.assertIn("--profile", argv)
-        prof_idx = argv.index("--profile")
-        self.assertEqual(argv[prof_idx + 1], "minimal")
 
     def test_rejection_of_non_finite_timeout(self):
         """Verifies rejection of NaN and Inf timeout values."""
@@ -399,7 +352,7 @@ class TestOpenClawBridge(unittest.TestCase):
         self.assertIn("not bound to a loopback address", resp.error.lower())
 
     # -------------------------------------------------------------------------
-    # 12. Agent 3 Security Hardening: Tool denial, output limits, route provenance
+    # 12. Security Hardening: Tool denial, isolated config, and route provenance
     # -------------------------------------------------------------------------
     def test_unverified_local_route_rejected_under_require_local(self):
         """Verifies default unverified route fails closed when require_local is True."""
@@ -408,7 +361,7 @@ class TestOpenClawBridge(unittest.TestCase):
             cli_path=self.mock_cli_path,
             gateway_url="ws://127.0.0.1:18789",
             default_model="ollama/llama3.2",
-            verified_local=False,  # Unverified route
+            verified_local=False,
         )
         bridge = OpenClawBridge(unverified_cfg)
         self.assertEqual(bridge.capabilities.default_route, ProcessingRoute.UNKNOWN)
@@ -433,36 +386,67 @@ class TestOpenClawBridge(unittest.TestCase):
         self.assertEqual(resp.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
         self.assertIn("explicit tool denial", resp.error.lower())
 
-    @patch("integrations.openclaw.bridge.subprocess.run")
-    def test_tool_denial_args_in_subprocess_argv(self, mock_run):
-        """Verifies --deny-tools * are included in subprocess argv."""
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps({"reply": "Response", "model": "ollama/llama3.2"}),
-            stderr=""
+    def test_tool_deny_pattern_wildcard_required(self):
+        """Verifies config without '*' in tool_deny_patterns fails closed."""
+        cfg = OpenClawConfig(
+            enabled=True,
+            cli_path=self.mock_cli_path,
+            gateway_url="ws://127.0.0.1:18789",
+            default_model="ollama/llama3.2",
+            tool_deny_patterns=("some_tool",),
+            verified_local=True,
         )
-        bridge = OpenClawBridge(self.config)
+        bridge = OpenClawBridge(cfg)
         with patch.object(Path, "exists", return_value=True):
             resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
-        self.assertEqual(resp.status, AssistantStatus.OK)
-        argv = mock_run.call_args[0][0]
-        self.assertIn("--deny-tools", argv)
-        self.assertIn("*", argv)
+        self.assertEqual(resp.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
+        self.assertIn("explicit tool denial with '*' pattern is required", resp.error.lower())
 
-    @patch("integrations.openclaw.bridge.subprocess.run")
-    def test_output_size_limit_exceeded(self, mock_run):
-        """Verifies stdout exceeding 1MB is rejected fail-closed with AssistantStatus.ERROR."""
-        huge_output = "x" * (1048576 + 50)
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=huge_output,
-            stderr=""
+    def test_enforce_isolated_config_required(self):
+        """Verifies config with enforce_isolated_config=False fails closed."""
+        cfg = OpenClawConfig(
+            enabled=True,
+            cli_path=self.mock_cli_path,
+            gateway_url="ws://127.0.0.1:18789",
+            default_model="ollama/llama3.2",
+            enforce_isolated_config=False,
+            verified_local=True,
         )
-        bridge = OpenClawBridge(self.config)
+        bridge = OpenClawBridge(cfg)
         with patch.object(Path, "exists", return_value=True):
             resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
-        self.assertEqual(resp.status, AssistantStatus.ERROR)
-        self.assertIn("maximum permitted byte limit", resp.error.lower())
+        self.assertEqual(resp.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
+        self.assertIn("isolated configuration", resp.error.lower())
+
+    def test_isolated_config_and_environment_variables(self):
+        """Verifies that submit_prompt writes isolated config and binds environment variables."""
+        bridge = OpenClawBridge(self.config)
+        verified_conf = {}
+        verified_env = {}
+
+        def mock_exec(cmd, env, timeout, max_bytes):
+            verified_env.update(env)
+            conf_file = env.get("OPENCLAW_CONFIG_PATH")
+            if conf_file and Path(conf_file).exists():
+                with open(conf_file, "r", encoding="utf-8") as f:
+                    verified_conf.update(json.load(f))
+            return 0, json.dumps({"reply": "isolated ok"}).encode("utf-8"), b"", None
+
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_execute_bounded_process", side_effect=mock_exec):
+            resp = bridge.submit_prompt(AssistantRequest(prompt="Check isolation"))
+
+        self.assertEqual(resp.status, AssistantStatus.OK)
+        # Verify environment variables were set
+        self.assertIn("OPENCLAW_CONFIG_PATH", verified_env)
+        self.assertIn("OPENCLAW_STATE_DIR", verified_env)
+        self.assertEqual(verified_env["OPENCLAW_GATEWAY_URL"], "ws://127.0.0.1:18789")
+        self.assertEqual(verified_env["OPENCLAW_PROFILE"], "minimal")
+
+        # Verify isolated config contents match tool lockdown contract
+        self.assertEqual(verified_conf.get("gateway", {}).get("url"), "ws://127.0.0.1:18789")
+        self.assertEqual(verified_conf.get("tools", {}).get("profile"), "minimal")
+        self.assertEqual(verified_conf.get("tools", {}).get("deny"), ["*"])
 
     def test_gateway_url_userinfo_rejected(self):
         """Verifies that gateway URLs containing credentials fail closed."""
@@ -479,7 +463,54 @@ class TestOpenClawBridge(unittest.TestCase):
         self.assertEqual(resp.status, AssistantStatus.ERROR)
         self.assertIn("user credentials", resp.error.lower())
 
+    # -------------------------------------------------------------------------
+    # 13. Subprocess Bounded Stream Execution (Real Process Invariants)
+    # -------------------------------------------------------------------------
+    def test_bounded_process_execution_success(self):
+        """Verifies _execute_bounded_process captures normal output successfully."""
+        bridge = OpenClawBridge(self.config)
+        code = "import sys; sys.stdout.write('CIPHER bounded ok'); sys.stderr.write('no error')"
+        ret, out_b, err_b, err_msg = bridge._execute_bounded_process(
+            cmd=[sys.executable, "-c", code],
+            env={},
+            timeout=5.0,
+            max_bytes=1024,
+        )
+        self.assertEqual(ret, 0)
+        self.assertEqual(out_b.decode("utf-8"), "CIPHER bounded ok")
+        self.assertEqual(err_b.decode("utf-8"), "no error")
+        self.assertIsNone(err_msg)
+
+    def test_bounded_process_execution_oversized_terminates_promptly(self):
+        """Verifies that stdout exceeding max_bytes terminates the subprocess and fails closed."""
+        bridge = OpenClawBridge(self.config)
+        # Process attempts to write 50,000 bytes; limit is set to 256 bytes
+        code = "import sys; sys.stdout.write('A' * 50000); sys.stdout.flush()"
+        ret, out_b, err_b, err_msg = bridge._execute_bounded_process(
+            cmd=[sys.executable, "-c", code],
+            env={},
+            timeout=5.0,
+            max_bytes=256,
+        )
+        self.assertEqual(ret, -1)
+        self.assertIsNotNone(err_msg)
+        self.assertIn("exceeded maximum permitted byte limit", err_msg)
+        self.assertIn("256 bytes", err_msg)
+
+    def test_bounded_process_execution_timeout_kills_process(self):
+        """Verifies that a hanging subprocess is killed and returns timeout."""
+        bridge = OpenClawBridge(self.config)
+        code = "import time; time.sleep(10)"
+        ret, out_b, err_b, err_msg = bridge._execute_bounded_process(
+            cmd=[sys.executable, "-c", code],
+            env={},
+            timeout=0.5,
+            max_bytes=1024,
+        )
+        self.assertEqual(ret, -1)
+        self.assertIsNotNone(err_msg)
+        self.assertIn("timed out after 0.5s", err_msg)
+
 
 if __name__ == "__main__":
-    import os
     unittest.main()

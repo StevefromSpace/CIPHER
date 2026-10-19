@@ -6,7 +6,7 @@ Verifies:
 3. Timeout range bounds (1 to 300s).
 4. Cloud model rejection under strict_local.
 5. Tool execution rejection (allow_tools=True).
-6. Privileged action rejection (computer use, mission dispatch, shell, install, config).
+6. Privileged action rejection (computer use, mission dispatch, shell, install, config, tools/functions).
 7. Loopback binding enforcement and user-info rejection.
 8. Verified chat endpoint (/api/runtime-gateway/v1/chat/completions) parsing.
 9. Connection error mapping.
@@ -17,7 +17,9 @@ Verifies:
 14. Health probe availability check on verified /api/health endpoint.
 15. Strict redirect refusal fail-closed (NoRedirectHandler / safe_urlopen).
 16. Provenance route defaults to UNKNOWN unless verified.
-17. Response body size limit bounding (1MB max).
+17. Response body size limit bounding (bounded reading terminates and aborts stream).
+18. Error body size limit bounding (HTTPError.fp bounded reading).
+19. Unverified live compatibility reporting when unverified.
 """
 
 import io
@@ -35,6 +37,24 @@ from integrations.contract import (
 )
 from integrations.dodaios.bridge import DodaiosBridge
 from integrations.dodaios.config import DodaiosConfig
+
+
+class ChunkStream(io.BytesIO):
+    """Test stream that records bytes read and close calls to prove bounded reads."""
+
+    def __init__(self, data: bytes):
+        super().__init__(data)
+        self.bytes_read = 0
+        self.closed_called = False
+
+    def read(self, size=-1):
+        chunk = super().read(size)
+        self.bytes_read += len(chunk)
+        return chunk
+
+    def close(self):
+        self.closed_called = True
+        super().close()
 
 
 class TestDodaiosBridge(unittest.TestCase):
@@ -89,9 +109,12 @@ class TestDodaiosBridge(unittest.TestCase):
         self.assertEqual(resp.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
 
     def test_privileged_actions_rejection(self):
-        """Verifies computer use, mission dispatch, shell execution, install, config mutation are rejected."""
+        """Verifies computer use, mission dispatch, shell execution, install, config mutation, tools are rejected."""
         bridge = DodaiosBridge(self.config)
-        for act in ("computer_use", "mission", "execute", "shell", "config", "install", "mission_dispatch", "shell_execution"):
+        for act in (
+            "computer_use", "mission", "execute", "shell", "config", "install",
+            "mission_dispatch", "shell_execution", "tools", "functions", "tool_choice"
+        ):
             resp = bridge.submit_prompt(AssistantRequest(prompt="Hi", metadata={act: True}))
             self.assertEqual(
                 resp.status,
@@ -114,13 +137,13 @@ class TestDodaiosBridge(unittest.TestCase):
 
     @patch("integrations.dodaios.bridge.safe_urlopen")
     def test_successful_mocked_completion(self, mock_urlopen):
-        """Verifies successful text response parsing from verified runtime gateway endpoint."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = json.dumps({
+        """Verifies successful text response parsing from runtime gateway endpoint."""
+        data = json.dumps({
             "choices": [
                 {"message": {"role": "assistant", "content": "Dodaios local response."}}
             ]
         }).encode("utf-8")
+        mock_resp = ChunkStream(data)
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         bridge = DodaiosBridge(self.config)
@@ -130,7 +153,6 @@ class TestDodaiosBridge(unittest.TestCase):
         self.assertEqual(resp.text, "Dodaios local response.")
         self.assertEqual(resp.route, ProcessingRoute.VERIFIED_LOCAL)
 
-        # Verify real targeted endpoint was called
         called_req = mock_urlopen.call_args[0][0]
         self.assertTrue(called_req.full_url.endswith("/api/runtime-gateway/v1/chat/completions"))
 
@@ -147,12 +169,13 @@ class TestDodaiosBridge(unittest.TestCase):
     @patch("integrations.dodaios.bridge.safe_urlopen")
     def test_auth_failure(self, mock_urlopen):
         """Verifies HTTP 401 maps to AUTH_ERROR."""
+        err_stream = ChunkStream(b'{"detail":"Invalid API Key"}')
         mock_err = urllib.error.HTTPError(
             url="http://127.0.0.1:8000/api/runtime-gateway/v1/chat/completions",
             code=401,
             msg="Unauthorized",
             hdrs={},
-            fp=io.BytesIO(b'{"detail":"Invalid API Key"}')
+            fp=err_stream
         )
         mock_urlopen.side_effect = mock_err
 
@@ -160,6 +183,7 @@ class TestDodaiosBridge(unittest.TestCase):
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hi"))
         self.assertEqual(resp.status, AssistantStatus.AUTH_ERROR)
         self.assertIn("401", resp.error)
+        self.assertTrue(err_stream.closed_called)
 
     @patch("integrations.dodaios.bridge.safe_urlopen")
     def test_redirect_rejection(self, mock_urlopen):
@@ -169,7 +193,7 @@ class TestDodaiosBridge(unittest.TestCase):
             code=302,
             msg="Automatic HTTP redirect (302) to 'http://attacker.com' is blocked for security.",
             hdrs={},
-            fp=io.BytesIO(b'')
+            fp=ChunkStream(b'')
         )
         mock_urlopen.side_effect = mock_err
 
@@ -191,8 +215,7 @@ class TestDodaiosBridge(unittest.TestCase):
     @patch("integrations.dodaios.bridge.safe_urlopen")
     def test_malformed_json_response(self, mock_urlopen):
         """Verifies invalid JSON is handled gracefully."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = b"<html>502 Bad Gateway</html>"
+        mock_resp = ChunkStream(b"<html>502 Bad Gateway</html>")
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         bridge = DodaiosBridge(self.config)
@@ -212,14 +235,13 @@ class TestDodaiosBridge(unittest.TestCase):
     @patch("integrations.dodaios.bridge.safe_urlopen")
     def test_is_available_probing(self, mock_urlopen):
         """Verifies is_available queries the verified /api/health endpoint without following redirects."""
-        mock_resp = MagicMock()
+        mock_resp = ChunkStream(b'{"status":"ok"}')
         mock_resp.status = 200
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         bridge = DodaiosBridge(self.config)
         self.assertTrue(bridge.is_available())
 
-        # Verify endpoint called
         called_req = mock_urlopen.call_args[0][0]
         self.assertTrue(called_req.full_url.endswith("/api/health"))
 
@@ -277,17 +299,48 @@ class TestDodaiosBridge(unittest.TestCase):
         self.assertEqual(resp.status, AssistantStatus.REJECTED_CLOUD_MODEL)
         self.assertIn("unknown", resp.error.lower())
 
+        status = bridge.get_status()
+        self.assertEqual(status["live_compatibility"], "unverified")
+
     @patch("integrations.dodaios.bridge.safe_urlopen")
-    def test_response_size_limit_exceeded(self, mock_urlopen):
-        """Verifies response exceeding 1MB is rejected fail-closed."""
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = b"x" * (1048576 + 50)
-        mock_urlopen.return_value.__enter__.return_value = mock_resp
+    def test_bounded_response_size_terminates_promptly(self, mock_urlopen):
+        """Verifies oversized response terminates during stream reading and closes stream."""
+        # 2MB stream; limit is 1MB (1048576)
+        stream = ChunkStream(b"A" * (1048576 + 500000))
+        mock_urlopen.return_value.__enter__.return_value = stream
 
         bridge = DodaiosBridge(self.config)
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+
         self.assertEqual(resp.status, AssistantStatus.ERROR)
         self.assertIn("maximum permitted byte limit", resp.error.lower())
+        # Stream MUST be closed when limit exceeded
+        self.assertTrue(stream.closed_called)
+        # Bytes read must NOT consume the whole 1.5MB; must stop right around max_bytes + 1
+        self.assertLessEqual(stream.bytes_read, 1048576 + 1)
+
+    @patch("integrations.dodaios.bridge.safe_urlopen")
+    def test_bounded_error_body_terminates_promptly(self, mock_urlopen):
+        """Verifies oversized HTTP error body terminates during reading and closes stream."""
+        # 100KB error stream; error limit is 4KB (4096)
+        err_stream = ChunkStream(b"E" * 102400)
+        mock_err = urllib.error.HTTPError(
+            url="http://127.0.0.1:8000/api/runtime-gateway/v1/chat/completions",
+            code=500,
+            msg="Internal Error",
+            hdrs={},
+            fp=err_stream
+        )
+        mock_urlopen.side_effect = mock_err
+
+        bridge = DodaiosBridge(self.config)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+
+        self.assertEqual(resp.status, AssistantStatus.ERROR)
+        self.assertIn("exceeded 4096 bytes", resp.error)
+        self.assertTrue(err_stream.closed_called)
+        # Bytes read must not read 100KB; must stop right at 4097
+        self.assertLessEqual(err_stream.bytes_read, 4096 + 1)
 
 
 if __name__ == "__main__":

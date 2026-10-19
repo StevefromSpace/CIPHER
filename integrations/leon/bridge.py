@@ -2,7 +2,13 @@
 
 Implements the request/response bridge via Leon's Fastify HTTP API,
 enforcing loopback binding, local-first isolation, version pinning (1.x stable contract),
-and profile authentication handling.
+tool/skill safety gating, bounded stream I/O, and profile authentication handling.
+
+Notice on Tool/Skill Safety:
+Leon's /api/v1/query endpoint maps utterances to NLP skills and executes skill actions
+('run-action') on the host OS. Because Leon cannot guarantee tool-free text isolation,
+live execution is disabled/unavailable under CIPHER safety policy unless explicitly
+verified/enabled.
 """
 
 from datetime import datetime
@@ -21,8 +27,10 @@ from integrations.contract import (
     AssistantResponse,
     AssistantStatus,
     BaseAssistantBackend,
-    ProcessingRoute,
     NoRedirectHandler,
+    ProcessingRoute,
+    ResponseTooLargeError,
+    read_bounded,
     safe_urlopen,
     sanitize_sensitive_data,
     validate_assistant_request,
@@ -55,12 +63,21 @@ class LeonBridge(BaseAssistantBackend):
             supports_voice_events=False,
             supports_tools=False,  # Skill actions locked down in CIPHER
             default_route=route,
-            is_mock_only=False,
+            is_mock_only=not self.config.enable_live_execution,
         )
 
     def is_available(self) -> bool:
-        """Probes the Leon server health/info endpoint on loopback rejecting redirects."""
+        """Probes the Leon server health/info endpoint on loopback rejecting redirects.
+
+        Under CIPHER safety policy, live execution is disabled if tool/skill isolation
+        cannot be positively established (enable_live_execution=False).
+        """
         if not self.config.enabled:
+            return False
+
+        # Live safety policy check: cannot be available if tool isolation is unproven
+        is_tool_safe, _ = self.config.is_tool_policy_safe()
+        if not is_tool_safe:
             return False
 
         is_loopback, _ = self.config.validate_api_url()
@@ -76,9 +93,10 @@ class LeonBridge(BaseAssistantBackend):
             with safe_urlopen(req, timeout=2.0) as resp:
                 if resp.status != 200:
                     return False
-                # Validate version compatibility (1.x stable vs 2.x preview)
+                # Validate version compatibility with bounded read
                 try:
-                    raw = resp.read().decode("utf-8")
+                    raw_bytes = read_bounded(resp, max_bytes=4096)
+                    raw = raw_bytes.decode("utf-8", errors="replace")
                     if raw.strip():
                         data = json.loads(raw)
                         if isinstance(data, dict):
@@ -104,7 +122,8 @@ class LeonBridge(BaseAssistantBackend):
             "strict_local": self.config.strict_local,
             "timeout_seconds": self.config.timeout_seconds,
             "route": self.capabilities.default_route.value,
-            "compatibility_note": "Targeted for Leon 1.x stable API. Leon 2.0 developer preview APIs are treated as unstable.",
+            "live_execution_status": "enabled" if self.config.enable_live_execution else "disabled_unproven_tool_isolation",
+            "compatibility_note": "Targeted for Leon 1.x stable API. Query path executes skill actions; text-only mode unproven.",
         }
 
     def _sanitize_error(self, message: str) -> str:
@@ -117,7 +136,9 @@ class LeonBridge(BaseAssistantBackend):
         Guarantees:
         - Central policy validation (blank prompt, timeout, tool lockdown, local route).
         - Rejects immediately if integration is disabled.
+        - Fails closed if tool/skill isolation cannot be proven (safe text-only mode unavailable).
         - Enforces loopback address binding.
+        - Enforces bounded stream I/O on success and error responses.
         - Respects profile authentication without credential exposure.
         - Parses responses into standard AssistantResponse.
         """
@@ -131,12 +152,21 @@ class LeonBridge(BaseAssistantBackend):
                 route=self.capabilities.default_route,
             )
 
-        # 2. Central policy validation gate
+        # 2. Gate: Tool/skill safety boundary check
+        is_tool_safe, tool_err = self.config.is_tool_policy_safe()
+        if not is_tool_safe:
+            return AssistantResponse(
+                status=AssistantStatus.UNAVAILABLE,
+                error=f"Leon execution unavailable: {tool_err}",
+                route=self.capabilities.default_route,
+            )
+
+        # 3. Central policy validation gate
         is_valid, validation_resp = validate_assistant_request(request, self.capabilities)
         if not is_valid and validation_resp:
             return validation_resp
 
-        # 3. Gate: Loopback network check
+        # 4. Gate: Loopback network check
         is_loopback, loopback_err = self.config.validate_api_url()
         if not is_loopback:
             return AssistantResponse(
@@ -145,7 +175,7 @@ class LeonBridge(BaseAssistantBackend):
                 route=self.capabilities.default_route,
             )
 
-        # 4. Gate: Model selection and local-first verification
+        # 5. Gate: Model selection and local-first verification
         model = request.model_override or self.config.default_model
         is_local, rejection_reason = self.config.is_model_local(model)
         if not is_local:
@@ -156,7 +186,7 @@ class LeonBridge(BaseAssistantBackend):
                 error=f"Local-First Policy Rejection: {rejection_reason}",
             )
 
-        # 5. Build HTTP request payload for Leon Fastify query endpoint
+        # 6. Build HTTP request payload for Leon Fastify query endpoint
         timeout = request.timeout_seconds if request.timeout_seconds is not None else self.config.timeout_seconds
         query_url = urllib.parse.urljoin(self.config.api_url, self.config.query_endpoint)
 
@@ -180,23 +210,23 @@ class LeonBridge(BaseAssistantBackend):
         if self.config.api_key:
             http_req.add_header("X-API-Key", self.config.api_key)
 
-        # 6. Execute HTTP request with timeout and redirect rejection
+        # 7. Execute HTTP request with timeout, redirect rejection, and bounded streaming
         try:
             with safe_urlopen(http_req, timeout=timeout) as response:
                 duration_ms = (time.perf_counter() - start_time) * 1000.0
-                raw_body = response.read().decode("utf-8")
 
-                # Enforce output size bounding (1MB)
-                max_output_bytes = 1048576
-                if len(raw_body.encode("utf-8", errors="replace")) > max_output_bytes:
+                try:
+                    raw_bytes = read_bounded(response, max_bytes=self.config.max_output_bytes)
+                except ResponseTooLargeError:
                     return AssistantResponse(
                         status=AssistantStatus.ERROR,
                         model=model,
                         route=self.capabilities.default_route,
                         duration_ms=duration_ms,
-                        error=f"Leon response exceeded maximum permitted byte limit ({max_output_bytes} bytes)."
+                        error=f"Leon response exceeded maximum permitted byte limit ({self.config.max_output_bytes} bytes)."
                     )
 
+                raw_body = raw_bytes.decode("utf-8", errors="replace")
                 if not raw_body.strip():
                     return AssistantResponse(
                         status=AssistantStatus.ERROR,
@@ -209,7 +239,6 @@ class LeonBridge(BaseAssistantBackend):
                 data = json.loads(raw_body)
                 reply_text = ""
                 if isinstance(data, dict):
-                    # Check for Leon 1.x response shapes
                     if "output" in data and isinstance(data["output"], dict):
                         output_obj = data["output"]
                         reply_text = output_obj.get("speech") or output_obj.get("text") or ""
@@ -242,11 +271,24 @@ class LeonBridge(BaseAssistantBackend):
         except urllib.error.HTTPError as he:
             duration_ms = (time.perf_counter() - start_time) * 1000.0
             raw_err = ""
-            if hasattr(he, "read"):
+            if hasattr(he, "fp") and he.fp is not None:
                 try:
-                    raw_err = he.read().decode("utf-8", errors="replace")
+                    err_bytes = read_bounded(he.fp, max_bytes=self.config.max_error_bytes)
+                    raw_err = err_bytes.decode("utf-8", errors="replace")
+                except ResponseTooLargeError:
+                    raw_err = f"[Error response body exceeded {self.config.max_error_bytes} bytes]"
                 except Exception:
                     pass
+                finally:
+                    try:
+                        he.close()
+                    except Exception:
+                        pass
+                    try:
+                        if hasattr(he, "fp") and he.fp is not None:
+                            he.fp.close()
+                    except Exception:
+                        pass
             if not raw_err.strip():
                 raw_err = str(getattr(he, "msg", "") or getattr(he, "reason", "") or he)
             raw_err = self._sanitize_error(raw_err)

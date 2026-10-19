@@ -4,20 +4,19 @@ Verifies:
 1. Disabled state handling.
 2. Blank prompt rejection fail-closed.
 3. Timeout range bounds (1 to 300s).
-4. Tool execution rejection (allow_tools=True).
-5. System control / privileged command rejection (shutdown, reboot, install, shell, metadata flags).
+4. Tool execution rejection (allow_tools=True, metadata flags).
+5. Safety boundary: live skill dispatch is disabled and unavailable (mock-only assistant submission).
 6. Loopback binding enforcement and user-info credential rejection.
 7. Message envelope construction.
-8. Response correlation via session_id.
-9. Successful mocked speech event resolution.
-10. Timeout waiting for bus response.
-11. Intent failure handling.
-12. Unavailable status when bus is offline.
-13. Socket availability probe.
-14. Broadcast notice present in health status.
-15. Broadcast confidentiality guard: sensitive credentials rejected.
-16. Provenance route defaults to UNKNOWN unless verified.
-17. is_mock_only flag reflects whether live factory is attached.
+8. Explicit response correlation via session_id and response event types.
+9. Rejection of uncorrelated responses (session mismatch, missing session, wrong event type).
+10. Successful mocked speech event resolution.
+11. Timeout waiting for bus response.
+12. Intent failure handling.
+13. Socket availability probe for voice/event bus.
+14. Broadcast confidentiality guard: best-effort pattern detection rejects sensitive prompts.
+15. Provenance route defaults to UNKNOWN unless verified.
+16. is_mock_only capability is True for assistant text prompts.
 """
 
 import json
@@ -91,32 +90,30 @@ class TestOVOSBridge(unittest.TestCase):
         self.assertEqual(resp_high.status, AssistantStatus.INVALID_REQUEST)
 
     def test_tool_request_rejection(self):
-        """Verifies allow_tools=True is rejected fail-closed."""
+        """Verifies allow_tools=True and metadata tool actions are rejected fail-closed."""
         bridge = OVOSBridge(self.config)
-        resp = bridge.submit_prompt(AssistantRequest(prompt="Hi", allow_tools=True))
-        self.assertEqual(resp.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
-
-    def test_system_control_command_rejection(self):
-        """Verifies privileged system control commands and metadata actions are blocked."""
-        bridge = OVOSBridge(self.config)
-        resp1 = bridge.submit_prompt(AssistantRequest(prompt="Shutdown the computer now"))
-        resp2 = bridge.submit_prompt(AssistantRequest(prompt="Reboot system"))
-        resp3 = bridge.submit_prompt(AssistantRequest(prompt="Tell me the time", metadata={"shell": True}))
-        resp4 = bridge.submit_prompt(AssistantRequest(prompt="Tell me the time", metadata={"computer_use": True}))
-
+        resp1 = bridge.submit_prompt(AssistantRequest(prompt="Hi", allow_tools=True))
+        resp2 = bridge.submit_prompt(AssistantRequest(prompt="Hi", metadata={"shell": True}))
+        resp3 = bridge.submit_prompt(AssistantRequest(prompt="Hi", metadata={"computer_use": True}))
         self.assertEqual(resp1.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
         self.assertEqual(resp2.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
         self.assertEqual(resp3.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
-        self.assertEqual(resp4.status, AssistantStatus.REJECTED_TOOLS_ENABLED)
-        self.assertIn("blocked", resp1.error.lower())
+
+    def test_safety_boundary_live_skill_dispatch_unavailable(self):
+        """Verifies that live skill execution without a mock client is UNAVAILABLE fail-closed."""
+        bridge = OVOSBridge(self.config)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Tell me a joke"))
+        self.assertEqual(resp.status, AssistantStatus.UNAVAILABLE)
+        self.assertIn("destination: ['skills']", resp.error)
+        self.assertIn("mock-only", resp.error)
 
     def test_broadcast_confidentiality_sensitive_prompt_rejection(self):
-        """Verifies prompts containing credentials are not emitted onto the broadcast messagebus."""
+        """Verifies best-effort detection heuristic rejects prompts containing sensitive credentials."""
         bridge = OVOSBridge(self.config)
         sensitive_prompt = "My api_key: sk-ant-api03-1234567890abcdef please save it"
         resp = bridge.submit_prompt(AssistantRequest(prompt=sensitive_prompt))
         self.assertEqual(resp.status, AssistantStatus.INVALID_REQUEST)
-        self.assertIn("sensitive credentials", resp.error.lower())
+        self.assertIn("best-effort detection", resp.error.lower())
 
     def test_loopback_binding_enforcement(self):
         """Verifies rejection of non-loopback URLs."""
@@ -154,32 +151,67 @@ class TestOVOSBridge(unittest.TestCase):
         self.assertEqual(msg.data["lang"], "en-us")
         self.assertEqual(msg.context["session_id"], "session-xyz-123")
         self.assertEqual(msg.context["source"], "cipher_bridge")
+        self.assertEqual(msg.context["destination"], ["skills"])
 
-        # Verify JSON round-trip
         json_str = msg.to_json()
         parsed = OVOSMessage.from_json(json_str)
         self.assertEqual(parsed.type, msg.type)
         self.assertEqual(parsed.context["session_id"], "session-xyz-123")
 
-    def test_response_correlation(self):
-        """Verifies correlation detection based on session_id and event type."""
+    def test_explicit_response_correlation_logic(self):
+        """Verifies strict explicit correlation rules in OVOSMessage."""
         req = OVOSMessage.create_utterance("Test", session_id="session-42")
 
-        # Correlated speak event
-        matching_resp = OVOSMessage(
-            type="speak",
-            data={"utterance": "Intent handled."},
-            context={"session_id": "session-42"}
-        )
-        self.assertTrue(matching_resp.is_correlated_response_to(req))
+        # 1. Matching session and valid event type -> correlated
+        for valid_type in ("speak", "ovos.utterance.handled", "complete_intent_failure"):
+            matching_resp = OVOSMessage(
+                type=valid_type,
+                data={"utterance": "Intent handled."},
+                context={"session_id": "session-42"}
+            )
+            self.assertTrue(matching_resp.is_correlated_response_to(req))
 
-        # Different session event (broadcast noise)
-        unrelated_resp = OVOSMessage(
+        # 2. Mismatched session_id -> uncorrelated
+        diff_session_resp = OVOSMessage(
             type="speak",
-            data={"utterance": "Noise from other client."},
+            data={"utterance": "Noise."},
             context={"session_id": "other-session-99"}
         )
-        self.assertFalse(unrelated_resp.is_correlated_response_to(req))
+        self.assertFalse(diff_session_resp.is_correlated_response_to(req))
+
+        # 3. Missing session_id -> uncorrelated
+        missing_session_resp = OVOSMessage(
+            type="speak",
+            data={"utterance": "No session."},
+            context={}
+        )
+        self.assertFalse(missing_session_resp.is_correlated_response_to(req))
+
+        # 4. Wrong event type -> uncorrelated
+        wrong_type_resp = OVOSMessage(
+            type="skill.internal.event",
+            data={},
+            context={"session_id": "session-42"}
+        )
+        self.assertFalse(wrong_type_resp.is_correlated_response_to(req))
+
+        # 5. Invalid request object -> uncorrelated
+        self.assertFalse(matching_resp.is_correlated_response_to(None))
+
+    def test_uncorrelated_response_rejected_in_bridge(self):
+        """Verifies bridge rejects responses with mismatched session_id fail-closed."""
+        # Response has mismatched session_id
+        wrong_resp = OVOSMessage(
+            type="speak",
+            data={"utterance": "Unrelated reply."},
+            context={"session_id": "mismatched-session"}
+        )
+        mock_client = MockBusClient(response_msg=wrong_resp)
+        bridge = OVOSBridge(self.config, bus_client_factory=lambda: mock_client)
+
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello", session_id="expected-session"))
+        self.assertEqual(resp.status, AssistantStatus.ERROR)
+        self.assertIn("uncorrelated ovos response", resp.error.lower())
 
     def test_successful_mocked_interaction(self):
         """Verifies end-to-end prompt submission with correlated speak event."""
@@ -220,17 +252,9 @@ class TestOVOSBridge(unittest.TestCase):
         self.assertEqual(resp.status, AssistantStatus.ERROR)
         self.assertIn("intent failure", resp.error.lower())
 
-    def test_unavailable_when_offline_and_no_client(self):
-        """Verifies UNAVAILABLE status when bus is not running and no client supplied."""
-        bridge = OVOSBridge(self.config)
-        with patch.object(bridge, "is_available", return_value=False):
-            resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
-            self.assertEqual(resp.status, AssistantStatus.UNAVAILABLE)
-            self.assertIn("not reachable", resp.error.lower())
-
     @patch("integrations.ovos.bridge.socket.create_connection")
     def test_socket_availability_probe(self, mock_create_conn):
-        """Verifies is_available correctly probes socket connect."""
+        """Verifies is_available correctly probes socket connect for event bus."""
         mock_conn = MagicMock()
         mock_create_conn.return_value.__enter__.return_value = mock_conn
 
@@ -240,12 +264,13 @@ class TestOVOSBridge(unittest.TestCase):
         mock_create_conn.side_effect = ConnectionRefusedError()
         self.assertFalse(bridge.is_available())
 
-    def test_broadcast_notice_in_status(self):
-        """Verifies that health status includes broadcast confidentiality warning."""
+    def test_confidentiality_notice_in_status(self):
+        """Verifies that health status includes confidentiality and safety boundary notices."""
         bridge = OVOSBridge(self.config)
         status = bridge.get_status()
-        self.assertIn("broadcast_notice", status)
-        self.assertIn("broadcasts frames", status["broadcast_notice"].lower())
+        self.assertIn("safety_boundary", status)
+        self.assertIn("confidentiality_notice", status)
+        self.assertIn("best-effort", status["confidentiality_notice"].lower())
 
     def test_rejection_of_non_finite_timeout(self):
         """Verifies rejection of NaN and Inf timeout values."""
@@ -284,13 +309,9 @@ class TestOVOSBridge(unittest.TestCase):
         self.assertIn("unknown", resp.error.lower())
 
     def test_is_mock_only_capability(self):
-        """Verifies is_mock_only capability is True without live client factory."""
-        bridge_no_factory = OVOSBridge(self.config)
-        self.assertTrue(bridge_no_factory.capabilities.is_mock_only)
-
-        mock_client = MockBusClient()
-        bridge_with_factory = OVOSBridge(self.config, bus_client_factory=lambda: mock_client)
-        self.assertFalse(bridge_with_factory.capabilities.is_mock_only)
+        """Verifies is_mock_only capability is True for assistant prompt submission."""
+        bridge = OVOSBridge(self.config)
+        self.assertTrue(bridge.capabilities.is_mock_only)
 
 
 if __name__ == "__main__":
