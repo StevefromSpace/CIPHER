@@ -87,13 +87,13 @@ class DodaiosConfig:
         return True, None
 
     def validate_api_url(self) -> Tuple[bool, Optional[str]]:
-        """Ensures Control API communication is strictly bound to loopback."""
-        url = self.api_url.lower()
-        is_loopback = (
-            "127.0.0.1" in url
-            or "localhost" in url
-            or "[::1]" in url
-        )
-        if not is_loopback:
-            return False, f"Dodaios API URL '{self.api_url}' is not bound to a loopback address (127.0.0.1/localhost)."
-        return True, None
+        """Ensures Control API communication is strictly bound to loopback using parsed hostname."""
+        try:
+            import urllib.parse
+            parsed = urllib.parse.urlsplit(self.api_url)
+            hostname = (parsed.hostname or "").lower()
+            if hostname not in ("127.0.0.1", "localhost", "::1"):
+                return False, f"Dodaios API URL '{self.api_url}' host '{hostname}' is not bound to a loopback address (127.0.0.1, localhost, ::1)."
+            return True, None
+        except Exception as e:
+            return False, f"Invalid Dodaios API URL: {e}"

@@ -8,8 +8,11 @@ Neither cipher_core nor cipher_memory depends on this module.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
+import math
 import re
 from typing import Any, Dict, Optional, Tuple
+import urllib.error
+import urllib.request
 
 
 class ProcessingRoute(str, Enum):
@@ -88,6 +91,20 @@ def sanitize_sensitive_data(message: str) -> str:
     return sanitized.strip()
 
 
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Rejects automatic HTTP redirects fail-closed to prevent SSRF and egress escapes."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            newurl,
+            code,
+            f"Automatic HTTP redirect to '{newurl}' is blocked for security.",
+            headers,
+            fp
+        )
+
+
+
 def validate_assistant_request(
     request: AssistantRequest,
     capabilities: AssistantCapabilities
@@ -108,11 +125,16 @@ def validate_assistant_request(
             route=capabilities.default_route
         )
 
-    # Invariant 2: Timeout bounds
-    if request.timeout_seconds < 1.0 or request.timeout_seconds > 300.0:
+    # Invariant 2: Timeout bounds & finiteness
+    if (
+        not isinstance(request.timeout_seconds, (int, float))
+        or not math.isfinite(request.timeout_seconds)
+        or request.timeout_seconds < 1.0
+        or request.timeout_seconds > 300.0
+    ):
         return False, AssistantResponse(
             status=AssistantStatus.INVALID_REQUEST,
-            error=f"Timeout seconds ({request.timeout_seconds}) must be bounded between 1.0 and 300.0 seconds.",
+            error=f"Timeout seconds ({request.timeout_seconds}) must be a finite number bounded between 1.0 and 300.0 seconds.",
             route=capabilities.default_route
         )
 

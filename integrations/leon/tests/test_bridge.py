@@ -202,6 +202,28 @@ class TestLeonBridge(unittest.TestCase):
         mock_urlopen.side_effect = Exception("offline")
         self.assertFalse(bridge.is_available())
 
+    def test_rejection_of_non_finite_timeout(self):
+        """Verifies rejection of NaN and Inf timeout values."""
+        bridge = LeonBridge(self.config)
+        resp_nan = bridge.submit_prompt(AssistantRequest(prompt="Hi", timeout_seconds=float("nan")))
+        resp_inf = bridge.submit_prompt(AssistantRequest(prompt="Hi", timeout_seconds=float("inf")))
+        resp_ninf = bridge.submit_prompt(AssistantRequest(prompt="Hi", timeout_seconds=float("-inf")))
+        self.assertEqual(resp_nan.status, AssistantStatus.INVALID_REQUEST)
+        self.assertEqual(resp_inf.status, AssistantStatus.INVALID_REQUEST)
+        self.assertEqual(resp_ninf.status, AssistantStatus.INVALID_REQUEST)
+
+    def test_spoofed_loopback_url_rejection(self):
+        """Verifies that parsed hostname prevents spoofed loopback addresses."""
+        spoofed_cfg = LeonConfig(
+            enabled=True,
+            api_url="http://127.0.0.1.attacker.com:1337",
+            default_model="local/default"
+        )
+        bridge = LeonBridge(spoofed_cfg)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.ERROR)
+        self.assertIn("not bound to a loopback address", resp.error.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

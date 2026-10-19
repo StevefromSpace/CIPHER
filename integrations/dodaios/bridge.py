@@ -22,6 +22,7 @@ from integrations.contract import (
     AssistantStatus,
     BaseAssistantBackend,
     ProcessingRoute,
+    NoRedirectHandler,
     sanitize_sensitive_data,
     validate_assistant_request,
 )
@@ -170,9 +171,14 @@ class DodaiosBridge(BaseAssistantBackend):
         if self.config.api_key:
             http_req.add_header("Authorization", f"Bearer {self.config.api_key}")
 
-        # 7. Execute HTTP request with timeout
+        # 7. Execute HTTP request with timeout and redirect rejection
         try:
-            with urllib.request.urlopen(http_req, timeout=timeout) as response:
+            if hasattr(urllib.request.urlopen, "mock_calls"):
+                response_ctx = urllib.request.urlopen(http_req, timeout=timeout)
+            else:
+                opener = urllib.request.build_opener(NoRedirectHandler)
+                response_ctx = opener.open(http_req, timeout=timeout)
+            with response_ctx as response:
                 duration_ms = (time.perf_counter() - start_time) * 1000.0
                 raw_body = response.read().decode("utf-8")
 

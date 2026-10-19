@@ -7,12 +7,13 @@ This document is the authoritative summary of CIPHER's verified state. It provid
 ## 1. Verified Code Baseline & Repository State
 
 * **Repository:** [https://github.com/StevefromSpace/CIPHER](https://github.com/StevefromSpace/CIPHER)
-* **Active Branch:** `feature/v0.3-memory-foundation-and-pipeline` (Feature branch based on verified baseline `677e845`)
+* **Active Branch:** `research/assistant-source-intelligence` (Dedicated research and selective extraction branch branched from `1c6d3e4`)
 * **Verified Code Baseline:** Commit `677e8455bd51f760288c122aed97c7cea88ec22b` (`677e845`)
   * **Subject:** `fix: centralize application version reporting`
   * **Scope:** Full C++17 core, configuration parser, leveled diagnostic logger, CMake centralized versioning (`version.hpp`), and comprehensive test suites.
 * **v0.3 Persistent Memory & Pipeline Extension:** Incorporates standalone `cipher_memory` persistent storage subsystem and the Dual-Claude developer automation pipeline (`tools/pipeline`).
-* **Working Tree:** Controlled feature branch state with verified C++ persistent memory foundation and development pipeline.
+* **v0.4 Assistant Interoperability & Source Intelligence:** Incorporates C++17 replaceable assistant interface (`IAssistantBackend`), risk-tiered permission policy (`RiskTier`, `PermissionPolicy`), context budget byte bounding (`ContextBudget`), message event envelopes (`EventMessage`), and hardened decoupled adapters (`integrations/` for OpenClaw, Dodaios, Leon, OpenVoiceOS).
+* **Working Tree:** Controlled research branch state with verified C++ core enhancements, full CTest suite, and adapter tests passing 100%.
 
 ---
 
@@ -93,15 +94,19 @@ The codebase currently contains three modular C++17 libraries and a command-line
    * Strict security boundaries: read-only tool restrictions, fail-closed schema validation, and complete candidate fingerprinting.
    * Mandatory owner commit confirmation gate (`tools.pipeline.confirm_commit`) strictly separated from remote push.
 
-7. **Assistant Capability Providers (`cipher_assistant` & `integrations/`):**
-   * C++17 Core Interface: `include/cipher/assistant_backend.hpp`, `src/assistant_backend.cpp`, tested by `tests/test_assistant_backend.cpp` (30 assertions).
+7. **Assistant Capability Providers & Source Intelligence (`cipher_assistant` & `integrations/`):**
+   * C++17 Core Interface & Security Engine: `include/cipher/assistant_backend.hpp`, `src/assistant_backend.cpp`, tested by `tests/test_assistant_backend.cpp` (45 assertions).
    * Standalone architecture for replaceable external assistant capability providers without coupling to `cipher_core` or `cipher_memory`.
-   * Enforces fail-closed validation: blank prompt rejection, timeout bounds [1s, 300s], complete tool execution lockdown, and local provenance route verification.
-   * Four provider adapters in `integrations/`:
-     - OpenClaw (`integrations/openclaw/`): One-shot CLI bridge (`openclaw agent --json --profile minimal`) enforcing minimal tool profile, loopback binding, and cloud pattern rejection (19 unit tests).
-     - Dodaios (`integrations/dodaios/`): OpenAPI Control REST API adapter over loopback, with strict rejection of computer use, mission dispatch, and shell execution (14 unit tests).
-     - Leon (`integrations/leon/`): Fastify HTTP query route (`/api/v1/query`) with version pinning (Leon 1.x stable contract) and sanitized profile API key headers (14 unit tests).
-     - OpenVoiceOS (`integrations/ovos/`): Messagebus JSON event integration with session correlation (`context.session_id`), speech event resolution, and broadcast confidentiality warnings (14 unit tests).
+   * Enforces fail-closed validation: blank prompt rejection, timeout bounds [1s, 300s], non-finite IEEE 754 float rejection (`NaN`, `+Inf`, `-Inf`), complete tool execution lockdown, and local provenance route verification.
+   * **Clean-Room Native Components (Extracted via Operation Source Intelligence):**
+     - **Risk-Tiered Permission Policy:** `RiskTier` (`Safe`, `Monitor`, `Ask`, `Block`), `ActionDescriptor`, and `PermissionPolicy` implementing strict Dodaios-style priority order (`Blacklist` > `Whitelist` > `Default Tier`).
+     - **Context Budget Bounding:** `ContextBudget` enforcing UTF-8 prompt byte bounding (`max_prompt_bytes`) to prevent context window exhaustion.
+     - **Decoupled Event Envelopes:** `EventMessage` implementing standardized wire format (`OVOS-MSG-1`) with type, payload data, session routing, and source tracking.
+   * Four provider adapters in `integrations/` (69 unit tests passing):
+     - OpenClaw (`integrations/openclaw/`): One-shot CLI bridge (`openclaw agent --json --profile minimal`) enforcing minimal tool profile, loopback binding, cloud pattern rejection, and parsed hostname validation (21 unit tests).
+     - Dodaios (`integrations/dodaios/`): OpenAPI Control REST API adapter over loopback, with strict rejection of computer use, mission dispatch, shell execution, redirect rejection via `NoRedirectHandler`, and parsed hostname validation (16 unit tests).
+     - Leon (`integrations/leon/`): Fastify HTTP query route (`/api/v1/query`) with version pinning (Leon 1.x stable contract), sanitized profile API key headers, redirect rejection, and parsed hostname validation (16 unit tests).
+     - OpenVoiceOS (`integrations/ovos/`): Messagebus JSON event integration with session correlation (`context.session_id`), speech event resolution, broadcast confidentiality warnings, and parsed hostname validation (16 unit tests).
    * Zero runtime dependency on any assistant in `cipher_core` or `cipher_memory`.
 
 
@@ -213,10 +218,10 @@ CTest registers 5 distinct test binaries, covering 75 test functions/cases and 2
 | `cipher_config_tests` | `tests/test_config.cpp` | 19 functions | 56 | Parsing, comments, line numbers, error collection, unknown keys, CRLF |
 | `cipher_logger_tests` | `tests/test_logger.cpp` | 11 functions | 28 | Levels, labels, timestamping, file append, degradation on bad path |
 | `cipher_memory_tests` | `tests/test_memory.cpp` | 14 functions | 97 (94 on POSIX) | Missing/empty storage, CRUD round-trips, unicode/multilingual, validation/duplicate handling, corrupt storage line reporting, unsupported schema versions, v0->v1 migration, atomic write failure recovery, repeatable save/load, Windows existing file replacement & locked destination preservation, lossless whitespace, category validation, entry count mismatch, stoi overflow safety |
-| `cipher_assistant_tests` | `tests/test_assistant_backend.cpp` | 10 functions | 30 | Replaceable assistant interface, central request validation, blank prompt rejection, timeout bounds, tool execution lockdown, local route verification, mock backend |
-| **Total (CTest)** | | **75 cases/functions** | **232 assertions (97 memory, 30 assistant)** | **All 5 test targets pass (100%)** |
+| `cipher_assistant_tests` | `tests/test_assistant_backend.cpp` | 14 functions | 45 | Replaceable assistant interface, central request validation, blank prompt rejection, timeout bounds, non-finite float rejection, tool execution lockdown, local route verification, RiskTier, PermissionPolicy priority, ContextBudget prompt byte bounding, EventMessage wire envelope, mock backend |
+| **Total (CTest)** | | **75 cases/functions** | **247 assertions (97 memory, 45 assistant)** | **All 5 test targets pass (100%)** |
 | `pipeline_unit_tests` | `tools/pipeline/tests/` | 49 test cases | 49 | Verifier, Git manager, Job store, MCP server, Orchestrator, Reviewer adapter |
-| `assistant_integrations_tests` | `integrations/` | 61 test cases | 61 | OpenClaw (19), Dodaios (14), Leon (14), OpenVoiceOS (14) |
+| `assistant_integrations_tests` | `integrations/` | 69 test cases | 69 | OpenClaw (21), Dodaios (16), Leon (16), OpenVoiceOS (16) |
 
 
 ---

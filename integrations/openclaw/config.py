@@ -98,16 +98,16 @@ class OpenClawConfig:
         return True, None
 
     def validate_gateway_url(self) -> Tuple[bool, Optional[str]]:
-        """Ensures gateway communication is strictly bound to loopback."""
-        url = self.gateway_url.lower()
-        is_loopback = (
-            "127.0.0.1" in url
-            or "localhost" in url
-            or "[::1]" in url
-        )
-        if not is_loopback:
-            return False, f"Gateway URL '{self.gateway_url}' is not bound to a loopback address (127.0.0.1/localhost)."
-        return True, None
+        """Ensures gateway communication is strictly bound to loopback using parsed hostname."""
+        try:
+            import urllib.parse
+            parsed = urllib.parse.urlsplit(self.gateway_url)
+            hostname = (parsed.hostname or "").lower()
+            if hostname not in ("127.0.0.1", "localhost", "::1"):
+                return False, f"Gateway URL '{self.gateway_url}' host '{hostname}' is not bound to a loopback address (127.0.0.1, localhost, ::1)."
+            return True, None
+        except Exception as e:
+            return False, f"Invalid Gateway URL: {e}"
 
     def is_tool_policy_safe(self) -> Tuple[bool, Optional[str]]:
         """Verifies that the active OpenClaw profile restricts tool execution."""

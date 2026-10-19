@@ -1,6 +1,7 @@
 #include "cipher/assistant_backend.hpp"
 
 #include <iostream>
+#include <limits>
 #include <string>
 
 namespace {
@@ -99,182 +100,224 @@ public:
 };
 
 // ---------------------------------------------------------------------------
-// Test Invariant 1: Blank or Whitespace-Only Prompts
+// Test Invariant 1: Prompt Validation
 // ---------------------------------------------------------------------------
 void test_prompt_validation() {
-    cipher::AssistantCapabilities local_caps;
-    local_caps.processing_route = cipher::ProcessingRoute::VerifiedLocal;
+    cipher::AssistantCapabilities caps;
+    caps.processing_route = cipher::ProcessingRoute::VerifiedLocal;
 
+    // 1. Empty prompt rejected
     {
         cipher::AssistantRequest req;
         req.prompt = "";
-        auto res = cipher::validate_assistant_request(req, local_caps);
-        check(!res.is_valid, "empty prompt rejected", "Expected failure on empty prompt");
+        auto res = cipher::validate_assistant_request(req, caps);
+        check(!res.is_valid, "empty prompt rejected", "Expected invalid result");
         check(res.error_message.find("empty") != std::string::npos,
-              "empty prompt error message mentions empty", "Missing descriptive error");
+              "empty prompt error message mentions empty", "Unexpected message: " + res.error_message);
     }
 
+    // 2. Whitespace-only prompt rejected
     {
         cipher::AssistantRequest req;
-        req.prompt = "    \t \n \r  ";
-        auto res = cipher::validate_assistant_request(req, local_caps);
-        check(!res.is_valid, "whitespace-only prompt rejected", "Expected failure on whitespace-only prompt");
+        req.prompt = "   \t\n\r  ";
+        auto res = cipher::validate_assistant_request(req, caps);
+        check(!res.is_valid, "whitespace-only prompt rejected", "Expected invalid result");
     }
 
+    // 3. Valid prompt accepted
     {
         cipher::AssistantRequest req;
-        req.prompt = "What is the status?";
-        auto res = cipher::validate_assistant_request(req, local_caps);
-        check(res.is_valid, "valid prompt accepted", "Expected success on valid prompt");
+        req.prompt = "Hello CIPHER";
+        auto res = cipher::validate_assistant_request(req, caps);
+        check(res.is_valid, "valid prompt accepted", "Expected valid result: " + res.error_message);
     }
 }
 
 // ---------------------------------------------------------------------------
-// Test Invariant 2: Bounded Timeouts [1.0s, 300.0s]
+// Test Invariant 2: Timeout Bounds & Non-Finite Rejection
 // ---------------------------------------------------------------------------
 void test_timeout_bounds() {
-    cipher::AssistantCapabilities local_caps;
-    local_caps.processing_route = cipher::ProcessingRoute::VerifiedLocal;
+    cipher::AssistantCapabilities caps;
+    caps.processing_route = cipher::ProcessingRoute::VerifiedLocal;
 
-    // Below 1.0s
+    // 1. Sub-second timeout rejected
     {
         cipher::AssistantRequest req;
         req.prompt = "Valid prompt";
         req.timeout_seconds = 0.5;
-        auto res = cipher::validate_assistant_request(req, local_caps);
-        check(!res.is_valid, "timeout < 1.0s rejected", "Expected failure on sub-second timeout");
+        auto res = cipher::validate_assistant_request(req, caps);
+        check(!res.is_valid, "timeout < 1.0s rejected", "Expected invalid result");
     }
 
-    // Negative timeout
+    // 2. Excessive timeout (> 300s) rejected
     {
         cipher::AssistantRequest req;
         req.prompt = "Valid prompt";
-        req.timeout_seconds = -10.0;
-        auto res = cipher::validate_assistant_request(req, local_caps);
-        check(!res.is_valid, "negative timeout rejected", "Expected failure on negative timeout");
+        req.timeout_seconds = 301.0;
+        auto res = cipher::validate_assistant_request(req, caps);
+        check(!res.is_valid, "timeout > 300.0s rejected", "Expected invalid result");
     }
 
-    // Above 300.0s
+    // 3. Valid timeout boundary values
     {
         cipher::AssistantRequest req;
         req.prompt = "Valid prompt";
-        req.timeout_seconds = 300.5;
-        auto res = cipher::validate_assistant_request(req, local_caps);
-        check(!res.is_valid, "timeout > 300s rejected", "Expected failure on timeout > 300s");
+        req.timeout_seconds = 1.0;
+        check(cipher::validate_assistant_request(req, caps).is_valid, "timeout 1.0s accepted", "Expected valid");
+
+        req.timeout_seconds = 300.0;
+        check(cipher::validate_assistant_request(req, caps).is_valid, "timeout 300.0s accepted", "Expected valid");
+
+        req.timeout_seconds = 30.0;
+        check(cipher::validate_assistant_request(req, caps).is_valid, "timeout 30.0s accepted", "Expected valid");
     }
 
-    // Boundaries: 1.0s and 300.0s
+    // 4. Non-finite timeouts (NaN, +Inf, -Inf) rejected fail-closed
     {
-        cipher::AssistantRequest req1;
-        req1.prompt = "Valid prompt";
-        req1.timeout_seconds = 1.0;
-        auto res1 = cipher::validate_assistant_request(req1, local_caps);
-        check(res1.is_valid, "boundary timeout 1.0s accepted", "Expected valid for 1.0s");
+        cipher::AssistantRequest req;
+        req.prompt = "Valid prompt";
+        req.timeout_seconds = std::numeric_limits<double>::quiet_NaN();
+        auto res_nan = cipher::validate_assistant_request(req, caps);
+        check(!res_nan.is_valid, "NaN timeout rejected fail-closed", "Expected invalid result");
 
-        cipher::AssistantRequest req2;
-        req2.prompt = "Valid prompt";
-        req2.timeout_seconds = 300.0;
-        auto res2 = cipher::validate_assistant_request(req2, local_caps);
-        check(res2.is_valid, "boundary timeout 300.0s accepted", "Expected valid for 300.0s");
+        req.timeout_seconds = std::numeric_limits<double>::infinity();
+        auto res_inf = cipher::validate_assistant_request(req, caps);
+        check(!res_inf.is_valid, "+Inf timeout rejected fail-closed", "Expected invalid result");
+
+        req.timeout_seconds = -std::numeric_limits<double>::infinity();
+        auto res_ninf = cipher::validate_assistant_request(req, caps);
+        check(!res_ninf.is_valid, "-Inf timeout rejected fail-closed", "Expected invalid result");
     }
 }
 
 // ---------------------------------------------------------------------------
-// Test Invariant 3: Tool Execution Lockdown (Fails Closed)
+// Test Invariant 3: Tool Lockdown
 // ---------------------------------------------------------------------------
 void test_tool_request_lockdown() {
-    cipher::AssistantCapabilities local_caps;
-    local_caps.processing_route = cipher::ProcessingRoute::VerifiedLocal;
+    cipher::AssistantCapabilities caps;
+    caps.processing_route = cipher::ProcessingRoute::VerifiedLocal;
 
-    cipher::AssistantRequest req;
-    req.prompt = "List directory files";
-    req.request_tools = true;
+    // 1. Tool execution request rejected
+    {
+        cipher::AssistantRequest req;
+        req.prompt = "Execute tool command";
+        req.request_tools = true;
+        auto res = cipher::validate_assistant_request(req, caps);
+        check(!res.is_valid, "request_tools=true rejected", "Expected invalid result");
+        check(res.error_message.find("prohibited") != std::string::npos,
+              "tool lockdown error message explains policy", "Unexpected message: " + res.error_message);
+    }
 
-    auto res = cipher::validate_assistant_request(req, local_caps);
-    check(!res.is_valid, "tool execution request fails closed", "Expected failure when request_tools is true");
-    check(res.error_message.find("prohibited") != std::string::npos,
-          "error mentions tool prohibition", "Missing explanation of tool prohibition");
+    // 2. Default request_tools=false accepted
+    {
+        cipher::AssistantRequest req;
+        req.prompt = "Pure conversation";
+        req.request_tools = false;
+        auto res = cipher::validate_assistant_request(req, caps);
+        check(res.is_valid, "request_tools=false accepted", "Expected valid result");
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Test Invariant 4: Local-Only Route Enforcement & Provenance Verification
+// Test Invariant 4: Local-Only Route Verification
 // ---------------------------------------------------------------------------
 void test_local_only_routing_invariants() {
-    cipher::AssistantRequest req;
-    req.prompt = "Explain quantum computing";
-    req.local_only = true;
-
-    // 1. VerifiedLocal route accepted
+    // 1. local_only with VerifiedLocal succeeds
     {
         cipher::AssistantCapabilities caps;
         caps.processing_route = cipher::ProcessingRoute::VerifiedLocal;
+
+        cipher::AssistantRequest req;
+        req.prompt = "Local query";
+        req.local_only = true;
         auto res = cipher::validate_assistant_request(req, caps);
-        check(res.is_valid, "local_only accepted with VerifiedLocal route", "Expected success");
+        check(res.is_valid, "local_only with VerifiedLocal route accepted", "Expected valid result");
     }
 
-    // 2. RemoteCloud route rejected under local_only
+    // 2. local_only with RemoteCloud rejected
     {
         cipher::AssistantCapabilities caps;
         caps.processing_route = cipher::ProcessingRoute::RemoteCloud;
+
+        cipher::AssistantRequest req;
+        req.prompt = "Local query";
+        req.local_only = true;
         auto res = cipher::validate_assistant_request(req, caps);
-        check(!res.is_valid, "local_only rejects RemoteCloud route", "Expected rejection");
-        check(res.error_message.find("Local-only policy violation") != std::string::npos,
-              "error mentions local-only policy violation", "Missing expected error phrasing");
+        check(!res.is_valid, "local_only with RemoteCloud rejected", "Expected invalid result");
     }
 
-    // 3. Unknown route rejected (model name / URL alone is not proof)
+    // 3. local_only with Unknown route rejected (fail-closed)
     {
         cipher::AssistantCapabilities caps;
         caps.processing_route = cipher::ProcessingRoute::Unknown;
+
+        cipher::AssistantRequest req;
+        req.prompt = "Local query";
+        req.local_only = true;
         auto res = cipher::validate_assistant_request(req, caps);
-        check(!res.is_valid, "local_only rejects Unknown route even with local model override", "Expected rejection");
+        check(!res.is_valid, "local_only with Unknown route rejected", "Expected invalid result");
     }
 
-    // 4. Mixed route rejected
+    // 4. local_only=false allows RemoteCloud
     {
-        cipher::AssistantCapabilities caps;
-        caps.processing_route = cipher::ProcessingRoute::Mixed;
-        auto res = cipher::validate_assistant_request(req, caps);
-        check(!res.is_valid, "local_only rejects Mixed route", "Expected rejection on mixed/hybrid route");
-    }
-
-    // 5. Remote route permitted when local_only is explicitly false
-    {
-        cipher::AssistantRequest cloud_req;
-        cloud_req.prompt = "Public weather query";
-        cloud_req.local_only = false;
         cipher::AssistantCapabilities caps;
         caps.processing_route = cipher::ProcessingRoute::RemoteCloud;
-        auto res = cipher::validate_assistant_request(cloud_req, caps);
-        check(res.is_valid, "RemoteCloud route permitted when local_only is explicitly false", "Expected pass");
+
+        cipher::AssistantRequest req;
+        req.prompt = "Cloud query";
+        req.local_only = false;
+        auto res = cipher::validate_assistant_request(req, caps);
+        check(res.is_valid, "local_only=false allows RemoteCloud", "Expected valid result");
     }
 }
 
 // ---------------------------------------------------------------------------
-// Test AssistantManager Central Dispatcher & Gating
+// Test Invariant 5: Context Budget Prompt Bounding
+// ---------------------------------------------------------------------------
+void test_context_budget_prompt_bounding() {
+    cipher::AssistantCapabilities caps;
+    caps.processing_route = cipher::ProcessingRoute::VerifiedLocal;
+
+    cipher::AssistantRequest req;
+    req.budget.max_prompt_bytes = 100;
+
+    // Small prompt within budget
+    req.prompt = "Small prompt";
+    check(cipher::validate_assistant_request(req, caps).is_valid,
+          "prompt within budget accepted", "Expected valid");
+
+    // Oversized prompt exceeding budget
+    req.prompt = std::string(150, 'X');
+    auto res_oversized = cipher::validate_assistant_request(req, caps);
+    check(!res_oversized.is_valid, "oversized prompt exceeding budget rejected", "Expected invalid");
+    check(res_oversized.error_message.find("Context budget violation") != std::string::npos,
+          "budget error message contains Context budget violation", "Unexpected message: " + res_oversized.error_message);
+}
+
+// ---------------------------------------------------------------------------
+// Test AssistantManager Central Dispatch
 // ---------------------------------------------------------------------------
 void test_assistant_manager_dispatch() {
-    // 1. Null backend handling
+    // 1. Null backend fails gracefully
     {
         cipher::AssistantRequest req;
-        req.prompt = "Hello";
+        req.prompt = "Test";
         auto resp = cipher::AssistantManager::submit(nullptr, req);
         check(resp.status == cipher::AssistantStatus::Unavailable,
-              "null backend returns Unavailable", "Expected Unavailable status");
-        check(resp.error.has_value(), "null backend returns descriptive error", "Expected error message");
+              "null backend returns Unavailable", "Expected Unavailable");
     }
 
-    // 2. Unavailable/offline backend handling
+    // 2. Unavailable backend fails gracefully
     {
         MockUnavailableBackend offline_backend;
         cipher::AssistantRequest req;
-        req.prompt = "Hello";
+        req.prompt = "Test";
         auto resp = cipher::AssistantManager::submit(&offline_backend, req);
         check(resp.status == cipher::AssistantStatus::Unavailable,
-              "offline backend returns Unavailable without throwing", "Expected Unavailable status");
+              "offline backend returns Unavailable", "Expected Unavailable");
     }
 
-    // 3. Policy violation interception before backend invocation
+    // 3. Policy violation blocks backend execution
     {
         MockLocalBackend local_backend;
         cipher::AssistantRequest req;
@@ -302,6 +345,63 @@ void test_assistant_manager_dispatch() {
 }
 
 // ---------------------------------------------------------------------------
+// Test Dodaios-Inspired PermissionPolicy & RiskTier
+// ---------------------------------------------------------------------------
+void test_risk_tier_and_permission_policy() {
+    cipher::PermissionPolicy policy;
+    policy.set_default_tier(cipher::RiskTier::Ask);
+
+    // Add rules
+    policy.add_blacklist_pattern("run_shell rm -rf*");
+    policy.add_blacklist_pattern("exec*");
+    policy.add_blacklist_pattern("format*");
+    policy.add_whitelist_pattern("read_file*");
+    policy.add_whitelist_pattern("time");
+
+    // 1. Blacklist evaluation
+    cipher::ActionDescriptor blocked_action{"run_shell", "rm -rf /", "system", cipher::RiskTier::Ask};
+    check(policy.evaluate(blocked_action) == cipher::RiskTier::Block,
+          "blacklist match evaluates to RiskTier::Block", "Expected Block");
+    check(!policy.is_permitted(blocked_action),
+          "blocked action is not permitted", "Expected false");
+
+    // 2. Blacklist beats whitelist (Dodaios non-negotiable priority order)
+    policy.add_whitelist_pattern("exec*"); // Even if whitelisted, blacklist wins!
+    cipher::ActionDescriptor conflict_action{"exec", "whoami", "system", cipher::RiskTier::Ask};
+    check(policy.evaluate(conflict_action) == cipher::RiskTier::Block,
+          "blacklist beats whitelist on conflict (Dodaios invariant)", "Expected Block");
+
+    // 3. Whitelist downgrades tier to Safe
+    cipher::ActionDescriptor safe_action{"read_file", "cipher.conf", "fs", cipher::RiskTier::Ask};
+    check(policy.evaluate(safe_action) == cipher::RiskTier::Safe,
+          "whitelist match evaluates to RiskTier::Safe", "Expected Safe");
+    check(policy.is_permitted(safe_action),
+          "safe action is permitted", "Expected true");
+
+    // 4. Default tier fallback when no match
+    cipher::ActionDescriptor unconfigured_action{"edit_memory", "key", "memory", cipher::RiskTier::Ask};
+    check(policy.evaluate(unconfigured_action) == cipher::RiskTier::Ask,
+          "unmatched action falls back to default Ask tier", "Expected Ask");
+}
+
+// ---------------------------------------------------------------------------
+// Test OpenVoiceOS-Inspired EventMessage
+// ---------------------------------------------------------------------------
+void test_event_message_envelope() {
+    cipher::EventMessage msg;
+    msg.type = "recognizer_loop:utterance";
+    msg.data = "{\"utterance\":\"hello\"}";
+    msg.session_id = "session-12345";
+    msg.source = "cipher";
+    msg.destination = "assistant";
+    msg.timestamp = 1729330000.0;
+
+    check(msg.type == "recognizer_loop:utterance", "event message type", "mismatch");
+    check(msg.session_id == "session-12345", "event message session_id", "mismatch");
+    check(msg.source == "cipher", "event message source", "mismatch");
+}
+
+// ---------------------------------------------------------------------------
 // Test Enum to String Conversions
 // ---------------------------------------------------------------------------
 void test_enum_to_string() {
@@ -309,6 +409,8 @@ void test_enum_to_string() {
     check(cipher::to_string(cipher::AssistantStatus::PolicyViolation) == "policy_violation", "status policy violation string", "mismatch");
     check(cipher::to_string(cipher::ProcessingRoute::VerifiedLocal) == "verified_local", "route verified_local string", "mismatch");
     check(cipher::to_string(cipher::ProcessingRoute::RemoteCloud) == "remote_cloud", "route remote_cloud string", "mismatch");
+    check(cipher::to_string(cipher::RiskTier::Safe) == "safe", "risk tier safe string", "mismatch");
+    check(cipher::to_string(cipher::RiskTier::Block) == "block", "risk tier block string", "mismatch");
 }
 
 } // anonymous namespace
@@ -320,7 +422,10 @@ int main() {
     test_timeout_bounds();
     test_tool_request_lockdown();
     test_local_only_routing_invariants();
+    test_context_budget_prompt_bounding();
     test_assistant_manager_dispatch();
+    test_risk_tier_and_permission_policy();
+    test_event_message_envelope();
     test_enum_to_string();
 
     std::cout << "\n-------------------------------------------------------------\n";

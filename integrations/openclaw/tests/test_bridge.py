@@ -368,8 +368,32 @@ class TestOpenClawBridge(unittest.TestCase):
         prof_idx = argv.index("--profile")
         self.assertEqual(argv[prof_idx + 1], "minimal")
 
+    def test_rejection_of_non_finite_timeout(self):
+        """Verifies rejection of NaN and Inf timeout values."""
+        bridge = OpenClawBridge(self.config)
+        with patch.object(Path, "exists", return_value=True):
+            resp_nan = bridge.submit_prompt(AssistantRequest(prompt="Hi", timeout_seconds=float("nan")))
+            resp_inf = bridge.submit_prompt(AssistantRequest(prompt="Hi", timeout_seconds=float("inf")))
+            resp_ninf = bridge.submit_prompt(AssistantRequest(prompt="Hi", timeout_seconds=float("-inf")))
+        self.assertEqual(resp_nan.status, AssistantStatus.INVALID_REQUEST)
+        self.assertEqual(resp_inf.status, AssistantStatus.INVALID_REQUEST)
+        self.assertEqual(resp_ninf.status, AssistantStatus.INVALID_REQUEST)
+
+    def test_spoofed_loopback_url_rejection(self):
+        """Verifies that parsed hostname prevents spoofed loopback addresses."""
+        spoofed_cfg = OpenClawConfig(
+            enabled=True,
+            cli_path=self.mock_cli_path,
+            gateway_url="ws://127.0.0.1.attacker.com:18789",
+            default_model="ollama/llama3.2"
+        )
+        bridge = OpenClawBridge(spoofed_cfg)
+        with patch.object(Path, "exists", return_value=True):
+            resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.ERROR)
+        self.assertIn("not bound to a loopback address", resp.error.lower())
+
 
 if __name__ == "__main__":
     import os
     unittest.main()
-

@@ -82,9 +82,19 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
 
 
 ### v0.4: Replaceable AI runtime interface
-
+ 
 - [x] Implement standard C++17 assistant backend interface (`cipher_assistant`: `IAssistantBackend`, `AssistantManager`) with central validation enforcing blank prompt rejection, timeout bounds, tool lockdown, and local route verification (30 CTest assertions).
 - [x] Implement provider-independent assistant adapters (`integrations/`) for OpenClaw, Dodaios, Leon, and OpenVoiceOS (61 unit tests) with loopback binding, cloud rejection, and failure containment.
+- [x] Operation Source Intelligence: Conduct source-level architectural investigation of OpenClaw, Dodaios, Leon, and OpenVoiceOS (6 audit reports + ARCHITECTURE_DECISION synthesis).
+- [x] Clean-Room Native C++17 Extraction: Port proven mechanisms directly into CIPHER Core:
+  * Risk-tiered permission policy (`RiskTier`: `Safe`, `Monitor`, `Ask`, `Block`; `PermissionPolicy` with `Blacklist` > `Whitelist` > `Default Tier`).
+  * Context budget prompt byte bounding (`ContextBudget` with `max_prompt_bytes`).
+  * Decoupled message wire envelopes (`EventMessage` with `OVOS-MSG-1` schema).
+- [x] Defense-in-Depth Security Hardening:
+  * Non-finite IEEE 754 float rejection (`std::isnan`, `std::isinf`, `math.isfinite()`).
+  * Strict parsed hostname loopback binding (`urlsplit().hostname` in `127.0.0.1`, `localhost`, `::1`).
+  * HTTP redirect rejection (`NoRedirectHandler`) to prevent loopback bypass.
+- [x] Test Suite Expansion: 5 CTest targets (75 cases, 247 assertions, 100% passing), 69 adapter unit tests (100% passing), 49 pipeline unit tests (100% passing).
 - [x] Configure dedicated CI test job for assistant integrations and developer pipeline.
 - [ ] Prototype direct in-process local runtime adapter (e.g., `llama.cpp` or embedded model) when local inference milestone begins.
 - [ ] Keep the core useful when no model or assistant is available.

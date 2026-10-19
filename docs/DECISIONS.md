@@ -144,3 +144,29 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
     - `integrations/leon`: Fastify HTTP query route (`/api/v1/query`) with version pinning (Leon 1.x stable contract) and sanitized profile API key headers (14 unit tests).
     - `integrations/ovos`: Messagebus JSON event integration with session correlation (`context.session_id`), speech event resolution, and broadcast confidentiality warnings (14 unit tests).
 * **Future Intent:** CIPHER Core interacts with external assistants solely through the abstract `IAssistantBackend` interface, allowing hot-swapping between direct local runtimes (e.g. `llama.cpp`), local daemons (e.g. `ollama`), or agent gateways with zero code modification to core commands or memory persistence.
+
+---
+
+### 13. Clean-Room Multi-Agent Source Intelligence Extraction, Risk-Tiered Permission Policy, and Defense-in-Depth Loopback Hardening
+
+* **Status:** Accepted (Operation Source Intelligence, Milestone v0.4)
+* **Principle:** Upstream open-source assistant codebases (OpenClaw, Dodaios, Leon, OpenVoiceOS) are architectural reference models, not vendored runtimes or dependencies. Architectural mechanisms—specifically risk-tiered permissions, strict prompt budget bounding, and decoupled event envelopes—must be cleanly reimplemented in modern C++17 without third-party runtime dependencies or copy-paste license contamination.
+* **Rationale:** In-depth source code audit of OpenClaw (MIT), Dodaios (Apache 2.0 / historical MIT <= 1.6.0), Leon (MIT), and OpenVoiceOS (Apache 2.0) revealed critical architectural patterns and security nuances:
+  1. Dodaios implements a four-tier risk classification (`Safe`, `Monitor`, `Ask`, `Block`) where blacklist overrides whitelist unconditionally.
+  2. OpenClaw's context engine manages prompt budgets strictly in UTF-8 bytes to prevent model context exhaustion, but its default `minimal` profile still loads discovery tools (`presence`, `session_status`, `gateway`).
+  3. OpenVoiceOS uses a standardized messagebus wire envelope (`OVOS-MSG-1`) that decouples message routing, data payloads, and session tracking, but broadcasts across all connected listeners.
+  4. Security audit identified attack vectors: URL hostname spoofing via substring matching (e.g. `http://127.0.0.1.attacker.com`), non-finite IEEE 754 float values (`NaN`, `+Inf`, `-Inf`) evading boundary checks, and HTTP redirect follows (`301`/`302`) that could silently escape loopback confines.
+* **Current Implementation:**
+  - `cipher_assistant` (C++17 library):
+    - `RiskTier` (`Safe`, `Monitor`, `Ask`, `Block`) and `ActionDescriptor` in `include/cipher/assistant_backend.hpp`.
+    - `PermissionPolicy`: Implements Dodaios-style priority evaluation (`Blacklist` > `Whitelist` > `Default Tier`).
+    - `ContextBudget`: Enforces byte-level UTF-8 bounding (`max_prompt_bytes`) during `validate_assistant_request()`.
+    - `EventMessage`: Standardized decoupled message envelope (`OVOS-MSG-1` wire structure).
+    - Hardened `validate_assistant_request()` with `std::isnan` and `std::isinf` rejection.
+    - Verified by 45 C++ assertions in `tests/test_assistant_backend.cpp` (5/5 CTest targets pass; total C++ suite: 75 test cases, 247 assertions).
+  - `integrations/` (Python adapters):
+    - `integrations/contract.py`: Hardened with `math.isfinite()` validation and `NoRedirectHandler`.
+    - Loopback validation in OpenClaw, Dodaios, Leon, and OVOS configs updated to use `urllib.parse.urlsplit().hostname` strictly restricted to `("127.0.0.1", "localhost", "::1")`.
+    - Redirect blocking: HTTP bridges reject redirects to external hosts.
+    - Verified by 69 unit tests across all adapter test suites.
+* **Future Intent:** When native tool execution (Milestone v0.5) is implemented in CIPHER, the native C++17 `PermissionPolicy` and `RiskTier` evaluation engine will serve as the mandatory, authoritative security gate preceding any tool invocation.

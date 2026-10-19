@@ -38,13 +38,13 @@ class OVOSConfig:
     broadcast_privacy_acknowledged: bool = True
 
     def validate_bus_url(self) -> Tuple[bool, Optional[str]]:
-        """Ensures messagebus communication is strictly bound to loopback."""
-        url = self.bus_url.lower()
-        is_loopback = (
-            "127.0.0.1" in url
-            or "localhost" in url
-            or "[::1]" in url
-        )
-        if not is_loopback:
-            return False, f"OVOS Messagebus URL '{self.bus_url}' is not bound to a loopback address (127.0.0.1/localhost)."
-        return True, None
+        """Ensures messagebus communication is strictly bound to loopback using parsed hostname."""
+        try:
+            import urllib.parse
+            parsed = urllib.parse.urlsplit(self.bus_url)
+            hostname = (parsed.hostname or "").lower()
+            if hostname not in ("127.0.0.1", "localhost", "::1"):
+                return False, f"OVOS Messagebus URL '{self.bus_url}' host '{hostname}' is not bound to a loopback address (127.0.0.1, localhost, ::1)."
+            return True, None
+        except Exception as e:
+            return False, f"Invalid OVOS Messagebus URL: {e}"
