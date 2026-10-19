@@ -12,13 +12,14 @@ This document is the authoritative summary of CIPHER's verified state. It provid
   * **Subject:** `fix: centralize application version reporting`
   * **Scope:** Full C++17 core, configuration parser, leveled diagnostic logger, CMake centralized versioning (`version.hpp`), and comprehensive test suites.
 * **v0.3 Persistent Memory & Pipeline Extension:** Incorporates standalone `cipher_memory` persistent storage subsystem and the Dual-Claude developer automation pipeline (`tools/pipeline`).
-* **v0.4 Assistant Interoperability, Source Intelligence & Hardening Gates 1 & 2:** Incorporates C++17 replaceable assistant interface (`IAssistantBackend`), risk-tiered permission policy (`RiskTier`, `PermissionPolicy`), context budget byte bounding (`ContextBudget`), message event envelopes (`EventMessage`), hardened decoupled adapters (`integrations/` for OpenClaw, Dodaios, Leon, OpenVoiceOS), and completed Operation Hardening Gate 2:
+* **v0.4 Assistant Interoperability, Source Intelligence & Hardening Gates 1, 2 & 2.1:** Incorporates C++17 replaceable assistant interface (`IAssistantBackend`), risk-tiered permission policy (`RiskTier`, `PermissionPolicy`), context budget byte bounding (`ContextBudget`), message event envelopes (`EventMessage`), hardened decoupled adapters (`integrations/` for OpenClaw, Dodaios, Leon, OpenVoiceOS), and completed Operation Hardening Gate 2.1:
   - Reusable bounded I/O primitive (`read_bounded`) halting stream consumption at `max_bytes + 1` and aborting/closing streams immediately.
-  - Genuine OpenClaw tool isolation via isolated temporary configuration schema (`tools: {profile: "minimal", deny: ["*"]}`), environment variable binding (`OPENCLAW_CONFIG_PATH`, `OPENCLAW_STATE_DIR`, `OPENCLAW_GATEWAY_URL`, `OPENCLAW_PROFILE`), and bounded subprocess streaming killing processes on limit breach.
-  - Alignment of Dodaios contract as an agent-runtime gateway proxy with unverified live compatibility and bounded response/error body streams.
-  - Fail-closed tool isolation boundary for Leon, disabling live execution while safe text-only mode cannot be established.
-  - Defensible boundary for OpenVoiceOS removing keyword denylists, keeping general assistant submission mock-only/unavailable, and requiring explicit `session_id` response correlation.
-* **Working Tree:** Controlled research branch state with verified C++ core enhancements, full CTest suite, and 115 adapter tests passing 100%.
+  - Genuine OpenClaw tool isolation via strict upstream configuration schema (`tools: {profile: "minimal", deny: ["*"]}`), environment variable binding (`OPENCLAW_CONFIG_PATH`, `OPENCLAW_STATE_DIR`, `OPENCLAW_GATEWAY_URL`, `OPENCLAW_PROFILE`), empty tool inventory verification probe, and immediate subprocess overflow kill without blocking on child exit.
+  - Alignment of Dodaios contract as an agent-runtime gateway proxy with unverified live compatibility, bounded response/error body streams, and enforced `enable_live_execution=False` + `verified_tool_isolation=False` guards preventing Boolean opt-in bypass.
+  - Fail-closed tool isolation boundary for Leon, requiring both `enable_live_execution=True` and positive downstream `verified_tool_isolation=True` before query dispatch.
+  - Defensible boundary for OpenVoiceOS enforcing mock-only client factory verification (`is_mock=True` / `_is_cipher_mock=True`), blocking live bus dispatch bypass, and requiring explicit `session_id` response correlation.
+  - Developer pipeline reproducibility via `requirements-dev.txt` (`mcp>=1.0.0`) in CI.
+* **Working Tree:** Controlled research branch state with verified C++ core enhancements, full CTest suite (5 targets, 75 cases, 264 assertions), 127 adapter tests passing 100%, and 49 developer pipeline tests passing 100%.
 
 ---
 
@@ -107,12 +108,12 @@ The codebase currently contains three modular C++17 libraries and a command-line
      - **Risk-Tiered Permission Policy:** `RiskTier` (`Safe`, `Monitor`, `Ask`, `Block`), `ActionDescriptor`, and `PermissionPolicy` implementing strict Dodaios-style priority order (`Blacklist` > `Whitelist` > `Default Tier`). Empty actions fail closed to `Block`.
      - **Context Budget Bounding:** `ContextBudget` enforcing UTF-8 prompt byte bounding (`max_prompt_bytes`) to prevent context window exhaustion, strictly rejecting prompts when budget is zero.
      - **Decoupled Event Envelopes:** `EventMessage` implementing standardized wire format (`OVOS-MSG-1`) with type, payload data, session routing, and source tracking.
-   * Four provider adapters in `integrations/` (99 unit tests passing):
-     - Shared Contract (`integrations/contract.py`): Loopback URL validation (`validate_loopback_url`) strictly limited to `{"127.0.0.1", "localhost", "::1"}` rejecting user credentials, and redirect denial (`NoRedirectHandler`, `safe_urlopen`) blocking 301, 302, 303, 307, 308 (12 unit tests).
-     - OpenClaw (`integrations/openclaw/`): One-shot CLI bridge (`openclaw agent --json --profile minimal`) enforcing minimal tool profile, `explicit_tool_denial=True` with CLI flag `--deny-tools *`, route provenance defaulting to `UNKNOWN`, loopback binding, cloud pattern rejection, and 1MB output bounds (26 unit tests).
-     - Dodaios (`integrations/dodaios/`): OpenAPI Control REST API adapter over loopback targeting verified `/api/runtime-gateway/v1/chat/completions` and `/api/health`, route defaulting to `UNKNOWN`, redirect rejection, bounded output, with strict rejection of computer use, mission dispatch, and shell execution (20 unit tests).
-     - Leon (`integrations/leon/`): Fastify HTTP query route (`/api/v1/query` and `/api/v1/info`) with version pinning (Leon 1.x stable contract, rejecting 2.x preview), route defaulting to `UNKNOWN`, sanitized profile API key headers (`X-API-Key` redaction), redirect rejection, and 1MB output bounds (21 unit tests).
-     - OpenVoiceOS (`integrations/ovos/`): Messagebus JSON event integration with session correlation (`context.session_id`), voice event bus role, route defaulting to `UNKNOWN`, live client factory presence check (`is_mock_only`), privileged command rejection (shutdown, reboot, install, shell), and broadcast confidentiality guard against credential leakage (20 unit tests).
+   * Four provider adapters in `integrations/` (127 unit tests passing 100%):
+     - Shared Contract (`integrations/contract.py`): Loopback URL validation (`validate_loopback_url`) strictly limited to `{"127.0.0.1", "localhost", "::1"}` rejecting user credentials, and redirect denial (`NoRedirectHandler`, `safe_urlopen`) blocking 301, 302, 303, 307, 308 (22 unit tests).
+     - OpenClaw (`integrations/openclaw/`): Execution adapter distinguishing `openclaw agent` (gateway-mediated) and `openclaw agent exec` (embedded) with strict upstream configuration schema (`tools` only, rejecting unverified `gateway.url`), environment variable binding (`OPENCLAW_CONFIG_PATH`, `OPENCLAW_STATE_DIR`, `OPENCLAW_GATEWAY_URL`, `OPENCLAW_PROFILE`), empty tool inventory verification probe (`_verify_empty_tool_inventory()`), immediate subprocess overflow detection killing the process immediately without blocking on child exit, broken pipe handling, reader exception handling, and fail-closed `enable_live_execution=False` (36 unit tests).
+     - Dodaios (`integrations/dodaios/`): OpenAPI Control REST API adapter over loopback targeting verified `/api/runtime-gateway/v1/chat/completions` and `/api/health`, route defaulting to `UNKNOWN`, redirect rejection, bounded success and error response streams (`read_bounded`), and enforced `enable_live_execution=False` + `verified_tool_isolation=False` guards preventing Boolean opt-in bypass (23 unit tests).
+     - Leon (`integrations/leon/`): Fastify HTTP query route (`/api/v1/query` and `/api/v1/info`) with version pinning (Leon 1.x stable contract, rejecting 2.x preview), route defaulting to `UNKNOWN`, sanitized profile API key headers (`X-API-Key` redaction), redirect rejection, bounded streaming (`read_bounded`), and enforced fail-closed tool isolation requiring both `enable_live_execution=True` and positive downstream `verified_tool_isolation=True` (24 unit tests).
+     - OpenVoiceOS (`integrations/ovos/`): Messagebus JSON event integration with session correlation (`context.session_id`), voice event bus role, route defaulting to `UNKNOWN`, client factory verification requiring authentic test mocks (`is_mock=True` / `_is_cipher_mock=True`), blocking live bus dispatch bypass, and best-effort secret pattern detection (22 unit tests).
    * Zero runtime dependency on any assistant in `cipher_core` or `cipher_memory`.
 
 
@@ -216,7 +217,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## 7. Current Test Suites & Counts
 
-CTest registers 5 distinct test binaries, covering 75 test functions/cases and 232 individual assertions (on Windows; 229 on POSIX due to platform-specific Win32 locking checks) with a 100% pass rate:
+CTest registers 5 distinct test binaries, covering 75 test functions/cases and 264 individual assertions (261 on POSIX due to platform-specific Win32 locking checks) with a 100% pass rate:
 
 | Test Target | Source File | Functions / Cases | Assertions / Checks | Purpose |
 | :--- | :--- | :--- | :--- | :--- |
@@ -226,8 +227,8 @@ CTest registers 5 distinct test binaries, covering 75 test functions/cases and 2
 | `cipher_memory_tests` | `tests/test_memory.cpp` | 14 functions | 97 (94 on POSIX) | Missing/empty storage, CRUD round-trips, unicode/multilingual, validation/duplicate handling, corrupt storage line reporting, unsupported schema versions, v0->v1 migration, atomic write failure recovery, repeatable save/load, Windows existing file replacement & locked destination preservation, lossless whitespace, category validation, entry count mismatch, stoi overflow safety |
 | `cipher_assistant_tests` | `tests/test_assistant_backend.cpp` | 14 functions | 62 | Replaceable assistant interface, central request validation, blank prompt rejection, timeout bounds, non-finite float rejection, tool execution lockdown, local route verification, zero budget rejection, RiskTier, PermissionPolicy priority, ContextBudget prompt byte bounding, EventMessage wire envelope, mock backend |
 | **Total (CTest)** | | **75 cases/functions** | **264 assertions (97 memory, 62 assistant)** | **All 5 test targets pass (100%)** |
-| `pipeline_unit_tests` | `tools/pipeline/tests/` | 46 test cases | 45 passing (1 error: optional `mcp` library not installed in standard environment) | Verifier, Git manager, Job store, MCP server, Orchestrator, Reviewer adapter |
-| `assistant_integrations_tests` | `integrations/` | 115 test cases | 115 passing (100%) | Contract (22), OpenClaw (29), Dodaios (21), Leon (23), OpenVoiceOS (20) |
+| `pipeline_unit_tests` | `tools/pipeline/tests/` | 49 test cases | 49 passing (100% pass rate; reproducible dev dependency via `requirements-dev.txt`) | Verifier, Git manager, Job store, MCP server, Orchestrator, Reviewer adapter |
+| `assistant_integrations_tests` | `integrations/` | 127 test cases | 127 passing (100%) | Contract (22), OpenClaw (36), Dodaios (23), Leon (24), OpenVoiceOS (22) |
 
 
 ---

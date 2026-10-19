@@ -106,6 +106,12 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
   * Authentic Tool Lockdown: Verified OpenClaw Commander options, implemented isolated config generation, bound loopback Gateway, and streamed process I/O with kill on limit breach.
   * Downstream Boundaries: Classified Dodaios runtime gateway as agent-runtime model call endpoint; enforced fail-closed tool isolation policy for Leon; enforced mock-only safety boundary for OVOS skills dispatch with explicit correlation.
   * Test Suite Expansion: 5 CTest targets (75 cases, 264 assertions, 100% passing), 115 adapter unit tests (100% passing), 45 pipeline unit tests passing (100% pass rate).
+- [x] Operation Hardening Gate 2.1 (Effective Isolation and Release Readiness):
+  * OpenClaw Strict Schema & Immediate Subprocess Kill: Replaced unverified `gateway.url` with strict upstream `tools` schema; distinguished `openclaw agent` (gateway-mediated) vs `openclaw agent exec` (embedded); implemented immediate reader-thread overflow notification killing child process immediately without blocking on child exit; handled broken pipe, hanging child, and reader exception edge cases; verified empty tool inventory probe (`_verify_empty_tool_inventory()`); fail-closed `enable_live_execution=False`.
+  * Dodaios & Leon Safety Enforcement: Implemented and enforced `enable_live_execution=False` and `verified_tool_isolation=False` in executable code, preventing unverified Boolean opt-in bypass without positive isolation proof.
+  * OpenVoiceOS Mock-Only Bus Dispatch Guard: Injected `bus_client_factory` verified for authentic test mock (`is_mock=True` / `_is_cipher_mock=True`), blocking live skill dispatch bypass.
+  * CI & Developer Pipeline Reproducibility: Added `requirements-dev.txt` (`mcp>=1.0.0`) in CI workflow, resolving clean CI runner execution across all 49 pipeline tests.
+  * Test Suite Expansion: 5 CTest targets (75 cases, 264 assertions, 100% passing), 127 adapter unit tests (100% passing), 49 pipeline unit tests (100% passing).
 - [x] Configure dedicated CI test job for assistant integrations and developer pipeline.
 - [ ] Prototype direct in-process local runtime adapter (e.g., `llama.cpp` or embedded model) when local inference milestone begins.
 - [ ] Keep the core useful when no model or assistant is available.

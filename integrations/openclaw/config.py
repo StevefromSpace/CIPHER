@@ -58,6 +58,16 @@ class OpenClawConfig:
     # Flag indicating whether local execution has been independently verified (default False -> UNKNOWN route)
     verified_local: bool = False
 
+    # Live execution enablement: strictly False by default.
+    # Gateway-mediated execution ('openclaw agent') cannot guarantee that client-side
+    # config restricts an already-running Gateway daemon. Embedded execution ('openclaw agent exec')
+    # requires independent verification that the effective tool inventory is empty.
+    enable_live_execution: bool = False
+
+    # Execution mode: 'agent' for gateway-mediated execution, or
+    # 'agent-exec' for isolated embedded execution without background gateway.
+    execution_mode: str = "agent"
+
     # Permitted local provider prefixes (advisory only; model prefix is not proof of local inference)
     allowed_local_prefixes: Tuple[str, ...] = (
         "ollama/",

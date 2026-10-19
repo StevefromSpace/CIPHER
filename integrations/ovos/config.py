@@ -54,8 +54,15 @@ class OVOSConfig:
     # Utterance routing to skills triggers active skill actions; live execution is disabled.
     allow_live_skill_dispatch: bool = False
 
+    # Permitted test mock execution: True for unit and integration testing
+    allow_mock: bool = True
+
+    # Proven non-action-taking text route: False until a passive text path is verified
+    verified_non_action_route: bool = False
+
     # Acknowledgment that the OVOS messagebus broadcasts frames to all connected clients
     broadcast_privacy_acknowledged: bool = True
+
 
     def validate_bus_url(self) -> Tuple[bool, Optional[str]]:
         """Ensures messagebus communication is strictly bound to loopback using shared validator."""

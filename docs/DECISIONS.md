@@ -247,3 +247,39 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
     - Clarified outbound sensitive data detection as a best-effort pattern heuristic before broadcast, not complete secret protection (20 unit tests).
   - Total Test Suite: 115 unit tests passing across all Python integration suites (100% pass rate).
 * **Future Intent:** Live assistant integration tests require an isolated sandbox, a verified local route, and explicit owner authorization. All four bridges default to fail-closed behavior when tool safety or route provenance cannot be proven.
+
+---
+
+### 16. Operation Hardening Gate 2.1: Effective Subprocess Isolation, Mock-Only Enforcement, and CI Pipeline Reproducibility
+
+* **Status:** Accepted (Operation Hardening Gate 2.1, Milestone v0.4)
+* **Principle:** Security safeguards must be enforced in executing code and proven through runtime invariants rather than superficial configuration flags. A Boolean opt-in must never be accepted as proof of endpoint safety. Subprocess collection must terminate running processes immediately upon buffer limits without waiting for process exit.
+* **Rationale:** A targeted follow-up review of Gate 2 identified specific gaps:
+  1. Subprocess reader recorded buffer overflow but waited for child process exit or timeout before terminating, delaying termination of hanging or broken-pipe children.
+  2. The generated OpenClaw configuration included `gateway.url`, which violated upstream's strict configuration schema. Client-side configs cannot restrict already-running Gateway daemons, and `openclaw agent exec` (embedded) vs `openclaw agent` (gateway-mediated) execution contracts required explicit distinction.
+  3. The Gate 2 report claimed `enable_live_execution=False` was enforced in Dodaios, but `DodaiosConfig` lacked this field.
+  4. Leon permitted a Boolean opt-in (`enable_live_execution=True`) without establishing downstream tool isolation.
+  5. OVOS reported `is_mock_only=True` but permitted any injected `bus_client_factory` to dispatch live utterances.
+  6. CI failed because developer pipeline tests require `mcp`, which was not installed in clean Python CI runners.
+* **Current Implementation:**
+  - `integrations/openclaw/` (Immediate Termination & Strict Schema):
+    - Implemented immediate overflow notification in `_execute_bounded_process()` via `threading.Event()` and responsive poll loop, immediately terminating and killing the child process upon limit breach without waiting for process timeout.
+    - Verified against stdout overflow, stderr overflow, child ignoring broken pipe, hanging child, and reader thread exceptions.
+    - Generated configuration strictly adheres to upstream OpenClaw schema (`tools` object with `profile: "minimal"` and `deny: ["*"]`, removing invalid `gateway.url`).
+    - Differentiated `openclaw agent` (gateway-mediated) and `openclaw agent exec` (isolated embedded execution).
+    - Enforced `_verify_empty_tool_inventory()` gate and fail-closed `enable_live_execution=False` policy (36 unit tests).
+  - `integrations/dodaios/` (Enforced Live Execution Guard):
+    - Added `enable_live_execution: bool = False` and `verified_tool_isolation: bool = False` to `DodaiosConfig`.
+    - Enforced `is_tool_policy_safe()` gate in `DodaiosBridge.submit_prompt()` failing closed as `AssistantStatus.UNAVAILABLE` unless downstream isolation is proven (23 unit tests).
+  - `integrations/leon/` (No Boolean Bypass):
+    - Enforced that `enable_live_execution=True` alone does not bypass safety; requires `verified_tool_isolation=True` to prevent arbitrary host skill action execution (`run-action`) (24 unit tests).
+  - `integrations/ovos/` (Mock-Only Client Verification):
+    - Enforced that injected `bus_client_factory` must produce a verified test mock (`is_mock=True` / `_is_cipher_mock=True`). Real or live-like client factories cannot bypass the mock-only restriction and fail closed without dispatch (22 unit tests).
+  - `CI & Developer Dependencies`:
+    - Created `requirements-dev.txt` declaring `mcp>=1.0.0` for development and CI runners. CIPHER C++ core remains self-contained with standard library only.
+    - Updated `.github/workflows/ci.yml` to install `requirements-dev.txt` in the Python test job.
+  - Test Invariants:
+    - CTest: 5/5 targets passed (`cipher_core_tests`, `cipher_config_tests`, `cipher_logger_tests`, `cipher_memory_tests`, `cipher_assistant_tests` - 75 test cases, 264 assertions).
+    - Python Integrations: 127/127 tests passed.
+    - Developer Pipeline: 49/49 tests passed.
+* **Future Intent:** All live assistant integration tests require separately authorized sandbox plans and verified local routes.

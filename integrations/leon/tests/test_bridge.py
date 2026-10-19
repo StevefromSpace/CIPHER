@@ -70,7 +70,9 @@ class TestLeonBridge(unittest.TestCase):
             strict_local=True,
             verified_local=True,
             enable_live_execution=True,  # Enabled specifically for mocked transport tests
+            verified_tool_isolation=True,
         )
+
 
     def test_disabled_by_default(self):
         """Integration is disabled by default unless explicitly configured."""
@@ -131,11 +133,13 @@ class TestLeonBridge(unittest.TestCase):
             default_model="local/default",
             verified_local=True,
             enable_live_execution=True,
+            verified_tool_isolation=True,
         )
         bridge = LeonBridge(remote_cfg)
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hi"))
         self.assertEqual(resp.status, AssistantStatus.ERROR)
         self.assertIn("not bound to a loopback address", resp.error.lower())
+
 
     @patch("integrations.leon.bridge.safe_urlopen")
     def test_successful_mocked_completion_speech(self, mock_urlopen):
@@ -296,6 +300,7 @@ class TestLeonBridge(unittest.TestCase):
             default_model="local/default",
             verified_local=True,
             enable_live_execution=True,
+            verified_tool_isolation=True,
         )
         bridge = LeonBridge(spoofed_cfg)
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
@@ -310,6 +315,7 @@ class TestLeonBridge(unittest.TestCase):
             default_model="local/default",
             verified_local=True,
             enable_live_execution=True,
+            verified_tool_isolation=True,
         )
         bridge = LeonBridge(cred_cfg)
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
@@ -324,6 +330,7 @@ class TestLeonBridge(unittest.TestCase):
             default_model="local/default",
             verified_local=False,
             enable_live_execution=True,
+            verified_tool_isolation=True,
         )
         bridge = LeonBridge(unverified_cfg)
         self.assertEqual(bridge.capabilities.default_route, ProcessingRoute.UNKNOWN)
@@ -331,6 +338,24 @@ class TestLeonBridge(unittest.TestCase):
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hello", require_local=True))
         self.assertEqual(resp.status, AssistantStatus.REJECTED_CLOUD_MODEL)
         self.assertIn("unknown", resp.error.lower())
+
+    def test_boolean_opt_in_without_verified_tool_isolation_fails_closed(self):
+        """Verifies that a Boolean opt-in alone does NOT permit Leon execution."""
+        cfg = LeonConfig(
+            enabled=True,
+            api_url="http://127.0.0.1:1337",
+            default_model="local/default",
+            verified_local=True,
+            enable_live_execution=True,
+            verified_tool_isolation=False,
+        )
+        bridge = LeonBridge(cfg)
+        self.assertFalse(bridge.is_available())
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.UNAVAILABLE)
+        self.assertIn("tool/skill isolation cannot be proven", resp.error.lower())
+        self.assertIn("boolean opt-in", resp.error.lower())
+
 
     @patch("integrations.leon.bridge.safe_urlopen")
     def test_bounded_response_size_terminates_promptly(self, mock_urlopen):

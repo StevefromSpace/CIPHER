@@ -39,8 +39,11 @@ from integrations.ovos.message import OVOSMessage
 
 class MockBusClient:
     """Mock messagebus client simulating OVOS message broadcast and response."""
+    is_mock = True
+    _is_cipher_mock = True
 
     def __init__(self, response_msg: Optional[OVOSMessage] = None, raise_exc: bool = False):
+
         self.response_msg = response_msg
         self.raise_exc = raise_exc
         self.sent_messages = []
@@ -312,6 +315,38 @@ class TestOVOSBridge(unittest.TestCase):
         """Verifies is_mock_only capability is True for assistant prompt submission."""
         bridge = OVOSBridge(self.config)
         self.assertTrue(bridge.capabilities.is_mock_only)
+
+    def test_injected_live_like_client_factory_rejected(self):
+        """Verifies that injecting a live or non-mock client factory fails closed and prevents dispatch."""
+        class LiveLikeBusClient:
+            def __init__(self):
+                self.dispatched = False
+
+            def send_and_wait(self, msg, timeout=5.0):
+                self.dispatched = True
+                return None
+
+        live_client = LiveLikeBusClient()
+        bridge = OVOSBridge(self.config, bus_client_factory=lambda: live_client)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello live bus"))
+        self.assertEqual(resp.status, AssistantStatus.UNAVAILABLE)
+        self.assertIn("live ovos bus dispatch rejected", resp.error.lower())
+        self.assertFalse(live_client.dispatched, "Live-like client must NOT receive dispatch")
+
+    def test_allow_live_skill_dispatch_without_verified_route_fails_closed(self):
+        """Verifies enabling allow_live_skill_dispatch without verified_non_action_route fails closed."""
+        cfg = OVOSConfig(
+            enabled=True,
+            verified_local=True,
+            allow_live_skill_dispatch=True,
+            verified_non_action_route=False
+        )
+        mock_client = MockBusClient()
+        bridge = OVOSBridge(cfg, bus_client_factory=lambda: mock_client)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.UNAVAILABLE)
+        self.assertEqual(len(mock_client.sent_messages), 0, "No message should be sent")
+
 
 
 if __name__ == "__main__":

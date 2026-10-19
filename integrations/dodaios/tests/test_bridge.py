@@ -69,7 +69,10 @@ class TestDodaiosBridge(unittest.TestCase):
             timeout_seconds=10.0,
             strict_local=True,
             verified_local=True,
+            enable_live_execution=True,
+            verified_tool_isolation=True,
         )
+
 
     def test_disabled_by_default(self):
         """Integration is disabled by default unless explicitly configured."""
@@ -341,6 +344,31 @@ class TestDodaiosBridge(unittest.TestCase):
         self.assertTrue(err_stream.closed_called)
         # Bytes read must not read 100KB; must stop right at 4097
         self.assertLessEqual(err_stream.bytes_read, 4096 + 1)
+
+    def test_live_execution_disabled_by_default(self):
+        """Verifies Dodaios live execution fails closed by default."""
+        cfg = DodaiosConfig(enabled=True, api_url="http://127.0.0.1:8000", verified_local=True)
+        self.assertFalse(cfg.enable_live_execution)
+        bridge = DodaiosBridge(cfg)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.UNAVAILABLE)
+        self.assertIn("execution unavailable", resp.error.lower())
+        self.assertIn("tool isolation cannot be proven", resp.error.lower())
+
+    def test_boolean_opt_in_without_verified_tool_isolation_fails_closed(self):
+        """Verifies a Boolean opt-in alone does NOT permit Dodaios execution."""
+        cfg = DodaiosConfig(
+            enabled=True,
+            api_url="http://127.0.0.1:8000",
+            verified_local=True,
+            enable_live_execution=True,
+            verified_tool_isolation=False,
+        )
+        bridge = DodaiosBridge(cfg)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
+        self.assertEqual(resp.status, AssistantStatus.UNAVAILABLE)
+        self.assertIn("execution unavailable", resp.error.lower())
+        self.assertIn("tool isolation cannot be proven", resp.error.lower())
 
 
 if __name__ == "__main__":

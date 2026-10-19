@@ -103,7 +103,8 @@ class DodaiosBridge(BaseAssistantBackend):
             "strict_local": self.config.strict_local,
             "timeout_seconds": self.config.timeout_seconds,
             "route": self.capabilities.default_route.value,
-            "live_compatibility": "verified" if self.config.verified_local else "unverified",
+            "enable_live_execution": self.config.enable_live_execution,
+            "live_compatibility": "verified" if (self.config.verified_local and self.config.verified_tool_isolation) else "unverified",
         }
 
     def _sanitize_error(self, message: str) -> str:
@@ -116,6 +117,7 @@ class DodaiosBridge(BaseAssistantBackend):
         Guarantees:
         - Central policy validation (blank prompt, timeout, tool lockdown, local route).
         - Rejects immediately if integration is disabled.
+        - Fails closed if live execution is disabled or tool isolation is unproven.
         - Rejects privileged computer use, mission dispatch, or tool execution.
         - Restricts communication strictly to loopback addresses.
         - Enforces bounded stream consumption during I/O on both success and error responses.
@@ -169,7 +171,19 @@ class DodaiosBridge(BaseAssistantBackend):
                 error=f"Local-First Policy Rejection: {rejection_reason}",
             )
 
-        # 6. Build HTTP request payload for least-privileged chat endpoint
+        # 6. Gate: Tool policy and live execution safety boundary
+        is_tool_safe, tool_err = self.config.is_tool_policy_safe()
+        if not is_tool_safe:
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            return AssistantResponse(
+                status=AssistantStatus.UNAVAILABLE,
+                model=model,
+                route=self.capabilities.default_route,
+                duration_ms=duration_ms,
+                error=f"Dodaios execution unavailable: {tool_err}",
+            )
+
+        # 7. Build HTTP request payload for least-privileged chat endpoint
         timeout = request.timeout_seconds if request.timeout_seconds is not None else self.config.timeout_seconds
         chat_url = urllib.parse.urljoin(self.config.api_url, self.config.chat_endpoint)
 

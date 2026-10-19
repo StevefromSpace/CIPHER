@@ -161,7 +161,7 @@ class OVOSBridge(BaseAssistantBackend):
 
         # 6. Safety Boundary Gate: General assistant prompt submission to live skills is prohibited.
         # recognizer_loop:utterance destination: ['skills'] triggers active skill actions.
-        # Only mock client interaction is permitted during this sprint.
+        # Only verified mock client interaction is permitted; real/live client factories must NOT bypass this policy.
         if not self._bus_client_factory:
             duration_ms = (time.perf_counter() - start_time) * 1000.0
             return AssistantResponse(
@@ -173,6 +173,23 @@ class OVOSBridge(BaseAssistantBackend):
                     "OVOS live skill execution is disabled under CIPHER safety policy: "
                     "destination: ['skills'] routes utterances to active skill actions with unverified tool isolation. "
                     "Live execution is disabled; general assistant prompt submission is mock-only."
+                ),
+            )
+
+        client = self._bus_client_factory()
+
+        # Enforce that supplied client is an authentic test mock, NOT a live or live-like client
+        is_mock_client = bool(getattr(client, "is_mock", False) or getattr(client, "_is_cipher_mock", False))
+        if not is_mock_client or not self.config.allow_mock or (self.config.allow_live_skill_dispatch and not self.config.verified_non_action_route):
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            return AssistantResponse(
+                status=AssistantStatus.UNAVAILABLE,
+                model=request.model_override or self.config.default_model,
+                route=self.capabilities.default_route,
+                duration_ms=duration_ms,
+                error=(
+                    "Live OVOS bus dispatch rejected: supplying a client factory cannot bypass "
+                    "the mock-only policy. Live skill execution is disabled under CIPHER safety policy."
                 ),
             )
 
@@ -191,8 +208,8 @@ class OVOSBridge(BaseAssistantBackend):
 
         # 9. Mock Bus Client Dispatch with Explicit Response Correlation
         try:
-            client = self._bus_client_factory()
             resp_msg = client.send_and_wait(utterance_msg, timeout=timeout)
+
             duration_ms = (time.perf_counter() - start_time) * 1000.0
 
             if not resp_msg:

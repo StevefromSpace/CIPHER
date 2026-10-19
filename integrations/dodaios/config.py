@@ -58,6 +58,15 @@ class DodaiosConfig:
     # Maximum error body bytes to read from HTTP error stream (4KB default)
     max_error_bytes: int = 4096
 
+    # Live execution enablement: strictly False by default.
+    # The runtime gateway (/api/runtime-gateway/v1/chat/completions) is designed for agent
+    # runtimes and can proxy calls to downstream tools and external providers.
+    # It is NOT a verified no-tools endpoint.
+    enable_live_execution: bool = False
+
+    # Verified downstream tool isolation: False until an isolated, no-tools local deployment is proven.
+    verified_tool_isolation: bool = False
+
     # Permitted local provider prefixes
     allowed_local_prefixes: Tuple[str, ...] = (
         "local/",
@@ -106,6 +115,21 @@ class DodaiosConfig:
                 f"({', '.join(self.allowed_local_prefixes)}) under strict local mode."
             )
 
+        return True, None
+
+    def is_tool_policy_safe(self) -> Tuple[bool, Optional[str]]:
+        """Verifies whether Dodaios runtime gateway can guarantee tool-free text isolation.
+
+        The runtime gateway (/api/runtime-gateway/v1/chat/completions) is designed for
+        agent runtimes and can proxy calls to downstream tools and external providers.
+        It is NOT a verified no-tools endpoint. Unless downstream isolation is positively
+        established, live execution is disabled fail-closed under CIPHER safety policy.
+        """
+        if not self.enable_live_execution or not self.verified_tool_isolation:
+            return False, (
+                "Dodaios runtime gateway is an agent-runtime proxy, not a verified no-tools endpoint. "
+                "Downstream tool isolation cannot be proven. Live execution is disabled fail-closed under CIPHER safety policy."
+            )
         return True, None
 
     def validate_api_url(self) -> Tuple[bool, Optional[str]]:

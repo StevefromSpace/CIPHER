@@ -115,6 +115,9 @@ class OpenClawBridge(BaseAssistantBackend):
             "tool_profile": self.config.tool_profile,
             "timeout_seconds": self.config.timeout_seconds,
             "route": self.capabilities.default_route.value,
+            "enable_live_execution": self.config.enable_live_execution,
+            "execution_mode": self.config.execution_mode,
+            "live_enforcement": "verified" if (cli and self.config.verified_local) else "unverified",
         }
 
     def _sanitize_error(self, message: str) -> str:
@@ -128,11 +131,12 @@ class OpenClawBridge(BaseAssistantBackend):
         timeout: float,
         max_bytes: int
     ) -> Tuple[int, bytes, bytes, Optional[str]]:
-        """Executes a subprocess with bounded stream collection.
+        """Executes a subprocess with bounded stream collection and immediate overflow termination.
 
         Enforces output byte limits during collection by reading in chunks with read_bounded.
-        If stdout or stderr exceeds max_bytes, the subprocess is killed immediately
-        and input consumption ceases.
+        If stdout or stderr exceeds max_bytes, the subprocess is terminated and killed
+        immediately from the reader thread, and the main thread breaks instantly without
+        waiting for the timeout.
         """
         proc = subprocess.Popen(
             cmd,
@@ -146,54 +150,93 @@ class OpenClawBridge(BaseAssistantBackend):
         stdout_chunks: List[bytes] = []
         stderr_chunks: List[bytes] = []
         stream_errors: List[Exception] = []
+        overflow_event = threading.Event()
+        error_event = threading.Event()
 
-        def _reader(stream, storage):
+        def _kill_proc_immediately():
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            time.sleep(0.02)
+            if proc.poll() is None:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+        def _reader(stream, storage, is_stdout: bool):
             try:
                 storage.append(read_bounded(stream, max_bytes=max_bytes))
+            except ResponseTooLargeError as ex:
+                stream_errors.append(ex)
+                overflow_event.set()
+                _kill_proc_immediately()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             except Exception as ex:
                 stream_errors.append(ex)
+                error_event.set()
+                _kill_proc_immediately()
 
-        t_out = threading.Thread(target=_reader, args=(proc.stdout, stdout_chunks))
-        t_err = threading.Thread(target=_reader, args=(proc.stderr, stderr_chunks))
+        t_out = threading.Thread(target=_reader, args=(proc.stdout, stdout_chunks, True))
+        t_err = threading.Thread(target=_reader, args=(proc.stderr, stderr_chunks, False))
         t_out.daemon = True
         t_err.daemon = True
         t_out.start()
         t_err.start()
 
+        start_t = time.perf_counter()
+        timed_out = False
+
         try:
-            timed_out = False
+            # Responsive polling loop: react immediately to overflow or error events
+            while True:
+                if overflow_event.is_set():
+                    _kill_proc_immediately()
+                    break
+                if error_event.is_set():
+                    _kill_proc_immediately()
+                    break
+
+                if proc.poll() is not None:
+                    break
+
+                elapsed = time.perf_counter() - start_t
+                if elapsed >= timeout:
+                    timed_out = True
+                    _kill_proc_immediately()
+                    break
+
+                time.sleep(0.01)
+
             try:
-                proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                timed_out = True
+                proc.wait(timeout=0.5)
+            except Exception:
+                _kill_proc_immediately()
                 try:
-                    proc.kill()
+                    proc.wait(timeout=0.5)
                 except Exception:
                     pass
-                proc.wait()
 
-            t_out.join(timeout=1.0)
-            t_err.join(timeout=1.0)
+            t_out.join(timeout=0.5)
+            t_err.join(timeout=0.5)
 
             if timed_out:
                 return -1, b"", b"", f"OpenClaw execution timed out after {timeout:.1f}s."
 
-            for err in stream_errors:
-                if isinstance(err, ResponseTooLargeError):
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
-                    proc.wait()
-                    return -1, b"", b"", f"OpenClaw output exceeded maximum permitted byte limit ({max_bytes} bytes)."
+            if overflow_event.is_set():
+                return -1, b"", b"", f"OpenClaw output exceeded maximum permitted byte limit ({max_bytes} bytes)."
 
-            if stream_errors:
-                return -1, b"", b"", f"I/O error reading process streams: {stream_errors[0]}"
+            if error_event.is_set() or stream_errors:
+                err = stream_errors[0] if stream_errors else "Stream read failed"
+                return -1, b"", b"", f"I/O error reading process streams: {err}"
 
             out_b = stdout_chunks[0] if stdout_chunks else b""
             err_b = stderr_chunks[0] if stderr_chunks else b""
             return proc.returncode, out_b, err_b, None
         finally:
+            _kill_proc_immediately()
             try:
                 if proc.stdout:
                     proc.stdout.close()
@@ -205,15 +248,54 @@ class OpenClawBridge(BaseAssistantBackend):
             except Exception:
                 pass
 
+    def _verify_empty_tool_inventory(self, cli: Path, env: Optional[Dict[str, str]] = None) -> Tuple[bool, Optional[str]]:
+        """Verifies that the effective tool inventory is confirmed empty before prompt submission.
+
+        In OpenClaw, client-side config cannot be assumed to restrict an already-running
+        Gateway daemon. Furthermore, embedded execution must verifiably resolve to an
+        empty tool inventory. If the CLI or runtime cannot prove zero tools, fail closed.
+        """
+        # If no compatible binary is installed, tool inventory cannot be proven
+        if not cli or not cli.exists():
+            return False, "OpenClaw binary is not installed; effective tool inventory cannot be verified."
+
+        # Probe the tool inventory via CLI if available
+        try:
+            probe_cmd = [str(cli), "tools", "list", "--json"]
+            probe_env = env or os.environ.copy()
+            ret, stdout_b, _, _ = self._execute_bounded_process(
+                cmd=probe_cmd,
+                env=probe_env,
+                timeout=5.0,
+                max_bytes=65536
+            )
+            if ret == 0:
+                tools_data = json.loads(stdout_b.decode("utf-8", errors="replace"))
+                if isinstance(tools_data, list) and len(tools_data) == 0:
+                    return True, None
+                if isinstance(tools_data, dict) and len(tools_data.get("tools", [])) == 0:
+                    return True, None
+                return False, f"Effective tool inventory is not empty: found {tools_data}."
+        except Exception:
+            pass
+
+        return False, (
+            "Effective tool inventory cannot be proven empty. Gateway-mediated execution does "
+            "not guarantee client-side tool policy enforcement, and embedded execution tool inventory "
+            "is unverified. Live OpenClaw submission remains unavailable."
+        )
+
     def submit_prompt(self, request: AssistantRequest) -> AssistantResponse:
         """Submits a single text prompt to OpenClaw and returns the structured response.
 
         Guarantees:
         - Central policy validation (blank prompts, timeout bounds, tool lockdown, local route).
         - Rejects immediately if integration is disabled.
-        - Verifies tool policy restricts tool execution (profile == 'minimal').
+        - Fails closed if live execution is not enabled under CIPHER safety policy.
+        - Verifies tool policy restricts tool execution (profile == 'minimal', deny == ['*']).
+        - Verifies that effective tool inventory is empty before prompt submission.
         - Rejects cloud models before executing any external process.
-        - Enforces strict process timeouts.
+        - Enforces strict process timeouts and immediate overflow kill.
         - Parses responses into a standardized, decoupled AssistantResponse.
         """
         start_time = time.perf_counter()
@@ -260,32 +342,36 @@ class OpenClawBridge(BaseAssistantBackend):
                 error=f"Local-First Policy Rejection: {rejection_reason}",
             )
 
-        # 6. Gate: CLI executable presence
+        # 6. Gate: Live execution enablement under safety policy
+        if not self.config.enable_live_execution:
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            return AssistantResponse(
+                status=AssistantStatus.UNAVAILABLE,
+                model=model,
+                route=self.capabilities.default_route,
+                duration_ms=duration_ms,
+                error=(
+                    "OpenClaw live execution is disabled under CIPHER safety policy (enable_live_execution=False). "
+                    "Gateway-mediated execution cannot guarantee client-side tool policy enforcement on the gateway, "
+                    "and embedded execution mode with empty tool inventory is unverified."
+                ),
+            )
+
+        # 7. Gate: CLI executable presence
         cli = self._resolve_cli()
         if not cli:
             return AssistantResponse(
                 status=AssistantStatus.UNAVAILABLE,
                 model=model,
                 route=self.capabilities.default_route,
-                error="OpenClaw CLI executable not found on PATH or configured location.",
+                error=(
+                    "OpenClaw CLI executable not found on PATH or configured location. "
+                    "Live enforcement is unverified without an installed, compatible OpenClaw binary."
+                ),
             )
 
-        # 7. Build CLI command arguments (literal array, no shell execution)
-        timeout = request.timeout_seconds if request.timeout_seconds is not None else self.config.timeout_seconds
-        cmd: List[str] = [
-            str(cli),
-            "agent",
-            "--message", request.prompt,
-            "--model", model,
-            "--timeout", str(int(timeout)),
-            "--profile", self.config.tool_profile,
-            "--json"
-        ]
 
-        if request.session_id:
-            cmd.extend(["--session-id", request.session_id])
-
-        # 8. Configure isolated environment and execute subprocess with bounded streaming
+        # 8. Configure isolated environment and build strict upstream configuration
         env = os.environ.copy()
         temp_dir_obj = None
         try:
@@ -296,10 +382,8 @@ class OpenClawBridge(BaseAssistantBackend):
                 state_dir = temp_dir / "state"
                 state_dir.mkdir(parents=True, exist_ok=True)
 
+                # Upstream strict schema: tools object only (no invalid gateway.url key)
                 isolated_conf = {
-                    "gateway": {
-                        "url": self.config.gateway_url
-                    },
                     "tools": {
                         "profile": self.config.tool_profile,
                         "deny": list(self.config.tool_deny_patterns)
@@ -313,12 +397,51 @@ class OpenClawBridge(BaseAssistantBackend):
                 env["OPENCLAW_GATEWAY_URL"] = self.config.gateway_url
                 env["OPENCLAW_PROFILE"] = self.config.tool_profile
 
+            # 9. Gate: Effective tool inventory verification
+            is_empty_inv, inv_err = self._verify_empty_tool_inventory(cli, env)
+            if not is_empty_inv:
+                return AssistantResponse(
+                    status=AssistantStatus.UNAVAILABLE,
+                    model=model,
+                    route=self.capabilities.default_route,
+                    error=f"Tool Isolation Blocker: {inv_err}",
+                )
+
+            # 10. Build CLI command arguments (literal array, no shell execution)
+            timeout = request.timeout_seconds if request.timeout_seconds is not None else self.config.timeout_seconds
+            if self.config.execution_mode == "agent-exec":
+                cmd: List[str] = [
+                    str(cli),
+                    "agent",
+                    "exec",
+                    "--message", request.prompt,
+                    "--model", model,
+                    "--timeout", str(int(timeout)),
+                    "--profile", self.config.tool_profile,
+                    "--json"
+                ]
+            else:
+                cmd = [
+                    str(cli),
+                    "agent",
+                    "--message", request.prompt,
+                    "--model", model,
+                    "--timeout", str(int(timeout)),
+                    "--profile", self.config.tool_profile,
+                    "--gateway", self.config.gateway_url,
+                    "--json"
+                ]
+
+            if request.session_id:
+                cmd.extend(["--session-id", request.session_id])
+
             retcode, stdout_b, stderr_b, err_msg = self._execute_bounded_process(
                 cmd=cmd,
                 env=env,
                 timeout=timeout,
                 max_bytes=self.config.max_output_bytes,
             )
+
             duration_ms = (time.perf_counter() - start_time) * 1000.0
 
             if err_msg:
