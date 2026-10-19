@@ -128,3 +128,19 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
 * **Rationale:** Codex was completely removed to preserve usage budgets and eliminate mandatory cloud authentication dependencies. To ensure true peer review integrity, the independent reviewer (Claude Agent B) must not be able to modify the candidate code it reviews. Prompts alone are not security controls; tool-level confinement and process isolation must be enforced.
 * **Current Implementation:** `tools/pipeline/` orchestrates Gemini Flash (planner), Claude Agent A (implementer), and Claude Agent B (read-only reviewer). Agent B is executed via Claude Code CLI configured strictly with `--tools Read,Glob,Grep`, `--disallowed-tools Bash,PowerShell,Write,Edit`, and `--permission-mode dontAsk`. Prompts are piped via stdin to prevent Win32 command-line buffer overflows. Local commit confirmation (`tools.pipeline.confirm_commit`) is an explicit, interactive owner gate requiring terminal TTY interaction, strictly decoupled from remote git push.
 * **Future Intent:** Maintain strict separation between CIPHER runtime C++ code and developer tooling Python utilities. Pipeline tooling remains a development aid and is never a runtime dependency of CIPHER.
+
+---
+
+### 12. Replaceable Assistant Capability Providers (Assistant Interoperability Architecture: OpenClaw, Dodaios, OpenVoiceOS, Leon)
+
+* **Status:** Accepted (v0.4 Assistant Interoperability Baseline)
+* **Principle:** External assistants and LLM runtimes are optional capability providers, never mandatory runtime components of CIPHER. The C++17 core remains authoritative, self-contained, and fully operable when no assistant provider is installed or enabled.
+* **Rationale:** Integrating external open-source assistants ([OpenClaw](https://github.com/openclaw/openclaw), [Dodaios](https://github.com/Dodaios/Dodaios), [Leon](https://github.com/leon-ai/leon), [OpenVoiceOS](https://github.com/OpenVoiceOS)) requires establishing a non-invasive boundary that prevents dependency creep into `cipher_core` or `cipher_memory`. A standard C++17 pure virtual interface (`IAssistantBackend`) with central request validation governs all requests. Python adapters implement the respective documented contracts over loopback network boundaries or CLI execution, with strict tool execution lockdown, bounded timeouts, and local provenance verification.
+* **Current Implementation:**
+  - `cipher_assistant` (C++17 library): In `include/cipher/assistant_backend.hpp` and `src/assistant_backend.cpp`. Implements `IAssistantBackend`, `AssistantManager`, and `validate_assistant_request()` enforcing fail-closed blank prompt rejection, timeout bounds [1s, 300s], tool lockdown, and local route verification. Fully covered by 30 unit tests in `tests/test_assistant_backend.cpp`.
+  - `integrations/` (Python adapters):
+    - `integrations/openclaw`: One-shot CLI bridge (`openclaw agent --json --profile minimal`) enforcing minimal tool profile, loopback binding, and cloud pattern rejection (19 unit tests).
+    - `integrations/dodaios`: OpenAPI Control REST API adapter over loopback, with strict rejection of computer use, mission dispatch, and shell execution (14 unit tests).
+    - `integrations/leon`: Fastify HTTP query route (`/api/v1/query`) with version pinning (Leon 1.x stable contract) and sanitized profile API key headers (14 unit tests).
+    - `integrations/ovos`: Messagebus JSON event integration with session correlation (`context.session_id`), speech event resolution, and broadcast confidentiality warnings (14 unit tests).
+* **Future Intent:** CIPHER Core interacts with external assistants solely through the abstract `IAssistantBackend` interface, allowing hot-swapping between direct local runtimes (e.g. `llama.cpp`), local daemons (e.g. `ollama`), or agent gateways with zero code modification to core commands or memory persistence.

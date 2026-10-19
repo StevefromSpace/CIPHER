@@ -93,6 +93,18 @@ The codebase currently contains three modular C++17 libraries and a command-line
    * Strict security boundaries: read-only tool restrictions, fail-closed schema validation, and complete candidate fingerprinting.
    * Mandatory owner commit confirmation gate (`tools.pipeline.confirm_commit`) strictly separated from remote push.
 
+7. **Assistant Capability Providers (`cipher_assistant` & `integrations/`):**
+   * C++17 Core Interface: `include/cipher/assistant_backend.hpp`, `src/assistant_backend.cpp`, tested by `tests/test_assistant_backend.cpp` (30 assertions).
+   * Standalone architecture for replaceable external assistant capability providers without coupling to `cipher_core` or `cipher_memory`.
+   * Enforces fail-closed validation: blank prompt rejection, timeout bounds [1s, 300s], complete tool execution lockdown, and local provenance route verification.
+   * Four provider adapters in `integrations/`:
+     - OpenClaw (`integrations/openclaw/`): One-shot CLI bridge (`openclaw agent --json --profile minimal`) enforcing minimal tool profile, loopback binding, and cloud pattern rejection (19 unit tests).
+     - Dodaios (`integrations/dodaios/`): OpenAPI Control REST API adapter over loopback, with strict rejection of computer use, mission dispatch, and shell execution (14 unit tests).
+     - Leon (`integrations/leon/`): Fastify HTTP query route (`/api/v1/query`) with version pinning (Leon 1.x stable contract) and sanitized profile API key headers (14 unit tests).
+     - OpenVoiceOS (`integrations/ovos/`): Messagebus JSON event integration with session correlation (`context.session_id`), speech event resolution, and broadcast confidentiality warnings (14 unit tests).
+   * Zero runtime dependency on any assistant in `cipher_core` or `cipher_memory`.
+
+
 ---
 
 ## 5. Architecture & Project Layout
@@ -114,18 +126,28 @@ CIPHER/
 │   ├── ROADMAP.md             # Milestone tracking and forward planning
 │   └── VISION.md              # Founding charter, independence rules, and safety principles
 ├── include/cipher/
+│   ├── assistant_backend.hpp  # Replaceable assistant backend interface and validation
 │   ├── cipher_core.hpp        # Core command processor interface
 │   ├── config.hpp             # Configuration parser data structures and API
 │   ├── logger.hpp             # Leveled logger interface
 │   ├── memory.hpp             # Persistent memory data structures and API (v0.3)
 │   └── version.hpp.in         # Template for CMake-generated version header
+├── integrations/
+│   ├── __init__.py            # Root package exporting all 4 bridges and contracts
+│   ├── contract.py            # Shared Python contract and request validation
+│   ├── dodaios/               # Dodaios Control REST API adapter (14 tests)
+│   ├── leon/                  # Leon Fastify HTTP query adapter (14 tests)
+│   ├── openclaw/              # OpenClaw CLI adapter with minimal profile (19 tests)
+│   └── ovos/                  # OpenVoiceOS messagebus event adapter (14 tests)
 ├── src/
+│   ├── assistant_backend.cpp  # AssistantManager and central request validation
 │   ├── cipher_core.cpp        # Command execution implementation
 │   ├── config.cpp             # Configuration parsing and validation
 │   ├── logger.cpp             # Formatted diagnostic logging
 │   ├── memory.cpp             # Persistent memory storage and atomic write (v0.3)
 │   └── main.cpp               # Application entry point and REPL loop
 ├── tests/
+│   ├── test_assistant_backend.cpp # C++ assistant contract and policy tests (30 assertions)
 │   ├── test_cipher_core.cpp   # Core command test suite
 │   ├── test_config.cpp        # Configuration parser test suite
 │   ├── test_logger.cpp        # Leveled logger test suite
@@ -183,7 +205,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## 7. Current Test Suites & Counts
 
-CTest registers 4 distinct test binaries, covering 65 test functions/cases and 202 individual assertions (on Windows; 199 on POSIX due to platform-specific Win32 locking checks) with a 100% pass rate:
+CTest registers 5 distinct test binaries, covering 75 test functions/cases and 232 individual assertions (on Windows; 229 on POSIX due to platform-specific Win32 locking checks) with a 100% pass rate:
 
 | Test Target | Source File | Functions / Cases | Assertions / Checks | Purpose |
 | :--- | :--- | :--- | :--- | :--- |
@@ -191,8 +213,11 @@ CTest registers 4 distinct test binaries, covering 65 test functions/cases and 2
 | `cipher_config_tests` | `tests/test_config.cpp` | 19 functions | 56 | Parsing, comments, line numbers, error collection, unknown keys, CRLF |
 | `cipher_logger_tests` | `tests/test_logger.cpp` | 11 functions | 28 | Levels, labels, timestamping, file append, degradation on bad path |
 | `cipher_memory_tests` | `tests/test_memory.cpp` | 14 functions | 97 (94 on POSIX) | Missing/empty storage, CRUD round-trips, unicode/multilingual, validation/duplicate handling, corrupt storage line reporting, unsupported schema versions, v0->v1 migration, atomic write failure recovery, repeatable save/load, Windows existing file replacement & locked destination preservation, lossless whitespace, category validation, entry count mismatch, stoi overflow safety |
-| **Total (CTest)** | | **65 cases/functions** | **202 assertions (97 memory)** | **All 4 test targets pass (100%)** |
+| `cipher_assistant_tests` | `tests/test_assistant_backend.cpp` | 10 functions | 30 | Replaceable assistant interface, central request validation, blank prompt rejection, timeout bounds, tool execution lockdown, local route verification, mock backend |
+| **Total (CTest)** | | **75 cases/functions** | **232 assertions (97 memory, 30 assistant)** | **All 5 test targets pass (100%)** |
 | `pipeline_unit_tests` | `tools/pipeline/tests/` | 49 test cases | 49 | Verifier, Git manager, Job store, MCP server, Orchestrator, Reviewer adapter |
+| `assistant_integrations_tests` | `integrations/` | 61 test cases | 61 | OpenClaw (19), Dodaios (14), Leon (14), OpenVoiceOS (14) |
+
 
 ---
 

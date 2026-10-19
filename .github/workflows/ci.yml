@@ -6,6 +6,8 @@
 #                      migration notices; stable until at least April 2029)
 #   - windows-2022   : MSVC via the Visual Studio 2022 generator (pinned)
 #
+# A dedicated Python job tests the assistant integration adapters and developer pipeline.
+#
 # No AI providers, paid services, API keys, or model downloads are involved.
 # The entire build is self-contained: standard library only, no third-party
 # runtime dependencies.
@@ -53,3 +55,22 @@ jobs:
       #    when a test fails, keeping successful logs clean.
       - name: Test (CTest)
         run: ctest --test-dir build -C Release --output-on-failure
+
+  python-tests:
+    name: Assistant Adapters & Pipeline Tests (Python)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run Assistant Integration Tests (OpenClaw, Dodaios, Leon, OVOS)
+        run: python -m unittest discover -s integrations
+
+      - name: Run Developer Pipeline Tests
+        run: python -m unittest discover -s tools/pipeline/tests

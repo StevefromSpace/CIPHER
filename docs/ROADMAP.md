@@ -83,9 +83,12 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
 
 ### v0.4: Replaceable AI runtime interface
 
-- Define a small inference interface independent of a specific provider.
-- Prototype with a local model/runtime only as an optional adapter.
-- Keep the core useful when no model is available.
+- [x] Implement standard C++17 assistant backend interface (`cipher_assistant`: `IAssistantBackend`, `AssistantManager`) with central validation enforcing blank prompt rejection, timeout bounds, tool lockdown, and local route verification (30 CTest assertions).
+- [x] Implement provider-independent assistant adapters (`integrations/`) for OpenClaw, Dodaios, Leon, and OpenVoiceOS (61 unit tests) with loopback binding, cloud rejection, and failure containment.
+- [x] Configure dedicated CI test job for assistant integrations and developer pipeline.
+- [ ] Prototype direct in-process local runtime adapter (e.g., `llama.cpp` or embedded model) when local inference milestone begins.
+- [ ] Keep the core useful when no model or assistant is available.
+
 
 ### v0.5: Permissioned tools
 
