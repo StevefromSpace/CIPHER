@@ -64,6 +64,13 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v7
 
+      - name: Build C++ Test Binaries for Pipeline Verifier
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+          for f in build/cipher_*tests; do cp "$f" "$f.exe"; done
+          chmod +x build/*.exe
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
