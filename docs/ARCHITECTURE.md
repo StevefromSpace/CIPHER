@@ -48,6 +48,40 @@ Neither `cipher_config` nor `cipher_logger` depends on `cipher_core`.
 `cipher_core` does not depend on Config or Logger.
 This keeps each component testable and replaceable in isolation.
 
+## Current v0.4 assistant and integration boundary
+
+`cipher_assistant` is a standalone C++17 library. It provides the replaceable
+`IAssistantBackend` interface, central request validation, permission-policy
+types, prompt-budget checks, and event envelopes. It is not a runtime dependency
+of `cipher_core` or `cipher_memory`.
+
+The Python adapters under `integrations/` are separately tested integration
+boundaries, not an enabled application execution path:
+
+```text
+Assistant request
+       |
+       v
+cipher_assistant validation and policy types
+       |
+       +-- OpenClaw adapter: disabled by default; strict probe schema; runtime policy enforcement unverified
+       +-- Dodaios adapter: disabled by default; requires explicit isolation gate
+       +-- Leon adapter: disabled by default; requires explicit isolation gate
+       +-- OVOS adapter: live skill dispatch disabled; offline MockBusClient only in tests
+```
+
+All adapters default to fail-closed. `verified_local` is an operator assertion
+that the configured endpoint satisfies the loopback hostname contract; it is not
+independent evidence of an air gap, no-cloud route, or downstream behavior.
+Configured policy is likewise distinct from runtime-enforced policy. Where a
+compatible external runtime is unavailable, the adapters report the route or
+enforcement as unverified rather than allowing execution.
+
+The shared Python contract validates loopback URLs, rejects redirects, and
+performs bounded stream reads. OpenClaw subprocess collection terminates the
+direct child on timeout or output overflow; process-tree cleanup beyond that
+direct child has not been established as a cross-platform guarantee.
+
 ## Boundaries to preserve as CIPHER grows
 
 ```text
@@ -117,13 +151,15 @@ etc.), guaranteeing that the startup banner, command outputs, and logs remain sy
 
 ## Current limitations
 
-The v0.2 implementation is a single-process command-line program with configuration
-and diagnostic logging.  It has no database, networking, AI inference, long-term
-memory, authentication, sandbox, or system-control tools.  That is deliberate scope
-control, not hidden complexity.
+The C++ executable remains a single-process command-line program with
+configuration, diagnostic logging, and a standalone local persistent-memory
+library. It has no integrated model runtime, authentication system, sandbox, or
+system-control tools. The provider adapters do not change that: their live routes
+remain disabled or fail closed unless their explicit gates and evidence requirements
+are met.
 
 Not implemented yet (planned for future milestones):
-- Persistent memory (v0.3)
-- Replaceable AI runtime interface (v0.4)
 - Permissioned tool registry (v0.5)
+- Direct in-process local model runtime
+- Persistent-memory REPL commands and configuration integration
 - Voice and alternative interfaces (later)

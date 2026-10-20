@@ -8,35 +8,38 @@ This document is the authoritative summary of CIPHER's verified state. It provid
 
 * **Repository:** [https://github.com/StevefromSpace/CIPHER](https://github.com/StevefromSpace/CIPHER)
 * **Active Branch:** `research/assistant-source-intelligence` (Dedicated research and selective extraction branch branched from `1c6d3e4`)
-* **Verified Code Baseline:** Commit `677e8455bd51f760288c122aed97c7cea88ec22b` (`677e845`)
+* **Current Hardening Head:** Commit `75ebfd5531bff4c72f0e6cfdc6b64952a983dab5` (`75ebfd5`, `fix(integrations): enforce strict isolation gates and response schemas`). PR #1 is open, Draft, and unmerged.
+* **Historical Core Baseline:** Commit `677e8455bd51f760288c122aed97c7cea88ec22b` (`677e845`)
   * **Subject:** `fix: centralize application version reporting`
   * **Scope:** Full C++17 core, configuration parser, leveled diagnostic logger, CMake centralized versioning (`version.hpp`), and comprehensive test suites.
 * **v0.3 Persistent Memory & Pipeline Extension:** Incorporates standalone `cipher_memory` persistent storage subsystem and the Dual-Claude developer automation pipeline (`tools/pipeline`).
-* **v0.4 Assistant Interoperability, Source Intelligence, Hardening Gates & Final Isolation Verification:** Incorporates C++17 replaceable assistant interface (`IAssistantBackend`), risk-tiered permission policy (`RiskTier`, `PermissionPolicy`), context budget byte bounding (`ContextBudget`), message event envelopes (`EventMessage`), hardened decoupled adapters (`integrations/` for OpenClaw, Dodaios, Leon, OpenVoiceOS), and completed Final Isolation Verification:
+* **v0.4 Assistant Interoperability, Source Intelligence, Hardening Gates & Final Isolation Verification:** Incorporates C++17 replaceable assistant interface (`IAssistantBackend`), risk-tiered permission policy (`RiskTier`, `PermissionPolicy`), context budget byte bounding (`ContextBudget`), message event envelopes (`EventMessage`), and hardened decoupled adapters (`integrations/` for OpenClaw, Dodaios, Leon, OpenVoiceOS). The final gate establishes tested fail-closed boundaries; it does **not** establish live external-runtime isolation:
   - Reusable bounded I/O primitive (`read_bounded`) halting stream consumption at `max_bytes + 1` and aborting/closing streams immediately.
-  - Genuine OpenClaw tool isolation via strict upstream configuration schema (`tools: {profile: "minimal", deny: ["*"]}`), environment variable binding (`OPENCLAW_CONFIG_PATH`, `OPENCLAW_STATE_DIR`, `OPENCLAW_GATEWAY_URL`, `OPENCLAW_PROFILE`), empty tool inventory verification probe with strict response schema validation (rejecting missing `tools` property and non-list structures, checking upstream CLI version against `supported_cli_versions`), unverified effective runtime enforcement when compatible CLI is unavailable, and immediate subprocess overflow kill without blocking on child exit.
+  - OpenClaw configured tool-denial policy via strict upstream configuration schema (`tools: {profile: "minimal", deny: ["*"]}`), environment variable binding (`OPENCLAW_CONFIG_PATH`, `OPENCLAW_STATE_DIR`, `OPENCLAW_GATEWAY_URL`, `OPENCLAW_PROFILE`), empty tool inventory verification probe with strict response schema validation (rejecting missing `tools` property and non-list structures, checking upstream CLI version against `supported_cli_versions`), unverified effective runtime enforcement when a compatible CLI is unavailable, and immediate subprocess overflow kill without blocking on child exit.
   - Alignment of Dodaios contract as an agent-runtime gateway proxy with unverified live compatibility, bounded response/error body streams, and enforced `enable_live_execution=False` + `verified_tool_isolation=False` guards preventing Boolean opt-in bypass.
   - Fail-closed tool isolation boundary for Leon, requiring both `enable_live_execution=True` and positive downstream `verified_tool_isolation=True` before query dispatch.
   - Closed mock-only boundary for OpenVoiceOS enforcing exact type equality `type(client) is MockBusClient`, explicitly rejecting marker attributes (`is_mock=True` / `_is_cipher_mock=True`) to prevent live bus dispatch bypass, and requiring explicit `session_id` response correlation.
   - Clarified and documented `verified_local` across all contracts and adapters as an operator configuration assertion of loopback hostname compliance (`127.0.0.1`, `localhost`, `::1`), not hardware airgap proof.
   - Developer pipeline reproducibility via `requirements-dev.txt` (`mcp>=1.0.0`) in CI.
   - Published remote rollback tag `rollback-hardening-gate-2.1-baseline` at `ccc33273cdf3e36851b2b5b40847b90676362269`.
-* **Working Tree:** Controlled research branch state with verified C++ core enhancements, full CTest suite (5 targets, 75 cases, 264 assertions), 144 adapter tests passing 100%, and 49 developer pipeline tests passing 100%.
+* **Repository Scope:** This record describes the checked-out hardening branch. Its final isolation changes are source changes from `75ebfd5`; subsequent synchronization work is documentation-only.
 
 ---
 
-## 2. CI Verification for Code Baseline
+## 2. CI Verification
 
 * **Continuous Integration Provider:** GitHub Actions
 * **Workflow Configuration:** [.github/workflows/ci.yml](../.github/workflows/ci.yml)
 * **Triggers:** Push to `main`, Pull Requests targeting `main`.
-* **Code Baseline Tested:** Commit `677e845` (`fix: centralize application version reporting`)
-* **Workflow Run:** [Run #6 (ID: 38710534839)](https://github.com/StevefromSpace/CIPHER/actions/runs/38710534839)
-* **Status:** **Success (Passing)** in 42 seconds
-* **Matrix Jobs:**
+* **Final Isolation Verification Head Tested:** Commit `75ebfd5`.
+* **Workflow Run:** [Run #12 (ID: 39381571550)](https://github.com/StevefromSpace/CIPHER/actions/runs/39381571550)
+* **Status:** **Success**.
+* **Jobs:**
   1. **Ubuntu 24.04 (`ubuntu-24.04`):** Passed (GCC on Ubuntu 24.04 LTS; CTest passed).
   2. **Windows 2022 (`windows-2022`):** Passed (MSVC on Windows Server 2022; CTest passed).
-* **Note on v0.3 Extension:** v0.3 persistent memory and pipeline additions are locally verified (202 CTest assertions, 49 Python pipeline tests passing); CI verification on GitHub will occur upon PR submission.
+  3. **Assistant Adapters & Pipeline Tests (Python):** Passed.
+* **Historical core baseline:** [Run #6 (ID: 38710534839)](https://github.com/StevefromSpace/CIPHER/actions/runs/38710534839) passed for commit `677e845`.
+* **Scope of evidence:** CI proves the configured test suites passed. It does not verify a live OpenClaw installation, live model execution, live OVOS skill dispatch, or an independently verified local route.
 
 ---
 
@@ -235,14 +238,14 @@ CTest registers 5 distinct test binaries, covering 75 test functions/cases and 2
 
 ---
 
-## 8. Explicitly Unimplemented Capabilities
+## 8. Explicitly Unimplemented or Disabled Capabilities
 
 To prevent confusion or hallucination by future AI agents, the following capabilities have **NOT** been implemented:
-* **No AI Inference Engine:** No language models, no local runtime (e.g., llama.cpp/ONNX), and no external API integration.
+* **No AI Inference Engine:** No language models or direct local runtime (e.g., llama.cpp/ONNX) are integrated into the C++ application. The repository contains adapter code, but live external execution remains disabled by default and was not exercised as part of the final hardening gate.
 * **No Vector Search or Embeddings:** Persistent memory stores explicit, human-readable entries in local files; no vector database, semantic embeddings, or autonomous background memory extraction.
 * **No Voice / Audio:** No speech-to-text, text-to-speech, or audio capture.
 * **No Operating System Automation:** No arbitrary shell execution, browser control, or GUI manipulation.
-* **No Networking:** No web server, REST API, socket listener, or outbound HTTP client.
+* **No C++ Application Networking:** The C++ executable has no web server, REST API, socket listener, or outbound HTTP client. Python integration adapters contain bounded loopback transport code but do not make live calls under their safe defaults.
 * **No Autonomous Self-Modification:** No dynamic code rewriting or unattended system reconfiguration.
 
 ---
@@ -253,6 +256,7 @@ To prevent confusion or hallucination by future AI agents, the following capabil
 2. **Single-Threaded Execution:** The logger and core assume single-threaded execution; no mutex locking is implemented yet.
 3. **Log Rotation:** The logger appends continuously to `log_file` without size limits or rotation.
 4. **Config File Path:** `cipher.conf` is loaded exclusively from the current working directory.
+5. **External Integration Evidence:** OpenClaw effective policy enforcement, local-route provenance beyond the operator assertion, downstream tool isolation for Dodaios and Leon, and live OVOS bus behavior have not been independently runtime-verified. The adapters therefore remain fail-closed by default.
 
 ---
 
