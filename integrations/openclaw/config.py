@@ -55,7 +55,10 @@ class OpenClawConfig:
     # Maximum stdout/stderr output bytes collected from subprocess
     max_output_bytes: int = 1048576
 
-    # Flag indicating whether local execution has been independently verified (default False -> UNKNOWN route)
+    # Supported upstream OpenClaw CLI versions / major prefixes
+    supported_cli_versions: Tuple[str, ...] = ("2026.", "1.")
+
+    # Flag indicating whether local execution has been asserted by operator (strictly loopback compliance, NOT independent hardware or cryptographic proof; route defaults to UNKNOWN unless asserted)
     verified_local: bool = False
 
     # Live execution enablement: strictly False by default.
@@ -163,3 +166,16 @@ class OpenClawConfig:
             )
 
         return True, None
+
+    def is_cli_version_supported(self, version_str: str) -> Tuple[bool, Optional[str]]:
+        """Verifies whether an OpenClaw CLI version string matches supported versions."""
+        if not version_str or not version_str.strip():
+            return False, "OpenClaw version output is empty."
+        clean_ver = version_str.strip().lstrip("vV")
+        for supported in self.supported_cli_versions:
+            if clean_ver.startswith(supported):
+                return True, None
+        return False, (
+            f"Installed OpenClaw CLI version '{version_str.strip()}' does not match "
+            f"supported upstream versions ({', '.join(self.supported_cli_versions)})."
+        )

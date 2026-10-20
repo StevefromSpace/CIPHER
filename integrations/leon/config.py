@@ -38,7 +38,8 @@ class LeonConfig:
     query_endpoint: str = "/api/v1/query"
     info_endpoint: str = "/api/v1/info"
 
-    # Provenance verification: False until verified local runtime confirmed
+    # Provenance verification: operator configuration assertion (default False -> UNKNOWN route).
+    # NOTE: verified_local asserts loopback URL compliance per contract, NOT independent hardware or cryptographic proof.
     verified_local: bool = False
 
     # Live execution enablement: False by default because Leon /api/v1/query

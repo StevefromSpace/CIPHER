@@ -32,27 +32,9 @@ from integrations.contract import (
     AssistantStatus,
     ProcessingRoute,
 )
-from integrations.ovos.bridge import OVOSBridge
+from integrations.ovos.bridge import MockBusClient, OVOSBridge
 from integrations.ovos.config import OVOSConfig
 from integrations.ovos.message import OVOSMessage
-
-
-class MockBusClient:
-    """Mock messagebus client simulating OVOS message broadcast and response."""
-    is_mock = True
-    _is_cipher_mock = True
-
-    def __init__(self, response_msg: Optional[OVOSMessage] = None, raise_exc: bool = False):
-
-        self.response_msg = response_msg
-        self.raise_exc = raise_exc
-        self.sent_messages = []
-
-    def send_and_wait(self, msg: OVOSMessage, timeout: float = 5.0) -> Optional[OVOSMessage]:
-        self.sent_messages.append(msg)
-        if self.raise_exc:
-            raise ConnectionError("Mock bus connection dropped")
-        return self.response_msg
 
 
 class TestOVOSBridge(unittest.TestCase):
@@ -345,8 +327,57 @@ class TestOVOSBridge(unittest.TestCase):
         bridge = OVOSBridge(cfg, bus_client_factory=lambda: mock_client)
         resp = bridge.submit_prompt(AssistantRequest(prompt="Hello"))
         self.assertEqual(resp.status, AssistantStatus.UNAVAILABLE)
-        self.assertEqual(len(mock_client.sent_messages), 0, "No message should be sent")
+    def test_spoofed_marker_client_rejected(self):
+        """Verifies a live-like client spoofing is_mock=True or _is_cipher_mock=True is rejected fail-closed with 0 messages sent."""
+        class SpoofedLiveClient:
+            is_mock = True
+            _is_cipher_mock = True
+            is_mock_client = True
 
+            def __init__(self):
+                self.sent_messages = []
+                self.dispatched = False
+
+            def send_and_wait(self, msg, timeout=5.0):
+                self.dispatched = True
+                self.sent_messages.append(msg)
+                return None
+
+        spoofed = SpoofedLiveClient()
+        bridge = OVOSBridge(self.config, bus_client_factory=lambda: spoofed)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Attempt bypass with spoofed marker"))
+
+        self.assertEqual(resp.status, AssistantStatus.UNAVAILABLE)
+        self.assertIn("live ovos bus dispatch rejected", resp.error.lower())
+        self.assertIn("spoofing mock markers", resp.error.lower())
+        self.assertFalse(spoofed.dispatched, "Live client must NOT receive dispatch")
+        self.assertEqual(len(spoofed.sent_messages), 0, "Zero messages must be sent to spoofed client")
+
+    def test_subclassed_spoofed_mock_rejected(self):
+        """Verifies that subclassing MockBusClient cannot bypass exact type check."""
+        class SubclassedMock(MockBusClient):
+            def __init__(self):
+                super().__init__()
+                self.dispatched = False
+
+            def send_and_wait(self, msg, timeout=5.0):
+                self.dispatched = True
+                return super().send_and_wait(msg, timeout)
+
+        subclassed = SubclassedMock()
+        bridge = OVOSBridge(self.config, bus_client_factory=lambda: subclassed)
+        resp = bridge.submit_prompt(AssistantRequest(prompt="Attempt subclass bypass"))
+
+        self.assertEqual(resp.status, AssistantStatus.UNAVAILABLE)
+        self.assertFalse(subclassed.dispatched)
+        self.assertEqual(len(subclassed.sent_messages), 0)
+
+    def test_status_reports_operator_assertion(self):
+        """Verifies get_status explicitly declares verified_local as operator assertion."""
+        bridge = OVOSBridge(self.config)
+        status = bridge.get_status()
+        self.assertIn("verified_local_status", status)
+        self.assertIn("operator_assertion", status["verified_local_status"])
 
 
 if __name__ == "__main__":

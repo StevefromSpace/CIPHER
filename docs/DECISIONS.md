@@ -283,3 +283,40 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
     - Python Integrations: 127/127 tests passed.
     - Developer Pipeline: 49/49 tests passed.
 * **Future Intent:** All live assistant integration tests require separately authorized sandbox plans and verified local routes.
+
+---
+
+### 17. Final Isolation Verification: Mock-Only Boundary Rigor, Tool Inventory Schema Validation, and Operator Assertion Provenance
+
+* **Status:** Accepted (Final Isolation Verification, Milestone v0.4)
+* **Principle:** Security gates must not rely on duck-typed flags that an untrusted or live-like client could set. Response schema validation for security probes must fail closed on missing or unexpected properties rather than defaulting to permitted states. Route provenance attributes must be strictly qualified as operator configuration assertions rather than unverified hardware claims.
+* **Rationale:** A final pre-release isolation audit identified remaining defensive gaps:
+  1. In OVOS, checking `is_mock=True` or `_is_cipher_mock=True` allowed an injected live-like client to bypass mock-only boundary simply by defining those attributes.
+  2. In OpenClaw, `tools_data.get("tools", [])` treated a response dictionary missing the `"tools"` property (such as `{}` or `{"status": "ok"}`) as having an empty inventory, inadvertently permitting live submission. The CLI version was also unverified against supported upstream releases.
+  3. `verified_local` was not universally documented across contracts and adapters as an operator configuration assertion of loopback compliance (`127.0.0.1`, `localhost`, `::1`).
+  4. The remote repository lacked the published `rollback-hardening-gate-2.1-baseline` rollback tag.
+* **Implementation:**
+  - `integrations/ovos/` (Mock-Only Strict Type Equality):
+    - Replaced duck-typed attribute checks with exact type equality `type(client) is MockBusClient` against CIPHER's offline in-memory test double.
+    - Exported canonical `MockBusClient` in `integrations.ovos`. Subclasses and marker-spoofing live clients fail closed as `AssistantStatus.UNAVAILABLE` with zero messages sent (25 unit tests).
+  - `integrations/openclaw/` (Strict Schema Validation & Version Check):
+    - Added `supported_cli_versions: Tuple[str, ...] = ("2026.", "1.")` and `is_cli_version_supported()` to `OpenClawConfig`.
+    - In `_verify_empty_tool_inventory()`, probed CLI `--version` against supported upstream versions before dispatching tools probe.
+    - Enforced strict schema validation on `openclaw tools list --json` output:
+      - Valid empty list `[]` accepted.
+      - Dict with `"tools": []` accepted.
+      - Missing `"tools"` key strictly rejected as unexpected schema (never defaulted to `[]`).
+      - Non-list `"tools"` property strictly rejected as malformed schema.
+      - Non-empty tools list rejected fail-closed.
+      - Malformed or invalid JSON rejected fail-closed.
+    - In `get_status()`, reported `live_enforcement: "unverified"` whenever compatible CLI is unavailable or live execution / verified local is not configured (48 unit tests).
+  - `Operator Assertion Provenance`:
+    - Documented `verified_local` across `ProcessingRoute.VERIFIED_LOCAL`, `OpenClawConfig`, `DodaiosConfig`, `LeonConfig`, and `OVOSConfig` as an operator configuration assertion of loopback hostname compliance, not hardware airgap proof.
+    - Included `verified_local_status` attribute in `get_status()` across all four bridges.
+  - `Remote Tag Verification`:
+    - Verified and published `rollback-hardening-gate-2.1-baseline` to remote `origin` at `ccc33273cdf3e36851b2b5b40847b90676362269`.
+  - Test Invariants:
+    - CTest: 5/5 targets passed (75 test cases, 264 assertions, 100%).
+    - Python Integrations: 144/144 tests passed (Contract: 22, OpenClaw: 48, Dodaios: 24, Leon: 25, OVOS: 25).
+    - Developer Pipeline: 49/49 tests passed.
+* **Future Intent:** Live model invocation and live skill execution remain disabled under CIPHER safety policy until independently verifiable route evidence and sandbox isolation are implemented.

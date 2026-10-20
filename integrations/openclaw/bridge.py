@@ -80,15 +80,10 @@ class OpenClawBridge(BaseAssistantBackend):
 
         return None
 
-    def is_available(self) -> bool:
-        """Checks if OpenClaw CLI is installed and runnable."""
-        if not self.config.enabled:
-            return False
-
-        cli = self._resolve_cli()
-        if not cli:
-            return False
-
+    def _check_cli_version(self, cli: Path) -> Tuple[bool, Optional[str]]:
+        """Probes and verifies the OpenClaw CLI version against supported upstream versions."""
+        if not cli or not cli.exists():
+            return False, "OpenClaw binary is not installed."
         try:
             res = subprocess.run(
                 [str(cli), "--version"],
@@ -97,27 +92,67 @@ class OpenClawBridge(BaseAssistantBackend):
                 timeout=5.0,
                 shell=False
             )
-            return res.returncode == 0
-        except Exception:
+            if res.returncode != 0:
+                err_msg = res.stderr.strip() or res.stdout.strip() or f"exit code {res.returncode}"
+                return False, f"OpenClaw --version probe failed: {err_msg}"
+            version_str = res.stdout.strip()
+            ok, msg = self.config.is_cli_version_supported(version_str)
+            if not ok:
+                return False, msg
+            return True, version_str
+        except Exception as ex:
+            return False, f"Exception while probing OpenClaw version: {ex}"
+
+    def is_available(self) -> bool:
+        """Checks if OpenClaw CLI is installed and runnable with a supported upstream version."""
+        if not self.config.enabled:
             return False
+
+        cli = self._resolve_cli()
+        if not cli:
+            return False
+
+        ok, _ = self._check_cli_version(cli)
+        return ok
 
     def get_status(self) -> Dict[str, Any]:
         """Returns sanitized status and health information."""
         cli = self._resolve_cli()
+        cli_compatible = False
+        cli_version = None
+        if cli:
+            try:
+                ver_ok, ver_val = self._check_cli_version(cli)
+                cli_compatible = ver_ok
+                cli_version = ver_val if ver_ok else None
+            except Exception:
+                cli_compatible = False
+
+        # Mark effective runtime enforcement as "unverified" if compatible CLI is unavailable,
+        # or live execution / verified local has not been established.
+        effective_enforcement = (
+            "verified"
+            if (cli and cli_compatible and self.config.enable_live_execution and self.config.verified_local)
+            else "unverified"
+        )
+
         return {
             "name": "OpenClaw",
             "enabled": self.config.enabled,
             "installed": cli is not None,
             "cli_path": str(cli) if cli else None,
+            "cli_version": cli_version,
+            "cli_compatible": cli_compatible,
             "gateway_url": self.config.gateway_url,
             "default_model": self.config.default_model,
             "strict_local": self.config.strict_local,
             "tool_profile": self.config.tool_profile,
             "timeout_seconds": self.config.timeout_seconds,
             "route": self.capabilities.default_route.value,
+            "verified_local_status": "operator_assertion (loopback URL compliance per contract, unverified hardware airgap)",
             "enable_live_execution": self.config.enable_live_execution,
             "execution_mode": self.config.execution_mode,
-            "live_enforcement": "verified" if (cli and self.config.verified_local) else "unverified",
+            "live_enforcement": effective_enforcement,
         }
 
     def _sanitize_error(self, message: str) -> str:
@@ -253,37 +288,83 @@ class OpenClawBridge(BaseAssistantBackend):
 
         In OpenClaw, client-side config cannot be assumed to restrict an already-running
         Gateway daemon. Furthermore, embedded execution must verifiably resolve to an
-        empty tool inventory. If the CLI or runtime cannot prove zero tools, fail closed.
+        empty tool inventory. If the CLI, supported version, or runtime cannot prove zero tools, fail closed.
+
+        Guarantees:
+        1. Verifies that the installed CLI exists and is runnable.
+        2. Verifies CLI version against supported upstream CLI versions.
+        3. Executes probe command `openclaw tools list --json`.
+        4. Parses JSON output strictly:
+           - If output is not valid JSON, reject as malformed schema.
+           - If output is a list: must be empty (`len(tools_data) == 0`). Non-empty list rejected.
+           - If output is a dict: must have 'tools' key, and 'tools' MUST be a list, and `len(tools_data["tools"]) == 0`.
+             A missing 'tools' property is strictly rejected as unexpected/malformed schema (NOT treated as empty inventory).
+           - Any other data type (string, int, bool, None) is rejected as unexpected schema.
+        5. If probe fails or cannot be verified, fail closed.
         """
         # If no compatible binary is installed, tool inventory cannot be proven
         if not cli or not cli.exists():
             return False, "OpenClaw binary is not installed; effective tool inventory cannot be verified."
 
-        # Probe the tool inventory via CLI if available
+        # Verify upstream CLI version compatibility first
+        ver_ok, ver_err = self._check_cli_version(cli)
+        if not ver_ok:
+            return False, f"Incompatible or unverified OpenClaw CLI version: {ver_err}"
+
+        # Probe the tool inventory via CLI
         try:
             probe_cmd = [str(cli), "tools", "list", "--json"]
             probe_env = env or os.environ.copy()
-            ret, stdout_b, _, _ = self._execute_bounded_process(
+            ret, stdout_b, stderr_b, err_msg = self._execute_bounded_process(
                 cmd=probe_cmd,
                 env=probe_env,
                 timeout=5.0,
                 max_bytes=65536
             )
-            if ret == 0:
-                tools_data = json.loads(stdout_b.decode("utf-8", errors="replace"))
-                if isinstance(tools_data, list) and len(tools_data) == 0:
-                    return True, None
-                if isinstance(tools_data, dict) and len(tools_data.get("tools", [])) == 0:
-                    return True, None
-                return False, f"Effective tool inventory is not empty: found {tools_data}."
-        except Exception:
-            pass
+            if ret != 0 or err_msg:
+                detail = err_msg or stderr_b.decode("utf-8", errors="replace")[:200]
+                return False, f"OpenClaw tools list probe failed (code {ret}): {detail}"
 
-        return False, (
-            "Effective tool inventory cannot be proven empty. Gateway-mediated execution does "
-            "not guarantee client-side tool policy enforcement, and embedded execution tool inventory "
-            "is unverified. Live OpenClaw submission remains unavailable."
-        )
+            raw_text = stdout_b.decode("utf-8", errors="replace").strip()
+            if not raw_text:
+                return False, "OpenClaw tools list returned empty output; expected JSON schema."
+
+            try:
+                tools_data = json.loads(raw_text)
+            except (json.JSONDecodeError, ValueError) as ex:
+                return False, f"Malformed response schema from OpenClaw tools list (invalid JSON): {ex}"
+
+            # Strict response schema verification:
+            # 1. Output is a list
+            if isinstance(tools_data, list):
+                if len(tools_data) == 0:
+                    return True, None
+                return False, f"Effective tool inventory is not empty: found {len(tools_data)} registered tools: {tools_data}."
+
+            # 2. Output is a dict with 'tools' list
+            if isinstance(tools_data, dict):
+                # Reject if missing "tools" key -- do NOT treat missing "tools" as empty inventory!
+                if "tools" not in tools_data:
+                    return False, (
+                        "Unexpected response schema from OpenClaw tools list: missing 'tools' property. "
+                        f"Response keys: {list(tools_data.keys())}."
+                    )
+                tools_list = tools_data["tools"]
+                if not isinstance(tools_list, list):
+                    return False, (
+                        f"Malformed response schema from OpenClaw tools list: 'tools' property is not a list "
+                        f"(found type '{type(tools_list).__name__}')."
+                    )
+                if len(tools_list) == 0:
+                    return True, None
+                return False, f"Effective tool inventory is not empty: found {len(tools_list)} tools in 'tools' property: {tools_list}."
+
+            return False, (
+                f"Unexpected response schema from OpenClaw tools list: expected JSON object or array, "
+                f"got {type(tools_data).__name__}."
+            )
+        except Exception as ex:
+            return False, f"Exception while probing OpenClaw tool inventory: {ex}"
 
     def submit_prompt(self, request: AssistantRequest) -> AssistantResponse:
         """Submits a single text prompt to OpenClaw and returns the structured response.

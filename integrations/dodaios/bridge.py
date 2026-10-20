@@ -103,6 +103,7 @@ class DodaiosBridge(BaseAssistantBackend):
             "strict_local": self.config.strict_local,
             "timeout_seconds": self.config.timeout_seconds,
             "route": self.capabilities.default_route.value,
+            "verified_local_status": "operator_assertion (loopback URL compliance per contract, unverified hardware airgap)",
             "enable_live_execution": self.config.enable_live_execution,
             "live_compatibility": "verified" if (self.config.verified_local and self.config.verified_tool_isolation) else "unverified",
         }

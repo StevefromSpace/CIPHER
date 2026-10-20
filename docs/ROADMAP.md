@@ -112,6 +112,12 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
   * OpenVoiceOS Mock-Only Bus Dispatch Guard: Injected `bus_client_factory` verified for authentic test mock (`is_mock=True` / `_is_cipher_mock=True`), blocking live skill dispatch bypass.
   * CI & Developer Pipeline Reproducibility: Added `requirements-dev.txt` (`mcp>=1.0.0`) in CI workflow, resolving clean CI runner execution across all 49 pipeline tests.
   * Test Suite Expansion: 5 CTest targets (75 cases, 264 assertions, 100% passing), 127 adapter unit tests (100% passing), 49 pipeline unit tests (100% passing).
+- [x] Final Isolation Verification (Mock-Only Boundaries & Strict Schema Gate):
+  * OpenVoiceOS Mock-Only Type Safety: Replaced marker checks (`is_mock=True` / `_is_cipher_mock=True`) with exact type equality `type(client) is MockBusClient`, blocking spoofed live-like clients from bypassing safety boundary with zero messages sent (25 tests).
+  * OpenClaw Tool Inventory Schema Rigor & Version Probing: Enforced upstream version checks (`supported_cli_versions`), strict response schema validation on `openclaw tools list --json` (rejecting missing `tools` property and non-list structures), and unverified live enforcement when compatible CLI is unavailable (48 tests).
+  * Route Provenance Operator Assertion: Documented `verified_local` across all adapters as an operator configuration assertion of loopback hostname compliance, reporting `verified_local_status` in health responses.
+  * Baseline Rollback Tag Publication: Published `rollback-hardening-gate-2.1-baseline` to remote `origin` at `ccc33273cdf3e36851b2b5b40847b90676362269`.
+  * Complete Test Coverage: 5 CTest targets (75 cases, 264 assertions, 100%), 144 adapter unit tests (100%), 49 pipeline unit tests (100%).
 - [x] Configure dedicated CI test job for assistant integrations and developer pipeline.
 - [ ] Prototype direct in-process local runtime adapter (e.g., `llama.cpp` or embedded model) when local inference milestone begins.
 - [ ] Keep the core useful when no model or assistant is available.

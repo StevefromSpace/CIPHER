@@ -632,6 +632,183 @@ class TestOpenClawBridge(unittest.TestCase):
         self.assertIsNotNone(err_msg)
         self.assertIn("timed out after 0.5s", err_msg)
 
+    # -------------------------------------------------------------------------
+    # 14. Audit: _verify_empty_tool_inventory, CLI Version, and Schema Rejection
+    # -------------------------------------------------------------------------
+    def test_check_cli_version_supported_versions(self):
+        """Verifies version probing accepts supported versions and rejects unsupported versions."""
+        bridge = OpenClawBridge(self.config)
+        mock_cli = Path("/bin/openclaw")
+
+        with patch.object(Path, "exists", return_value=True):
+            # Supported version 2026.1.0
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stdout="2026.1.0\n", stderr="")
+                ok, ver = bridge._check_cli_version(mock_cli)
+                self.assertTrue(ok)
+                self.assertEqual(ver, "2026.1.0")
+
+            # Supported version v1.4.2
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stdout="v1.4.2\n", stderr="")
+                ok, ver = bridge._check_cli_version(mock_cli)
+                self.assertTrue(ok)
+                self.assertEqual(ver, "v1.4.2")
+
+            # Unsupported version 0.8.0
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stdout="0.8.0\n", stderr="")
+                ok, err = bridge._check_cli_version(mock_cli)
+                self.assertFalse(ok)
+                self.assertIn("does not match supported upstream versions", err)
+
+            # Failure during --version probe
+            with patch("subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=127, stdout="", stderr="command not found")
+                ok, err = bridge._check_cli_version(mock_cli)
+                self.assertFalse(ok)
+                self.assertIn("probe failed", err)
+
+    def test_verify_empty_tool_inventory_empty_list_accepted(self):
+        """Verifies an empty list [] is accepted as zero tools."""
+        bridge = OpenClawBridge(self.config)
+        mock_cli = Path("/bin/openclaw")
+
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_check_cli_version", return_value=(True, "2026.1.0")), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(0, b"[]", b"", None)):
+            ok, err = bridge._verify_empty_tool_inventory(mock_cli)
+            self.assertTrue(ok)
+            self.assertIsNone(err)
+
+    def test_verify_empty_tool_inventory_empty_dict_with_tools_accepted(self):
+        """Verifies a dict with 'tools': [] is accepted as zero tools."""
+        bridge = OpenClawBridge(self.config)
+        mock_cli = Path("/bin/openclaw")
+
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_check_cli_version", return_value=(True, "2026.1.0")), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(0, b'{"tools": []}', b"", None)):
+            ok, err = bridge._verify_empty_tool_inventory(mock_cli)
+            self.assertTrue(ok)
+            self.assertIsNone(err)
+
+    def test_verify_empty_tool_inventory_missing_tools_property_rejected(self):
+        """Verifies that a missing 'tools' property is strictly rejected and NOT treated as empty."""
+        bridge = OpenClawBridge(self.config)
+        mock_cli = Path("/bin/openclaw")
+
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_check_cli_version", return_value=(True, "2026.1.0")), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(0, b'{"status": "ok", "count": 0}', b"", None)):
+            ok, err = bridge._verify_empty_tool_inventory(mock_cli)
+            self.assertFalse(ok)
+            self.assertIn("missing 'tools' property", err)
+
+        # Empty dict {} without 'tools'
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_check_cli_version", return_value=(True, "2026.1.0")), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(0, b'{}', b"", None)):
+            ok, err = bridge._verify_empty_tool_inventory(mock_cli)
+            self.assertFalse(ok)
+            self.assertIn("missing 'tools' property", err)
+
+    def test_verify_empty_tool_inventory_non_list_tools_rejected(self):
+        """Verifies that non-list 'tools' property is rejected as malformed schema."""
+        bridge = OpenClawBridge(self.config)
+        mock_cli = Path("/bin/openclaw")
+
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_check_cli_version", return_value=(True, "2026.1.0")), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(0, b'{"tools": "none"}', b"", None)):
+            ok, err = bridge._verify_empty_tool_inventory(mock_cli)
+            self.assertFalse(ok)
+            self.assertIn("'tools' property is not a list", err)
+
+    def test_verify_empty_tool_inventory_non_empty_tools_rejected(self):
+        """Verifies that non-empty tool inventory is rejected fail-closed."""
+        bridge = OpenClawBridge(self.config)
+        mock_cli = Path("/bin/openclaw")
+
+        # Non-empty list
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_check_cli_version", return_value=(True, "2026.1.0")), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(0, b'["bash", "python"]', b"", None)):
+            ok, err = bridge._verify_empty_tool_inventory(mock_cli)
+            self.assertFalse(ok)
+            self.assertIn("not empty", err)
+
+        # Non-empty 'tools' key
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_check_cli_version", return_value=(True, "2026.1.0")), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(0, b'{"tools": ["gateway", "presence"]}', b"", None)):
+            ok, err = bridge._verify_empty_tool_inventory(mock_cli)
+            self.assertFalse(ok)
+            self.assertIn("not empty", err)
+
+    def test_verify_empty_tool_inventory_malformed_json_rejected(self):
+        """Verifies malformed JSON from tools probe is rejected fail-closed."""
+        bridge = OpenClawBridge(self.config)
+        mock_cli = Path("/bin/openclaw")
+
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_check_cli_version", return_value=(True, "2026.1.0")), \
+             patch.object(bridge, "_execute_bounded_process", return_value=(0, b'{not valid json', b"", None)):
+            ok, err = bridge._verify_empty_tool_inventory(mock_cli)
+            self.assertFalse(ok)
+            self.assertIn("invalid json", err.lower())
+
+    def test_verify_empty_tool_inventory_incompatible_version_fails_closed(self):
+        """Verifies incompatible CLI version blocks tool inventory verification."""
+        bridge = OpenClawBridge(self.config)
+        mock_cli = Path("/bin/openclaw")
+
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_check_cli_version", return_value=(False, "Unsupported version 0.1.0")):
+            ok, err = bridge._verify_empty_tool_inventory(mock_cli)
+            self.assertFalse(ok)
+            self.assertIn("Incompatible or unverified OpenClaw CLI version", err)
+
+    def test_verify_empty_tool_inventory_missing_cli_fails_closed(self):
+        """Verifies missing CLI binary fails closed."""
+        bridge = OpenClawBridge(self.config)
+        ok, err = bridge._verify_empty_tool_inventory(None)
+        self.assertFalse(ok)
+        self.assertIn("not installed", err)
+
+    # -------------------------------------------------------------------------
+    # 15. get_status: Live Enforcement and Operator Assertion Reporting
+    # -------------------------------------------------------------------------
+    def test_get_status_live_enforcement_unverified_when_cli_missing(self):
+        """Verifies live_enforcement is 'unverified' when CLI is not installed."""
+        cfg = OpenClawConfig(enabled=True, cli_path=None, enable_live_execution=True, verified_local=True)
+        bridge = OpenClawBridge(cfg)
+        status = bridge.get_status()
+        self.assertEqual(status["live_enforcement"], "unverified")
+        self.assertFalse(status["installed"])
+        self.assertIn("verified_local_status", status)
+        self.assertIn("operator_assertion", status["verified_local_status"])
+
+    def test_get_status_live_enforcement_unverified_when_live_disabled(self):
+        """Verifies live_enforcement is 'unverified' when enable_live_execution is False."""
+        cfg = OpenClawConfig(enabled=True, cli_path=self.mock_cli_path, enable_live_execution=False, verified_local=True)
+        bridge = OpenClawBridge(cfg)
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_check_cli_version", return_value=(True, "2026.1.0")):
+            status = bridge.get_status()
+            self.assertEqual(status["live_enforcement"], "unverified")
+
+    def test_get_status_live_enforcement_verified_when_all_conditions_met(self):
+        """Verifies live_enforcement is 'verified' only when compatible CLI, live execution, and verified local are set."""
+        cfg = OpenClawConfig(enabled=True, cli_path=self.mock_cli_path, enable_live_execution=True, verified_local=True)
+        bridge = OpenClawBridge(cfg)
+        with patch.object(Path, "exists", return_value=True), \
+             patch.object(bridge, "_check_cli_version", return_value=(True, "2026.1.0")):
+            status = bridge.get_status()
+            self.assertEqual(status["live_enforcement"], "verified")
+            self.assertTrue(status["cli_compatible"])
+            self.assertEqual(status["cli_version"], "2026.1.0")
+
 
 if __name__ == "__main__":
     unittest.main()

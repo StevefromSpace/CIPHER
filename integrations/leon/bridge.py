@@ -122,6 +122,7 @@ class LeonBridge(BaseAssistantBackend):
             "strict_local": self.config.strict_local,
             "timeout_seconds": self.config.timeout_seconds,
             "route": self.capabilities.default_route.value,
+            "verified_local_status": "operator_assertion (loopback URL compliance per contract, unverified hardware airgap)",
             "enable_live_execution": self.config.enable_live_execution,
             "verified_tool_isolation": self.config.verified_tool_isolation,
             "live_execution_status": "enabled" if (self.config.enable_live_execution and self.config.verified_tool_isolation) else "disabled_unproven_tool_isolation",

@@ -35,6 +35,26 @@ from .config import OVOSConfig
 from .message import OVOSMessage
 
 
+class MockBusClient:
+    """Official offline in-memory test double for OpenVoiceOS messagebus.
+
+    Live OVOS messagebus transmission is disabled under CIPHER safety policy.
+    Only instances of this verified test double are permitted to interact with
+    the bridge for test correlation and simulation.
+    """
+
+    def __init__(self, response_msg: Optional[OVOSMessage] = None, raise_exc: bool = False):
+        self.response_msg = response_msg
+        self.raise_exc = raise_exc
+        self.sent_messages = []
+
+    def send_and_wait(self, msg: OVOSMessage, timeout: float = 5.0) -> Optional[OVOSMessage]:
+        self.sent_messages.append(msg)
+        if self.raise_exc:
+            raise ConnectionError("Mock bus connection dropped")
+        return self.response_msg
+
+
 class OVOSBridge(BaseAssistantBackend):
     """Optional bridge connecting CIPHER to OpenVoiceOS messagebus."""
 
@@ -97,6 +117,7 @@ class OVOSBridge(BaseAssistantBackend):
             "strict_local": self.config.strict_local,
             "timeout_seconds": self.config.timeout_seconds,
             "route": self.capabilities.default_route.value,
+            "verified_local_status": "operator_assertion (loopback URL compliance per contract, unverified hardware airgap)",
             "is_mock_only": True,
             "safety_boundary": "Live utterance submission to skills is disabled under safety policy; assistant prompts are mock-only.",
             "confidentiality_notice": "Outbound sensitive-data check is best-effort pattern detection, not complete secret protection. Bus frames are broadcast to all local clients.",
@@ -178,9 +199,11 @@ class OVOSBridge(BaseAssistantBackend):
 
         client = self._bus_client_factory()
 
-        # Enforce that supplied client is an authentic test mock, NOT a live or live-like client
-        is_mock_client = bool(getattr(client, "is_mock", False) or getattr(client, "_is_cipher_mock", False))
-        if not is_mock_client or not self.config.allow_mock or (self.config.allow_live_skill_dispatch and not self.config.verified_non_action_route):
+        # Enforce that supplied client is the official verified MockBusClient test double.
+        # Setting marker attributes like is_mock=True, is_mock_client=True, or _is_cipher_mock=True
+        # on arbitrary or live-like objects is explicitly rejected as proof of mock isolation.
+        is_verified_mock = type(client) is MockBusClient
+        if not is_verified_mock or not self.config.allow_mock or (self.config.allow_live_skill_dispatch and not self.config.verified_non_action_route):
             duration_ms = (time.perf_counter() - start_time) * 1000.0
             return AssistantResponse(
                 status=AssistantStatus.UNAVAILABLE,
@@ -188,8 +211,9 @@ class OVOSBridge(BaseAssistantBackend):
                 route=self.capabilities.default_route,
                 duration_ms=duration_ms,
                 error=(
-                    "Live OVOS bus dispatch rejected: supplying a client factory cannot bypass "
-                    "the mock-only policy. Live skill execution is disabled under CIPHER safety policy."
+                    "Live OVOS bus dispatch rejected: live skill execution is disabled under CIPHER safety policy. "
+                    "Supplying a live-like client factory or spoofing mock markers (is_mock=True) cannot bypass "
+                    "the mock-only boundary. Only the verified in-memory MockBusClient is permitted."
                 ),
             )
 

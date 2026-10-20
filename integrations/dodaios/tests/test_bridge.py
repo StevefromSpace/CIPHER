@@ -370,6 +370,13 @@ class TestDodaiosBridge(unittest.TestCase):
         self.assertIn("execution unavailable", resp.error.lower())
         self.assertIn("tool isolation cannot be proven", resp.error.lower())
 
+    def test_status_reports_operator_assertion(self):
+        """Verifies get_status explicitly declares verified_local as operator assertion."""
+        bridge = DodaiosBridge(self.config)
+        status = bridge.get_status()
+        self.assertIn("verified_local_status", status)
+        self.assertIn("operator_assertion", status["verified_local_status"])
+
 
 if __name__ == "__main__":
     unittest.main()

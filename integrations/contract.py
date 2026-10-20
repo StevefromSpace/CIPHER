@@ -16,7 +16,14 @@ import urllib.request
 
 
 class ProcessingRoute(str, Enum):
-    """Provenance and network routing of the model execution."""
+    """Provenance and network routing of the model execution.
+
+    NOTE ON VERIFIED_LOCAL:
+    VERIFIED_LOCAL indicates that the endpoint URL passed strict loopback hostname
+    validation per contract (strictly limited to 127.0.0.1, localhost, ::1).
+    It represents an operator configuration assertion indicating loopback route provenance,
+    NOT independent hardware or cryptographic proof of local inference or air-gapping.
+    """
     UNKNOWN = "unknown"
     VERIFIED_LOCAL = "verified_local"
     REMOTE_CLOUD = "remote_cloud"

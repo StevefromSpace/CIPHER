@@ -44,7 +44,8 @@ class OVOSConfig:
     # Local-first enforcement
     strict_local: bool = True
 
-    # Provenance verification: False until verified local runtime confirmed
+    # Provenance verification: operator configuration assertion (default False -> UNKNOWN route).
+    # NOTE: verified_local asserts loopback URL compliance per contract, NOT independent hardware or cryptographic proof.
     verified_local: bool = False
 
     # Default identifier

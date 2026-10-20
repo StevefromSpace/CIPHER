@@ -34,8 +34,8 @@ class DodaiosConfig:
     chat_endpoint: str = "/api/runtime-gateway/v1/chat/completions"
     health_endpoint: str = "/api/health"
 
-    # Provenance verification: False until verified local runtime confirmed.
-    # Without a live, verified local instance, live compatibility remains unverified.
+    # Provenance verification: operator configuration assertion (default False -> UNKNOWN route).
+    # NOTE: verified_local asserts loopback URL compliance per contract, NOT independent hardware or cryptographic proof.
     verified_local: bool = False
 
     # Optional bearer token / API key (loaded from env, never hardcoded)

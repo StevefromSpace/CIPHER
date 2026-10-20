@@ -390,6 +390,13 @@ class TestLeonBridge(unittest.TestCase):
         self.assertTrue(err_stream.closed_called)
         self.assertLessEqual(err_stream.bytes_read, 4096 + 1)
 
+    def test_status_reports_operator_assertion(self):
+        """Verifies get_status explicitly declares verified_local as operator assertion."""
+        bridge = LeonBridge(self.config)
+        status = bridge.get_status()
+        self.assertIn("verified_local_status", status)
+        self.assertIn("operator_assertion", status["verified_local_status"])
+
 
 if __name__ == "__main__":
     unittest.main()
