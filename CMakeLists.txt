@@ -62,6 +62,34 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# cipher_memory  —  persistent memory subsystem (v0.3 foundation)
+# ---------------------------------------------------------------------------
+add_library(cipher_memory
+    src/memory.cpp
+)
+target_include_directories(cipher_memory PUBLIC include)
+
+if(MSVC)
+    target_compile_options(cipher_memory PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(cipher_memory PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# ---------------------------------------------------------------------------
+# cipher_assistant  —  assistant capability provider boundary (v0.4 preview)
+# ---------------------------------------------------------------------------
+add_library(cipher_assistant
+    src/assistant_backend.cpp
+)
+target_include_directories(cipher_assistant PUBLIC include)
+
+if(MSVC)
+    target_compile_options(cipher_assistant PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(cipher_assistant PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# ---------------------------------------------------------------------------
 # cipher  —  main executable
 # ---------------------------------------------------------------------------
 add_executable(cipher src/main.cpp)
@@ -86,4 +114,14 @@ if(BUILD_TESTING)
     add_executable(cipher_logger_tests tests/test_logger.cpp)
     target_link_libraries(cipher_logger_tests PRIVATE cipher_logger)
     add_test(NAME cipher_logger_tests COMMAND cipher_logger_tests)
+
+    # Persistent memory subsystem tests.
+    add_executable(cipher_memory_tests tests/test_memory.cpp)
+    target_link_libraries(cipher_memory_tests PRIVATE cipher_memory)
+    add_test(NAME cipher_memory_tests COMMAND cipher_memory_tests)
+
+    # Assistant capability provider subsystem tests.
+    add_executable(cipher_assistant_tests tests/test_assistant_backend.cpp)
+    target_link_libraries(cipher_assistant_tests PRIVATE cipher_assistant)
+    add_test(NAME cipher_assistant_tests COMMAND cipher_assistant_tests)
 endif()

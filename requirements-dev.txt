@@ -1,0 +1,3 @@
+# Test and developer-pipeline dependencies for CIPHER development and CI.
+# Note: CIPHER core runtime is modern C++17 with zero third-party dependencies.
+mcp>=1.0.0

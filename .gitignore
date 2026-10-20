@@ -27,3 +27,25 @@ cipher.conf
 .env.*
 !.env.example
 *.log
+
+# Knowledge & Graph infrastructure (local-only)
+graphify-out/
+.agents/memory/
+
+# Machine-specific agent configuration
+.agents/mcp_config.json
+
+# CIPHER Pipeline transient execution state and worktrees
+.agents/pipeline/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Test fixtures, scratch, and temporary files
+test_memory_tmp_dir/
+test_cipher_config_tmp.conf
+scratch/
+*.tmp
