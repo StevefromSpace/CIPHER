@@ -471,15 +471,7 @@ MemoryResult MemoryStore::load(const std::string& filepath) {
     MemoryResult result;
     std::error_code ec;
 
-    const bool file_exists = std::filesystem::exists(filepath, ec);
-    if (ec) {
-        // Inspection failed: existence is unknown, so never reset the store to empty
-        result.errors.push_back({0, "Failed to inspect memory file: " + filepath + " (" + ec.message() + ")"});
-        result.ok = false;
-        return result;
-    }
-
-    if (!file_exists) {
+    if (!std::filesystem::exists(filepath, ec)) {
         // Missing storage file is not an error — initialize clean empty store
         clear();
         result.ok = true;
