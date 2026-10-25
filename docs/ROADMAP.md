@@ -2,6 +2,46 @@
 
 The dates are planning targets, not promises. Work at a pace that preserves learning and quality.
 
+## Milestone Status (reconciled 2026-10-25)
+
+Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → v0.5**. A later milestone does not begin until the earlier one is formally complete, including its owner-review gate.
+
+| Milestone | Status | Remaining work |
+|-----------|--------|----------------|
+| v0.1 foundation | COMPLETE (owner review open) | Owner review of source files (WAITING_FOR_OWNER) |
+| v0.1.1 hardening | COMPLETE | None |
+| v0.2 configuration and diagnostics | PARTIALLY COMPLETE (blocked on owner review) | Owner review of v0.2 source files (WAITING_FOR_OWNER). No other v0.2 work is open. |
+| v0.2.1 version consistency | COMPLETE | None |
+| v0.3 persistent memory foundation | PARTIALLY COMPLETE | Permission-gate integration (`remember` and `forget` default to `Monitor`; blacklist/override authoritative; denied operations must not mutate the memory file). Owner review of v0.3 source files (WAITING_FOR_OWNER). |
+| v0.4 replaceable AI runtime interface | PARTIALLY COMPLETE | Verify the core is useful with no assistant or model attached. The `llama.cpp` or embedded-model prototype is a separate scope decision (WAITING_FOR_OWNER if substantial). |
+| v0.5 permissioned tools | NOT STARTED | Blocked until v0.2–v0.4 are complete. PR #12 (tool registry slice) is parked as Draft and is not part of current milestone execution. |
+
+### Milestone dependencies
+
+- v0.3 permission gate uses the existing `RiskTier`, `ActionDescriptor` and `PermissionPolicy` (`include/cipher/assistant_backend.hpp`, on the PR #2 stack). It does not depend on the v0.5 tool registry.
+- PR #12 is not a prerequisite for v0.2 or v0.3. Reassess it when v0.5 begins.
+
+### PR and issue mapping (as of this reconciliation)
+
+- PR #1 (open, not draft, base `main`, head `research/assistant-source-intelligence`): memory load fix and hardening. Not merged.
+- PR #2 (draft, base PR #1 branch, head `feat/repl-memory-commands`): v0.3 REPL memory commands; contains the v0.3 and v0.4 feature history.
+- PR #3 (draft, base `feat/repl-memory-commands`): Claude and Hermes CLI provider adapters, Windows handle inheritance fix (issue #5). Not tied to a numbered milestone.
+- PR #9 (draft): autonomous operating policy. Owner review pending.
+- PR #11 (draft): memory inspection regression test seam (issue #4, closed).
+- PR #12 (draft, parked, base PR #3 branch): tool registry slice for v0.5. Not part of current milestone execution.
+- Issue #4 and #5: closed. Issue #6 (POSIX process-tree termination misses `setsid` descendants): open, design decision WAITING_FOR_OWNER. Issue #7 (verify `claude --safe-mode` suppresses user-level instructions): open, inconclusive; no further billed calls without approval. Issue #8 (Hermes adapter): open, deferred; Hermes is not installed.
+
+### Known limitations and deferred work
+
+- No native CIPHER inference runtime. Provider adapters are not runtime-verified for live use.
+- Persistent memory is explicit and human-readable only; no semantic search or automatic extraction.
+- Process-tree termination on POSIX does not cover descendants that call `setsid` (Issue #6).
+- Open-source license not yet chosen.
+
+### External research track (non-blocking)
+
+Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, OpenVoiceOS, licensing and security. Ollama and `llama.cpp` have no report or clone yet; that gap does not block v0.2–v0.4. The `experiment/openclaw-bridge` branch has not been inspected. Findings feed v0.4 (runtime abstraction) and v0.5 (permissions, progressive tool loading) when those milestones begin.
+
 ## October 2026: v0.1 foundation
 
 - [x] Establish repository structure and founding principles.
@@ -77,7 +117,7 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
 - [ ] Review the v0.3 source files and understand the memory subsystem and pipeline tools.
       *(The owner must do this step.)*
 - [x] Integrate persistent memory into command REPL (`remember`, `recall`, `forget`, `memories`; opt-in via `memory_file`; `cipher_memory_commands` library, 29 assertions).
-- [ ] Integrate persistent memory into the permission gate (not started; the permission gate itself is not implemented).
+- [ ] Integrate persistent memory into the permission gate (not started). Decision: `remember` and `forget` default to `Monitor`; blacklist and override rules stay authoritative; denied operations must leave the memory file unchanged.
 
 ## Next milestones
 
@@ -121,13 +161,13 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
   * Complete Test Coverage: 5 CTest targets (75 cases, 264 assertions, 100%), 144 adapter unit tests (100%), 49 pipeline unit tests (100%).
 - [x] Configure dedicated CI test job for assistant integrations and developer pipeline.
 - [ ] Prototype direct in-process local runtime adapter (e.g., `llama.cpp` or embedded model) when local inference milestone begins.
-- [ ] Keep the core useful when no model or assistant is available.
+- [ ] Keep the core useful when no model or assistant is available (verification not yet done; see Milestone Status).
 
-
-### v0.5: Permissioned tools
+### v0.5: Permissioned tools (NOT STARTED)
 
 - Introduce a tool registry, explicit permissions, action logs, and dry-run mode.
 - Begin with safe read-only tools before allowing changes.
+- Not started. PR #12 (tool registry slice, draft, parked) will be reassessed against the completed v0.2–v0.4 work when this milestone begins.
 
 ### Later: voice, interfaces, planning, learning, and self-improvement
 
