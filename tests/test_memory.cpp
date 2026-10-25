@@ -596,7 +596,7 @@ void test_inspection_failure_is_not_missing_file() {
     std::filesystem::permissions(locked_dir, std::filesystem::perms::none, ec);
 
     std::error_code probe_ec;
-    std::filesystem::exists(locked_file, probe_ec);
+    static_cast<void>(std::filesystem::exists(locked_file, probe_ec));
     if (!probe_ec) {
         std::cout << "SKIP: test_inspection_failure_is_not_missing_file (permission denial not enforced, e.g. running as root)\n";
         std::filesystem::permissions(locked_dir, std::filesystem::perms::owner_all, ec);
