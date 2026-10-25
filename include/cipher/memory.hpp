@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace cipher {
@@ -123,6 +124,13 @@ private:
     // Helper for finding entry index
     std::optional<size_t> find_index(const std::string& id) const noexcept;
 };
+
+// Test-only seam: replaces the existence probe used by MemoryStore::load().
+// nullptr restores std::filesystem::exists. Production code never sets it.
+namespace memory_testing {
+using ExistsProbe = bool (*)(const std::string& path, std::error_code& ec);
+void set_exists_probe(ExistsProbe probe);
+} // namespace memory_testing
 
 } // namespace cipher
 

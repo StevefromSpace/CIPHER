@@ -467,11 +467,23 @@ MemoryResult MemoryStore::load_from_string(const std::string& text) {
 // File I/O with Atomic Recoverable Write
 // ---------------------------------------------------------------------------
 
+namespace memory_testing {
+namespace {
+ExistsProbe g_exists_probe = nullptr;
+} // namespace
+
+void set_exists_probe(ExistsProbe probe) {
+    g_exists_probe = probe;
+}
+} // namespace memory_testing
+
 MemoryResult MemoryStore::load(const std::string& filepath) {
     MemoryResult result;
     std::error_code ec;
 
-    const bool file_exists = std::filesystem::exists(filepath, ec);
+    const bool file_exists = memory_testing::g_exists_probe
+        ? memory_testing::g_exists_probe(filepath, ec)
+        : std::filesystem::exists(filepath, ec);
     if (ec) {
         // Inspection failed: existence is unknown, so never reset the store to empty
         result.errors.push_back({0, "Failed to inspect memory file: " + filepath + " (" + ec.message() + ")"});

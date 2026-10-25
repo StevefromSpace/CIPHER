@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #if defined(_WIN32)
@@ -577,12 +578,31 @@ void test_whitespace_category_and_entry_count_validation() {
 }
 
 // ---------------------------------------------------------------------------
-// 15. Filesystem inspection failure is not a missing file (POSIX only).
-//     A directory with no permissions makes exists() fail with EACCES.
-//     Windows is not covered: in a probe (MSVC 2022), a Deny FILE_TRAVERSE ACE on the directory
-//     did not make exists() fail for the owning user, and no other Windows failure was found
-//     that is portable. The cause is not established. A test seam is needed; see issue #4.
+// 15. Filesystem inspection failure is not a missing file.
+//     Deterministic on every platform via the test-only existence probe seam. The seam is used
+//     because ACL denial did not reproduce on Windows (MSVC 2022): a Deny FILE_TRAVERSE ACE left
+//     exists() succeeding for the owner, and invalid-name paths returned not-found with no error.
 // ---------------------------------------------------------------------------
+bool inspection_failing_probe(const std::string&, std::error_code& ec) {
+    ec = std::make_error_code(std::errc::permission_denied);
+    return false;
+}
+
+void test_inspection_failure_via_probe_seam() {
+    cipher::MemoryStore store;
+    store.set("in_memory_item", "Must survive", "general");
+
+    cipher::memory_testing::set_exists_probe(inspection_failing_probe);
+    auto res = store.load("unused/cipher_memory.v1");
+    cipher::memory_testing::set_exists_probe(nullptr);
+
+    check(!res.ok, "seam: load reports error when inspection fails",
+          "load treated an inspection failure as a missing file");
+    check(store.has("in_memory_item"), "seam: failed load does not clear in-memory store",
+          "failed load silently replaced the store with an empty one");
+}
+
+// Real-filesystem check: a directory without permissions makes exists() fail with EACCES.
 #if !defined(_WIN32)
 void test_inspection_failure_is_not_missing_file() {
     const std::string locked_dir = TEMP_TEST_DIR + "/locked";
@@ -638,6 +658,7 @@ int main() {
     test_repeatable_save_load();
     test_existing_file_replacement_and_lock_failure();
     test_whitespace_category_and_entry_count_validation();
+    test_inspection_failure_via_probe_seam();
 #if !defined(_WIN32)
     test_inspection_failure_is_not_missing_file();
 #endif
