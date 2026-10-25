@@ -1,0 +1,181 @@
+"""CIPHER — OpenClaw Integration Configuration.
+
+Enforces local-first constraints, loopback network binding, rejection of cloud models,
+and strict tool policy restriction (minimal profile without tool execution).
+"""
+
+from dataclasses import dataclass, field
+import os
+from pathlib import Path
+import re
+from typing import Optional, Set, Tuple
+
+
+@dataclass
+class OpenClawConfig:
+    """Configuration settings for the optional OpenClaw integration."""
+
+    # Integration enablement (strictly disabled by default)
+    enabled: bool = field(
+        default_factory=lambda: os.environ.get("CIPHER_OPENCLAW_ENABLED", "0").lower() in ("1", "true", "yes")
+    )
+
+    # Path to openclaw executable (None = search PATH)
+    cli_path: Optional[Path] = None
+
+    # Gateway WebSocket URL (strictly loopback by default)
+    gateway_url: str = "ws://127.0.0.1:18789"
+
+    # Default model (strictly local provider reference, e.g. Ollama)
+    default_model: str = "ollama/llama3.2"
+
+    # Per-request timeout in seconds
+    timeout_seconds: float = 30.0
+
+    # Local-first enforcement: reject any cloud routing or non-local models
+    strict_local: bool = True
+
+    # Tool policy profile (strictly 'minimal' to disable tool execution)
+    tool_profile: str = "minimal"
+
+    # Enforce minimal tool profile to prevent tool execution
+    enforce_minimal_tool_profile: bool = True
+
+    # Explicit tool denial verification: 'minimal' alone still includes presence, session_status, gateway.
+    # explicit_tool_denial must be True to guarantee fail-closed tool isolation.
+    explicit_tool_denial: bool = True
+
+    # Tool denial patterns written to the isolated configuration (tools.deny schema)
+    tool_deny_patterns: Tuple[str, ...] = ("*",)
+
+    # Force isolated configuration and state directory (OPENCLAW_CONFIG_PATH / OPENCLAW_STATE_DIR)
+    # to prevent inheriting or mutating ambient global configuration (~/.openclaw/config.json).
+    enforce_isolated_config: bool = True
+
+    # Maximum stdout/stderr output bytes collected from subprocess
+    max_output_bytes: int = 1048576
+
+    # Supported upstream OpenClaw CLI versions / major prefixes
+    supported_cli_versions: Tuple[str, ...] = ("2026.", "1.")
+
+    # Flag indicating whether local execution has been asserted by operator (strictly loopback compliance, NOT independent hardware or cryptographic proof; route defaults to UNKNOWN unless asserted)
+    verified_local: bool = False
+
+    # Live execution enablement: strictly False by default.
+    # Gateway-mediated execution ('openclaw agent') cannot guarantee that client-side
+    # config restricts an already-running Gateway daemon. Embedded execution ('openclaw agent exec')
+    # requires independent verification that the effective tool inventory is empty.
+    enable_live_execution: bool = False
+
+    # Execution mode: 'agent' for gateway-mediated execution, or
+    # 'agent-exec' for isolated embedded execution without background gateway.
+    execution_mode: str = "agent"
+
+    # Permitted local provider prefixes (advisory only; model prefix is not proof of local inference)
+    allowed_local_prefixes: Tuple[str, ...] = (
+        "ollama/",
+        "local/",
+        "lmstudio/",
+        "llamacpp/",
+        "vllm/",
+    )
+
+    # Patterns indicating cloud or hosted model providers
+    forbidden_cloud_patterns: Tuple[str, ...] = (
+        "openai",
+        "anthropic",
+        "claude",
+        "gpt-",
+        "gpt_",
+        "ollama-cloud",
+        "gemini",
+        "mistral-ai",
+        "bedrock",
+        "azure",
+        "groq",
+        "together",
+        "fireworks",
+        "deepseek-cloud",
+    )
+
+    def is_model_local(self, model_name: str) -> Tuple[bool, Optional[str]]:
+        """Validates model identifier against known cloud patterns.
+        
+        Notice: Having a local prefix like 'ollama/' is an advisory sanity check,
+        not cryptographic proof of local inference. Route remains UNKNOWN unless verified.
+        """
+        if not model_name or not model_name.strip():
+            return False, "Model identifier is empty."
+
+        clean_name = model_name.strip().lower()
+
+        # Check for explicit forbidden cloud patterns
+        for pattern in self.forbidden_cloud_patterns:
+            if pattern in clean_name:
+                return False, f"Model '{model_name}' matches cloud pattern '{pattern}'."
+
+        if not self.strict_local:
+            return True, None
+
+        # Under strict_local, model must start with an approved local prefix
+        has_local_prefix = any(clean_name.startswith(p) for p in self.allowed_local_prefixes)
+        if not has_local_prefix:
+            return False, (
+                f"Model '{model_name}' lacks an approved local prefix "
+                f"({', '.join(self.allowed_local_prefixes)}) under strict local mode."
+            )
+
+        return True, None
+
+    def validate_gateway_url(self) -> Tuple[bool, Optional[str]]:
+        """Ensures gateway communication is strictly bound to loopback using shared URL validator."""
+        from integrations.contract import validate_loopback_url
+        return validate_loopback_url(
+            self.gateway_url,
+            allowed_schemes=("ws", "wss"),
+            description="Gateway URL"
+        )
+
+    def is_tool_policy_safe(self) -> Tuple[bool, Optional[str]]:
+        """Verifies that the active OpenClaw profile verifiably restricts tool execution.
+
+        A profile named 'minimal' is NOT proof that tools are disabled because upstream
+        minimal profile still includes presence, session_status, and gateway discovery tools.
+        Explicit tool denial (explicit_tool_denial=True) must be active.
+        """
+        if not self.enforce_minimal_tool_profile:
+            return False, "Tool policy enforcement cannot be disabled. CIPHER requires tools to be locked down."
+
+        clean_profile = self.tool_profile.strip().lower()
+        if clean_profile != "minimal":
+            return False, (
+                f"Active OpenClaw tool profile is '{self.tool_profile}'. "
+                "Only the isolated 'minimal' profile with explicit tool denial is permitted by CIPHER policy."
+            )
+
+        if not self.explicit_tool_denial or "*" not in self.tool_deny_patterns:
+            return False, (
+                "OpenClaw profile 'minimal' alone does not guarantee tool lockdown (it permits internal "
+                "discovery and gateway tools). Explicit tool denial with '*' pattern is required."
+            )
+
+        if not self.enforce_isolated_config:
+            return False, (
+                "OpenClaw execution must use an isolated configuration (enforce_isolated_config=True) "
+                "to prevent inheriting arbitrary tools or settings from ambient global configuration."
+            )
+
+        return True, None
+
+    def is_cli_version_supported(self, version_str: str) -> Tuple[bool, Optional[str]]:
+        """Verifies whether an OpenClaw CLI version string matches supported versions."""
+        if not version_str or not version_str.strip():
+            return False, "OpenClaw version output is empty."
+        clean_ver = version_str.strip().lstrip("vV")
+        for supported in self.supported_cli_versions:
+            if clean_ver.startswith(supported):
+                return True, None
+        return False, (
+            f"Installed OpenClaw CLI version '{version_str.strip()}' does not match "
+            f"supported upstream versions ({', '.join(self.supported_cli_versions)})."
+        )
