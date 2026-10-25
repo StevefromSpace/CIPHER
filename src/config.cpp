@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -170,31 +172,24 @@ Config ConfigParser::defaults() noexcept {
 }
 
 ConfigResult ConfigParser::load(const std::string& path) {
-    std::ifstream file(path);
+    // std::ifstream cannot tell "missing" from "unreadable", so check existence first.
+    // A missing file is optional and yields defaults; an existing file that cannot
+    // be read is an error and is never silently replaced by defaults.
+    std::error_code ec;
+    const bool exists = std::filesystem::exists(path, ec);
+    ConfigResult result;
 
-    if (!file.is_open()) {
-        // Distinguish "file not found" from "file exists but cannot be read".
-        // std::ifstream sets failbit for both, so we try to detect "not found"
-        // by attempting to open in read mode; if errno is ENOENT (or the
-        // equivalent on this platform) that means the file is absent.
-        // However, the portable approach is: if the file does not open, try
-        // to detect whether it exists using another open attempt in binary
-        // mode that produces a clearer error on existence mismatch.
-        //
-        // Simpler alternative: just try to open it, and if it fails, check
-        // whether errno equals ENOENT.  We do that here.
-        //
-        // On Windows, _access() could be used but would require <io.h>.
-        // Using errno (set by the C runtime) is more portable.
-        //
-        // If we cannot distinguish "not found" from "permission denied", we
-        // treat both as "file not found" and return defaults.  This is safe
-        // because the configuration file is optional.  A future hardening
-        // step could use std::filesystem::exists() (C++17) to give a better
-        // message for permission errors.
-        ConfigResult result;
+    if (!ec && !exists) {
         result.config = defaults();
-        return result; // No errors: absent file is expected and acceptable.
+        return result;
+    }
+
+    std::ifstream file(path);
+    if (ec || !file.is_open()) {
+        result.config = defaults();
+        result.errors.push_back({0, "Cannot read configuration file '" + path +
+                                     "'. Check that it exists and is readable."});
+        return result;
     }
 
     return parse_lines(file);

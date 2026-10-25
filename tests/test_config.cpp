@@ -5,6 +5,16 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+// NOGDI keeps wingdi.h's ERROR macro from clashing with LogLevel::ERROR.
+#define WIN32_LEAN_AND_MEAN
+#define NOGDI
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 // ---------------------------------------------------------------------------
 // test_config.cpp  —  Tests for the configuration subsystem
 //
@@ -198,6 +208,43 @@ static void test_load_missing_file() {
           "Expected default INFO");
 }
 
+// An existing file that cannot be opened must be a configuration error, not defaults.
+// Platform hooks make the file unreadable with real OS mechanisms:
+//   POSIX:   chmod 000 (skipped when running as root, which can read anything).
+//   Windows: hold the file open with no sharing, so the parser's open fails.
+static void test_load_unreadable_file_is_error() {
+    if (!write_temp_file("log_level = error\n")) {
+        fail("unreadable file: setup", "Could not write temp file");
+        return;
+    }
+#if defined(_WIN32)
+    HANDLE locked = CreateFileA(TEMP_CONFIG, GENERIC_READ, 0, nullptr,
+                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (locked == INVALID_HANDLE_VALUE) {
+        fail("unreadable file: lock", "Could not lock temp file");
+        delete_temp_file();
+        return;
+    }
+    const cipher::ConfigResult r = cipher::ConfigParser::load(TEMP_CONFIG);
+    CloseHandle(locked);
+#else
+    if (geteuid() == 0) {
+        std::cout << "SKIP: unreadable file (running as root; permissions not enforced)\n";
+        delete_temp_file();
+        return;
+    }
+    chmod(TEMP_CONFIG, 0);
+    const cipher::ConfigResult r = cipher::ConfigParser::load(TEMP_CONFIG);
+    chmod(TEMP_CONFIG, S_IRUSR | S_IWUSR);
+#endif
+    delete_temp_file();
+    check(!r.ok(), "unreadable file: reported as error, not missing",
+          "Unreadable existing file was treated as missing");
+    check(r.config.log_level == cipher::LogLevel::INFO,
+          "unreadable file: defaults kept alongside the error",
+          "Expected default INFO");
+}
+
 static void test_load_real_file_valid() {
     if (!write_temp_file("log_level = warn\n")) {
         fail("real file valid: setup", "Could not write temp file");
@@ -310,6 +357,7 @@ int main() {
     test_load_from_string_line_number_tracking();
     test_load_from_string_multiple_errors();
     test_load_missing_file();
+    test_load_unreadable_file_is_error();
     test_load_real_file_valid();
     test_load_real_file_with_comments();
     test_load_real_file_invalid();
