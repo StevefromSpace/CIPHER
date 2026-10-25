@@ -133,6 +133,7 @@ void test_claude_invocation_contract() {
 
     check(has_pair("--tools", ""), "built-in tools are disabled with an empty --tools value", "missing");
     bool has_restricted = false;
+    bool has_safe_mode = false;
     bool has_strict_mcp = false;
     bool has_no_skills = false;
     bool has_print = false;
@@ -143,14 +144,15 @@ void test_claude_invocation_contract() {
         "--permission-mode", "--settings", "--plugin-dir", "--agents", "--allowedTools"};
     for (const auto& argument : args) {
         has_restricted = has_restricted || argument == "--restricted";
+        has_safe_mode = has_safe_mode || argument == "--safe-mode";
         has_strict_mcp = has_strict_mcp || argument == "--strict-mcp-config";
         has_no_skills = has_no_skills || argument == "--disable-slash-commands";
         has_print = has_print || argument == "--print";
         prompt_in_args = prompt_in_args || contains(argument, "dangerously-skip") || contains(argument, "rm -rf");
         for (const auto& flag : forbidden) forbidden_flag = forbidden_flag || argument == flag;
     }
-    check(has_restricted && has_strict_mcp && has_no_skills && has_print,
-          "restricted, strict-MCP, no-skills and print flags are present",
+    check(has_restricted && has_safe_mode && has_strict_mcp && has_no_skills && has_print,
+          "restricted, safe-mode, strict-MCP, no-skills and print flags are present",
           "one or more required flags missing");
     check(!prompt_in_args, "prompt text never appears in argv", "prompt leaked into arguments");
     check(!forbidden_flag, "no bypass, bare, settings or extra-context flags are used", "forbidden flag present");

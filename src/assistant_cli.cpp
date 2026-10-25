@@ -88,11 +88,13 @@ private:
     std::filesystem::path path_;
 };
 
-// Fixed, text-only invocation. The empty "--tools" value disables every built-in tool.
-// Prompt input arrives on stdin, not in this list.
+// Fixed, text-only invocation. --safe-mode drops user CLAUDE.md, skills, plugins and
+// hooks while auth keeps working; --restricted drops user and project settings.
+// The empty "--tools" value disables every built-in tool. Prompt input arrives on stdin.
 std::vector<std::string> claude_print_arguments() {
     return {"--print",
             "--restricted",
+            "--safe-mode",
             "--tools", "",
             "--strict-mcp-config",
             "--disable-slash-commands",
@@ -202,7 +204,8 @@ std::string find_executable_on_path(const std::string& name) {
     std::istringstream directories(read_path_variable());
     std::string directory;
     while (std::getline(directories, directory, separator)) {
-        if (directory.empty()) continue;
+        // Relative entries (such as ".") would let the working directory supply the binary.
+        if (directory.empty() || !std::filesystem::path(directory).is_absolute()) continue;
         const std::filesystem::path candidate = std::filesystem::path(directory) / file_name;
         std::error_code ec;
         if (std::filesystem::is_regular_file(candidate, ec) && !ec) return candidate.string();

@@ -313,6 +313,11 @@ void reap_child(pid_t pid, std::chrono::steady_clock::time_point deadline, Proce
 [[noreturn]] void exec_child(const ProcessRequest& request, std::vector<char*>& argv,
                              Pipe& in, Pipe& out, Pipe& err, Pipe& exec_report) {
     setpgid(0, 0);
+    // The parent ignores SIGPIPE, and an ignored disposition survives execv. Restore the default.
+    struct sigaction default_action {};
+    default_action.sa_handler = SIG_DFL;
+    sigaction(SIGPIPE, &default_action, nullptr);
+
     int failure = 0;
     if (!request.working_directory.empty() && chdir(request.working_directory.c_str()) != 0) {
         failure = errno;

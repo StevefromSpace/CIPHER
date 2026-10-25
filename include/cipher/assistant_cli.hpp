@@ -6,8 +6,9 @@
 //
 // Claude Code CLI (ClaudeCodeBackend):
 //   Hosted Anthropic inference, so the route is RemoteCloud. Each request runs
-//   `claude --print` with every built-in tool, MCP server, skill and settings
-//   source disabled, from an empty working directory, with the prompt on stdin.
+//   `claude --print --safe-mode --restricted` with every built-in tool, MCP
+//   server, skill, hook and settings source disabled, from an empty working
+//   directory, with the prompt on stdin.
 //   Permission-bypass flags are never used. Login is checked with
 //   `claude auth status --json`. Login state is required, but billing is not
 //   assumed: it depends on the account the CLI uses.
