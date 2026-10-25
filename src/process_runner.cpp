@@ -160,10 +160,14 @@ bool start_in_job(const ProcessRequest& request, Pipe& in, Pipe& out, Pipe& err,
     InitializeProcThreadAttributeList(nullptr, 1, 0, &attribute_size);
     std::vector<char> attribute_buffer(attribute_size);
     auto* attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attribute_buffer.data());
-    if (!InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_size) ||
-        !UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
+    if (!InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_size)) {
+        error = "could not restrict inherited handles (error " + std::to_string(GetLastError()) + ")";
+        return false;
+    }
+    if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
                                    sizeof(inherited), nullptr, nullptr)) {
         error = "could not restrict inherited handles (error " + std::to_string(GetLastError()) + ")";
+        DeleteProcThreadAttributeList(attributes);
         return false;
     }
     STARTUPINFOEXW startup{};
