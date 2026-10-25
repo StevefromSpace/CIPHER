@@ -263,11 +263,11 @@ struct Pipe {
 };
 
 // Close-on-exec keeps parent-side ends out of the child; dup2 clears it for 0/1/2.
-bool create_pipe(Pipe& pipe) {
+bool create_pipe(Pipe& ends) {
     int fds[2] = {-1, -1};
     if (pipe(fds) != 0) return false;
-    pipe.read_end.reset(fds[0]);
-    pipe.write_end.reset(fds[1]);
+    ends.read_end.reset(fds[0]);
+    ends.write_end.reset(fds[1]);
     fcntl(fds[0], F_SETFD, FD_CLOEXEC);
     fcntl(fds[1], F_SETFD, FD_CLOEXEC);
     return true;
