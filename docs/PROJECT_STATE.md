@@ -94,6 +94,7 @@ The codebase currently contains three modular C++17 libraries and a command-line
    * Strict validation and line-numbered error diagnostics on corrupted or invalid files.
    * Automatic backward-compatible migration from Legacy Schema 0 (flat format) to Schema 1.
    * Completely decoupled from core, config, and logger.
+   * REPL commands (`cipher_memory_commands`, `include/cipher/memory_commands.hpp`): `remember <id> <text>`, `recall <id>`, `forget <id>`, `memories`. Opt-in via `memory_file` in `cipher.conf` (absent = disabled). Each change is saved immediately. A file that fails to parse stops startup and blocks writes. A failed save rolls back the in-memory change. The layer depends only on `cipher_memory`; `cipher_core` is unchanged apart from its status text and does not see memory.
 
 5. **Executable Application (`cipher`):**
    * Source: `src/main.cpp`
@@ -148,6 +149,7 @@ CIPHER/
 │   ├── config.hpp             # Configuration parser data structures and API
 │   ├── logger.hpp             # Leveled logger interface
 │   ├── memory.hpp             # Persistent memory data structures and API (v0.3)
+│   ├── memory_commands.hpp    # REPL remember/recall/forget/memories layer (depends on cipher_memory only)
 │   └── version.hpp.in         # Template for CMake-generated version header
 ├── integrations/
 │   ├── __init__.py            # Root package exporting all 4 bridges and contracts
@@ -162,13 +164,15 @@ CIPHER/
 │   ├── config.cpp             # Configuration parsing and validation
 │   ├── logger.cpp             # Formatted diagnostic logging
 │   ├── memory.cpp             # Persistent memory storage and atomic write (v0.3)
+│   ├── memory_commands.cpp    # REPL memory command handling and save-or-roll-back
 │   └── main.cpp               # Application entry point and REPL loop
 ├── tests/
 │   ├── test_assistant_backend.cpp # C++ assistant contract and policy tests (30 assertions)
 │   ├── test_cipher_core.cpp   # Core command test suite
 │   ├── test_config.cpp        # Configuration parser test suite
 │   ├── test_logger.cpp        # Leveled logger test suite
-│   └── test_memory.cpp        # Persistent memory test suite (v0.3)
+│   ├── test_memory.cpp        # Persistent memory test suite (v0.3)
+│   └── test_memory_commands.cpp # REPL memory command tests (opt-in, persistence, guards)
 ├── tools/
 │   └── pipeline/              # Dual-Claude developer automation pipeline
 │       ├── adapters/          # Claude implementer, reviewer, and mock adapters
@@ -188,12 +192,14 @@ CIPHER/
 main.cpp
   ├── cipher_core
   ├── cipher_config
-  └── cipher_logger ──> cipher_config (for LogLevel)
+  ├── cipher_logger ──> cipher_config (for LogLevel)
+  └── cipher_memory_commands ──> cipher_memory (memory REPL commands; cipher_core never sees it)
 
 test_cipher_core.cpp    ──> cipher_core only
 test_config.cpp         ──> cipher_config only
 test_logger.cpp         ──> cipher_logger (and cipher_config)
 test_memory.cpp         ──> cipher_memory only
+test_memory_commands.cpp ──> cipher_memory_commands (and cipher_memory)
 ```
 Neither `cipher_config`, `cipher_logger`, nor `cipher_memory` depends on `cipher_core`. `cipher_core` does not depend on `cipher_config`, `cipher_logger`, or `cipher_memory`.
 
@@ -222,16 +228,17 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## 7. Current Test Suites & Counts
 
-CTest registers 5 distinct test binaries, covering 75 test functions/cases and 264 individual assertions (261 on POSIX due to platform-specific Win32 locking checks) with a 100% pass rate:
+CTest registers 6 distinct test binaries, covering 95 test functions/cases and 297 individual assertions (294 on POSIX due to platform-specific Win32 locking checks) with a 100% pass rate:
 
 | Test Target | Source File | Functions / Cases | Assertions / Checks | Purpose |
 | :--- | :--- | :--- | :--- | :--- |
 | `cipher_core_tests` | `tests/test_cipher_core.cpp` | 20 command cases + 1 version check | 21 | Command responses, whitespace trimming, time format, exit flags, version consistency |
-| `cipher_config_tests` | `tests/test_config.cpp` | 19 functions | 56 | Parsing, comments, line numbers, error collection, unknown keys, CRLF |
+| `cipher_config_tests` | `tests/test_config.cpp` | 21 functions | 60 | Parsing, comments, line numbers, error collection, unknown keys, CRLF |
 | `cipher_logger_tests` | `tests/test_logger.cpp` | 11 functions | 28 | Levels, labels, timestamping, file append, degradation on bad path |
 | `cipher_memory_tests` | `tests/test_memory.cpp` | 14 functions | 97 (94 on POSIX) | Missing/empty storage, CRUD round-trips, unicode/multilingual, validation/duplicate handling, corrupt storage line reporting, unsupported schema versions, v0->v1 migration, atomic write failure recovery, repeatable save/load, Windows existing file replacement & locked destination preservation, lossless whitespace, category validation, entry count mismatch, stoi overflow safety |
+| `cipher_memory_commands_tests` | `tests/test_memory_commands.cpp` | 14 functions | 29 | REPL remember/recall/forget/memories routing, opt-in disabled state, usage errors, cross-session persistence, invalid id rejection, corrupt-file write guard, failed-save rollback |
 | `cipher_assistant_tests` | `tests/test_assistant_backend.cpp` | 14 functions | 62 | Replaceable assistant interface, central request validation, blank prompt rejection, timeout bounds, non-finite float rejection, tool execution lockdown, local route verification, zero budget rejection, RiskTier, PermissionPolicy priority, ContextBudget prompt byte bounding, EventMessage wire envelope, mock backend |
-| **Total (CTest)** | | **75 cases/functions** | **264 assertions (97 memory, 62 assistant)** | **All 5 test targets pass (100%)** |
+| **Total (CTest)** | | **95 cases/functions** | **297 assertions (97 memory, 62 assistant, 29 memory commands)** | **All 6 test targets pass (100%)** |
 | `pipeline_unit_tests` | `tools/pipeline/tests/` | 49 test cases | 49 passing (100% pass rate; reproducible dev dependency via `requirements-dev.txt`) | Verifier, Git manager, Job store, MCP server, Orchestrator, Reviewer adapter |
 | `assistant_integrations_tests` | `integrations/` | 144 test cases | 144 passing (100%) | Contract (22), OpenClaw (48), Dodaios (24), Leon (25), OpenVoiceOS (25) |
 
@@ -263,7 +270,5 @@ To prevent confusion or hallucination by future AI agents, the following capabil
 ## 10. Next Recommended Tasks
 
 1. **Owner Review (v0.3 Foundation & Pipeline):** The project owner should review `include/cipher/memory.hpp`, `src/memory.cpp`, `tests/test_memory.cpp`, and the Dual-Claude pipeline tooling (`tools/pipeline/`) to maintain understanding of the v0.3 foundation.
-2. **Next Development Milestone (v0.3 REPL Integration):**
-   * Integrate `cipher_memory` into the CIPHER core interactive REPL (e.g. `remember`, `recall`, `forget` commands).
-   * Integrate persistent memory storage path into `cipher_config` (`memory_file` key in `cipher.conf`).
-   * Preserve strict decoupling: `cipher_core` coordinates via clean interfaces without memory coupling to logger or config.
+2. **Next Milestone (memory permission gate):** REPL memory commands and the `memory_file` key are implemented on `feat/repl-memory-commands` (`cipher_memory_commands`). The remaining item is routing memory writes through the permission gate, which is not implemented yet.
+   * Keep the strict decoupling: the memory layer depends only on `cipher_memory`, and `cipher_core` does not depend on memory.

@@ -76,6 +76,21 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# cipher_memory_commands  —  REPL memory commands (remember/recall/forget)
+# ---------------------------------------------------------------------------
+add_library(cipher_memory_commands
+    src/memory_commands.cpp
+)
+target_include_directories(cipher_memory_commands PUBLIC include)
+target_link_libraries(cipher_memory_commands PUBLIC cipher_memory)
+
+if(MSVC)
+    target_compile_options(cipher_memory_commands PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(cipher_memory_commands PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# ---------------------------------------------------------------------------
 # cipher_assistant  —  assistant capability provider boundary (v0.4 preview)
 # ---------------------------------------------------------------------------
 add_library(cipher_assistant
@@ -93,7 +108,7 @@ endif()
 # cipher  —  main executable
 # ---------------------------------------------------------------------------
 add_executable(cipher src/main.cpp)
-target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger)
+target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands)
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -119,6 +134,10 @@ if(BUILD_TESTING)
     add_executable(cipher_memory_tests tests/test_memory.cpp)
     target_link_libraries(cipher_memory_tests PRIVATE cipher_memory)
     add_test(NAME cipher_memory_tests COMMAND cipher_memory_tests)
+
+    add_executable(cipher_memory_commands_tests tests/test_memory_commands.cpp)
+    target_link_libraries(cipher_memory_commands_tests PRIVATE cipher_memory_commands)
+    add_test(NAME cipher_memory_commands_tests COMMAND cipher_memory_commands_tests)
 
     # Assistant capability provider subsystem tests.
     add_executable(cipher_assistant_tests tests/test_assistant_backend.cpp)

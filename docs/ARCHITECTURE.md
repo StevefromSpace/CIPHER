@@ -38,14 +38,16 @@ main.cpp
   |-- cipher_core   (commands)
   |-- cipher_config (configuration)
   |-- cipher_logger (logging, depends on cipher_config for LogLevel)
+  |-- cipher_memory_commands (REPL remember/recall/forget, depends on cipher_memory)
 
 test_cipher_core.cpp  --> cipher_core   only
 test_config.cpp       --> cipher_config only
 test_logger.cpp       --> cipher_logger (and transitively cipher_config)
+test_memory_commands.cpp --> cipher_memory_commands (and transitively cipher_memory)
 ```
 
 Neither `cipher_config` nor `cipher_logger` depends on `cipher_core`.
-`cipher_core` does not depend on Config or Logger.
+`cipher_core` does not depend on Config, Logger, or Memory.
 This keeps each component testable and replaceable in isolation.
 
 ## Current v0.4 assistant and integration boundary
@@ -161,5 +163,5 @@ are met.
 Not implemented yet (planned for future milestones):
 - Permissioned tool registry (v0.5)
 - Direct in-process local model runtime
-- Persistent-memory REPL commands and configuration integration
+- Persistent-memory permission gating (REPL commands and `memory_file` configuration are implemented)
 - Voice and alternative interfaces (later)

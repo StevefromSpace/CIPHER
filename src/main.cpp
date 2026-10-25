@@ -1,6 +1,7 @@
 #include "cipher/cipher_core.hpp"
 #include "cipher/config.hpp"
 #include "cipher/logger.hpp"
+#include "cipher/memory_commands.hpp"
 
 #include <iostream>
 #include <string>
@@ -72,6 +73,23 @@ int main() {
     // -----------------------------------------------------------------------
     cipher::CipherCore core;
 
+    // Memory is opt-in. A memory file that exists but cannot be parsed stops
+    // startup, so the next save can never overwrite the owner's data.
+    cipher::MemoryCommands memory(cfg.memory_file);
+    const cipher::MemoryResult memory_result = memory.open();
+    if (!memory_result.is_ok()) {
+        std::cerr << "CIPHER: could not load memory file '" << cfg.memory_file << "':\n";
+        for (const auto& err : memory_result.errors) {
+            if (err.line > 0) {
+                std::cerr << "  Line " << err.line << ": " << err.message << '\n';
+            } else {
+                std::cerr << "  " << err.message << '\n';
+            }
+        }
+        std::cerr << "Fix or move the file, then restart CIPHER.\n";
+        return 1;
+    }
+
     std::cout << "CIPHER v" << cipher::CipherCore::version() << '\n';
     std::cout << "Contextual Intelligence Platform for Home, Enterprise & Research\n";
     std::cout << "Type 'help' to begin. This build runs locally and has no AI runtime.\n\n";
@@ -85,9 +103,18 @@ int main() {
             break;
         }
 
+        const cipher::MemoryCommandResult memory_reply = memory.execute(input);
+        if (memory_reply.handled) {
+            std::cout << memory_reply.text << '\n';
+            continue;
+        }
+
         const cipher::CommandResponse response = core.execute(input);
         if (!response.text.empty()) {
             std::cout << response.text << '\n';
+        }
+        if (!memory_reply.text.empty()) {
+            std::cout << memory_reply.text << '\n';
         }
         if (response.exit_requested) {
             log.info("CIPHER session ended (user request)");

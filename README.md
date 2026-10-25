@@ -18,7 +18,7 @@ New in v0.2:
 - Clear error messages when the configuration file contains mistakes.
 - Sensible defaults when no configuration file is present.
 
-What is still not implemented: AI runtime, persistent memory, voice, computer control, autonomous planning, network access.
+Persistent memory is available as opt-in REPL commands (set `memory_file` in `cipher.conf`). What is still not implemented: AI runtime, voice, computer control, autonomous planning, network access.
 
 ## Configuration
 
