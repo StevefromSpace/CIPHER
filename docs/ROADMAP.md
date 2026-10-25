@@ -10,10 +10,10 @@ Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → 
 |-----------|--------|----------------|
 | v0.1 foundation | COMPLETE (owner review open) | Owner review of source files (WAITING_FOR_OWNER) |
 | v0.1.1 hardening | COMPLETE | None |
-| v0.2 configuration and diagnostics | PARTIALLY COMPLETE (blocked on owner review) | Owner review of v0.2 source files (WAITING_FOR_OWNER). No other v0.2 work is open. |
+| v0.2 configuration and diagnostics | COMPLETE | Owner-cleared. PR #13 merged to `main` (merge `dde6bc1`, from `7a27130`). Unreadable `cipher.conf` is a startup error; missing file uses defaults. |
 | v0.2.1 version consistency | COMPLETE | None |
-| v0.3 persistent memory foundation | PARTIALLY COMPLETE | Permission-gate integration (`remember` and `forget` default to `Monitor`; blacklist/override authoritative; denied operations must not mutate the memory file). Owner review of v0.3 source files (WAITING_FOR_OWNER). |
-| v0.4 replaceable AI runtime interface | PARTIALLY COMPLETE | Verify the core is useful with no assistant or model attached. The `llama.cpp` or embedded-model prototype is a separate scope decision (WAITING_FOR_OWNER if substantial). |
+| v0.3 persistent memory foundation | IMPLEMENTED, OWNER REVIEW OPEN | Permission gate implemented on PR #14 (`69e2ee6`, Draft, base `feat/repl-memory-commands`). `remember`/`forget` default to `Monitor`; denied operations leave the memory file byte-identical. Not merged; owner review (WAITING_FOR_OWNER). |
+| v0.4 replaceable AI runtime interface | CURRENT (no-model verification) | No-model verification suite on PR #15 (`9047f13`, Draft, base PR #14 branch): core, memory and provider layer with no provider attached. The `llama.cpp` or embedded-model prototype is out of scope until owner decision (WAITING_FOR_OWNER). |
 | v0.5 permissioned tools | NOT STARTED | Blocked until v0.2–v0.4 are complete. PR #12 (tool registry slice) is parked as Draft and is not part of current milestone execution. |
 
 ### Milestone dependencies
