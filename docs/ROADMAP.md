@@ -131,6 +131,8 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
 
 - Introduce a tool registry, explicit permissions, action logs, and dry-run mode.
 - Begin with safe read-only tools before allowing changes.
+- [x] First slice: `ToolRegistry` (`cipher_tools`) gates named tools through `PermissionPolicy`, runs `Safe`/`Monitor` tools, denies `Ask`/`Block` fail-closed, supports dry-run and logs every attempt (18 unit tests, locally verified on Windows/MSVC; no built-in tools and no REPL wiring yet).
+- [ ] Owner-confirmation path for `Ask` tools, REPL exposure, and the first built-in read-only tool (not started).
 
 ### Later: voice, interfaces, planning, learning, and self-improvement
 

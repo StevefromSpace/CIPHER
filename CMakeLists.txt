@@ -144,6 +144,21 @@ endif()
 # ---------------------------------------------------------------------------
 # cipher  —  main executable
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# cipher_tools  —  permission-gated tool registry (v0.5 first slice)
+# ---------------------------------------------------------------------------
+add_library(cipher_tools
+    src/tool_registry.cpp
+)
+target_include_directories(cipher_tools PUBLIC include)
+target_link_libraries(cipher_tools PUBLIC cipher_assistant)
+
+if(MSVC)
+    target_compile_options(cipher_tools PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(cipher_tools PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 add_executable(cipher src/main.cpp)
 target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands cipher_assistant_commands)
 
@@ -180,6 +195,11 @@ if(BUILD_TESTING)
     add_executable(cipher_assistant_tests tests/test_assistant_backend.cpp)
     target_link_libraries(cipher_assistant_tests PRIVATE cipher_assistant)
     add_test(NAME cipher_assistant_tests COMMAND cipher_assistant_tests)
+
+    # Permission-gated tool registry (no built-in tools; gate and log behavior only).
+    add_executable(cipher_tool_registry_tests tests/test_tool_registry.cpp)
+    target_link_libraries(cipher_tool_registry_tests PRIVATE cipher_tools)
+    add_test(NAME cipher_tool_registry_tests COMMAND cipher_tool_registry_tests)
 
     # Deterministic stand-in for the Claude Code CLI. Not a test itself; never
     # contacts a service. Named so the CI pipeline-verifier glob does not pick it up.
