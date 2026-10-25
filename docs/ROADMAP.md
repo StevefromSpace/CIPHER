@@ -120,6 +120,9 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
   * Baseline Rollback Tag Publication: Published `rollback-hardening-gate-2.1-baseline` to remote `origin` at `ccc33273cdf3e36851b2b5b40847b90676362269`.
   * Complete Test Coverage: 5 CTest targets (75 cases, 264 assertions, 100%), 144 adapter unit tests (100%), 49 pipeline unit tests (100%).
 - [x] Configure dedicated CI test job for assistant integrations and developer pipeline.
+- [x] Optional text-only provider CLIs in the REPL (`ask claude <prompt>`, `ai list`): bounded `cipher_process` runner, Claude Code CLI adapter with tools, MCP and skills disabled, and explicit `remote_cloud` disclosure. Verified locally on Windows/MSVC (9 CTest targets, 2 billed live probes). Ubuntu/GCC and CI status are recorded on the PR, not here.
+- [ ] Hermes CLI adapter: unavailable. The Hermes CLI was not installed on the verification host and no tool-free one-shot invocation has been verified, so the adapter fails closed.
+- [ ] Native CIPHER runtime: not implemented. `ai list` and `ask native` report it as such.
 - [ ] Prototype direct in-process local runtime adapter (e.g., `llama.cpp` or embedded model) when local inference milestone begins.
 - [ ] Keep the core useful when no model or assistant is available.
 

@@ -86,7 +86,7 @@ CommandResponse CipherCore::execute(const std::string& input) const {
             "  time              Show the local system time\n"
             "  echo <text>       Print text back to the console\n"
             "  exit / quit       Close CIPHER\n\n"
-            "File writes are limited to the optional log_file and memory_file. No network, shell, or AI-provider access is enabled in v" + std::string(version()) + ".",
+            "File writes are limited to the optional log_file and memory_file. No network, shell, or AI-provider access is enabled in v" + std::string(version()) + ", except the opt-in ask and ai commands.",
             false};
     }
 

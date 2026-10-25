@@ -145,6 +145,9 @@ CIPHER/
 │   └── VISION.md              # Founding charter, independence rules, and safety principles
 ├── include/cipher/
 │   ├── assistant_backend.hpp  # Replaceable assistant backend interface and validation
+│   ├── assistant_cli.hpp      # Claude Code CLI and Hermes (fail-closed) backends
+│   ├── assistant_commands.hpp # REPL ask and ai list commands (depends on cipher_assistant)
+│   ├── process_runner.hpp     # Bounded, shell-free child process runner
 │   ├── cipher_core.hpp        # Core command processor interface
 │   ├── config.hpp             # Configuration parser data structures and API
 │   ├── logger.hpp             # Leveled logger interface
@@ -160,6 +163,9 @@ CIPHER/
 │   └── ovos/                  # OpenVoiceOS messagebus event adapter (14 tests)
 ├── src/
 │   ├── assistant_backend.cpp  # AssistantManager and central request validation
+│   ├── assistant_cli.cpp      # Claude Code CLI adapter, auth parsing, redaction, PATH lookup
+│   ├── assistant_commands.cpp # REPL ask and ai list handling
+│   ├── process_runner.cpp     # Job Object (Windows) and process group (POSIX) runner
 │   ├── cipher_core.cpp        # Command execution implementation
 │   ├── config.cpp             # Configuration parsing and validation
 │   ├── logger.cpp             # Formatted diagnostic logging
@@ -238,7 +244,10 @@ CTest registers 6 distinct test binaries, covering 95 test functions/cases and 2
 | `cipher_memory_tests` | `tests/test_memory.cpp` | 14 functions | 97 (94 on POSIX) | Missing/empty storage, CRUD round-trips, unicode/multilingual, validation/duplicate handling, corrupt storage line reporting, unsupported schema versions, v0->v1 migration, atomic write failure recovery, repeatable save/load, Windows existing file replacement & locked destination preservation, lossless whitespace, category validation, entry count mismatch, stoi overflow safety |
 | `cipher_memory_commands_tests` | `tests/test_memory_commands.cpp` | 14 functions | 29 | REPL remember/recall/forget/memories routing, opt-in disabled state, usage errors, cross-session persistence, invalid id rejection, corrupt-file write guard, failed-save rollback |
 | `cipher_assistant_tests` | `tests/test_assistant_backend.cpp` | 14 functions | 62 | Replaceable assistant interface, central request validation, blank prompt rejection, timeout bounds, non-finite float rejection, tool execution lockdown, local route verification, zero budget rejection, RiskTier, PermissionPolicy priority, ContextBudget prompt byte bounding, EventMessage wire envelope, mock backend |
-| **Total (CTest)** | | **95 cases/functions** | **297 assertions (97 memory, 62 assistant, 29 memory commands)** | **All 6 test targets pass (100%)** |
+| `cipher_process_tests` | `tests/test_process_runner.cpp` | 8 functions | 17 | Bounded runner against the fake CLI: stdin delivery, exit codes, stdout and stderr overflow with prompt termination, timeout termination, missing executable, literal (non-shell) arguments, working directory |
+| `cipher_assistant_cli_tests` | `tests/test_assistant_cli.cpp` | 8 functions | 36 | Claude invocation contract (tools disabled, MCP and skills disabled, prompt on stdin, isolated cwd, no bypass flags), auth parsing and availability, failure mapping, redaction, local-only policy, Hermes fail-closed, end-to-end against the fake CLI |
+| `cipher_assistant_commands_tests` | `tests/test_assistant_commands.cpp` | 8 functions | 29 | REPL `ask` and `ai list`: usage and unknown-provider errors, no-fallback (Hermes failure never contacts Claude), cloud-route disclosure, login guidance, native not implemented, help addendum |
+| **Total (CTest)** | | **119 cases/functions** | **379 assertions (97 memory, 62 assistant, 29 memory commands, 17 process, 36 assistant CLI, 29 assistant commands)** | **All 9 test targets pass on Windows/MSVC (100%); Ubuntu/GCC verified by CI only where stated in the PR** |
 | `pipeline_unit_tests` | `tools/pipeline/tests/` | 49 test cases | 49 passing (100% pass rate; reproducible dev dependency via `requirements-dev.txt`) | Verifier, Git manager, Job store, MCP server, Orchestrator, Reviewer adapter |
 | `assistant_integrations_tests` | `integrations/` | 144 test cases | 144 passing (100%) | Contract (22), OpenClaw (48), Dodaios (24), Leon (25), OpenVoiceOS (25) |
 
@@ -248,7 +257,7 @@ CTest registers 6 distinct test binaries, covering 95 test functions/cases and 2
 ## 8. Explicitly Unimplemented or Disabled Capabilities
 
 To prevent confusion or hallucination by future AI agents, the following capabilities have **NOT** been implemented:
-* **No AI Inference Engine:** No language models or direct local runtime (e.g., llama.cpp/ONNX) are integrated into the C++ application. The repository contains adapter code, but live external execution remains disabled by default and was not exercised as part of the final hardening gate.
+* **No AI Inference Engine:** No language models or direct local runtime (e.g., llama.cpp/ONNX) are integrated into the C++ application. The `ask claude` command sends text to the user's installed Claude Code CLI, which performs hosted (`remote_cloud`) inference. This is delegation to an external tool, not a CIPHER runtime. `ask hermes` is unavailable (see Section 9), and `ask native` reports the native runtime as not implemented. The Python adapters remain disabled by default.
 * **No Vector Search or Embeddings:** Persistent memory stores explicit, human-readable entries in local files; no vector database, semantic embeddings, or autonomous background memory extraction.
 * **No Voice / Audio:** No speech-to-text, text-to-speech, or audio capture.
 * **No Operating System Automation:** No arbitrary shell execution, browser control, or GUI manipulation.
@@ -264,6 +273,15 @@ To prevent confusion or hallucination by future AI agents, the following capabil
 3. **Log Rotation:** The logger appends continuously to `log_file` without size limits or rotation.
 4. **Config File Path:** `cipher.conf` is loaded exclusively from the current working directory.
 5. **External Integration Evidence:** OpenClaw effective policy enforcement, local-route provenance beyond the operator assertion, downstream tool isolation for Dodaios and Leon, and live OVOS bus behavior have not been independently runtime-verified. The adapters therefore remain fail-closed by default.
+6. **Provider CLI Boundaries (`ask claude`, `ai list`):**
+   * **Hermes is unavailable.** The Hermes CLI was not installed on the verification host, so no tool-free one-shot invocation could be verified. The adapter fails closed with route `unknown`. It never uses a guessed flag set.
+   * **Tool restriction was verified by one live side-effect probe, not by a proof.** Claude Code CLI 2.1.310 was invoked with `--restricted --tools "" --strict-mcp-config --disable-slash-commands --no-session-persistence`. In one probe the model was asked to write a file and replied `NO_TOOL_ACCESS`, and no file was created. The model's own statement that it had tools was not treated as evidence. The `--restricted` mode is documented as skipping user, project and local settings, which should cover hooks. Hooks were not separately verified, and managed settings still apply and cannot be disabled by CIPHER.
+   * **`--bare` is not used.** Its help text states that Anthropic auth is limited to `ANTHROPIC_API_KEY` or `apiKeyHelper` and that OAuth and keychain are never read. Using it would force an API-key requirement, which this milestone excludes.
+   * **Billing is not assumed.** Login is checked with `claude auth status --json`. The `loggedIn` and `authMethod` fields are read, and no credential values are printed. Whether a request is billed to a subscription or an API key depends on the account the CLI uses.
+   * **Route is `remote_cloud`.** Every `ask claude` request discloses this. The request sets `local_only=false` only for that explicit call. The validator still rejects local-only requests when a backend has no verified local route.
+   * **Process isolation is bounded but not total.** Requests use a fixed executable with an argument vector and no shell, with stdin input, a 120 second timeout, a 256 KiB stdout limit and a 16 KiB stderr limit. Windows uses a Job Object. POSIX uses a process group. On POSIX, a descendant that calls `setsid` and leaves the group is not terminated.
+   * **The child inherits the caller's environment.** Tokens in environment variables are not stripped. Diagnostics are redacted on a best-effort basis.
+   * **The POSIX runner was not built or run on this host.** The Windows/MSVC build and all 9 CTest targets pass locally. The Ubuntu/GCC path is verified only by the CI run on the PR.
 
 ---
 

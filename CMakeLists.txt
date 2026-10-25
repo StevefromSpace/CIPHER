@@ -93,10 +93,32 @@ endif()
 # ---------------------------------------------------------------------------
 # cipher_assistant  —  assistant capability provider boundary (v0.4 preview)
 # ---------------------------------------------------------------------------
+find_package(Threads REQUIRED)
+
+# ---------------------------------------------------------------------------
+# cipher_process  —  bounded, shell-free child process runner (provider CLIs)
+# ---------------------------------------------------------------------------
+add_library(cipher_process
+    src/process_runner.cpp
+)
+target_include_directories(cipher_process PUBLIC include)
+target_link_libraries(cipher_process PUBLIC Threads::Threads)
+
+if(MSVC)
+    target_compile_options(cipher_process PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(cipher_process PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# ---------------------------------------------------------------------------
+# cipher_assistant  —  assistant capability provider boundary (v0.4 preview)
+# ---------------------------------------------------------------------------
 add_library(cipher_assistant
     src/assistant_backend.cpp
+    src/assistant_cli.cpp
 )
 target_include_directories(cipher_assistant PUBLIC include)
+target_link_libraries(cipher_assistant PUBLIC cipher_process)
 
 if(MSVC)
     target_compile_options(cipher_assistant PRIVATE /W4 /permissive-)
@@ -105,10 +127,25 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# cipher_assistant_commands  —  REPL commands for ask and ai
+# ---------------------------------------------------------------------------
+add_library(cipher_assistant_commands
+    src/assistant_commands.cpp
+)
+target_include_directories(cipher_assistant_commands PUBLIC include)
+target_link_libraries(cipher_assistant_commands PUBLIC cipher_assistant)
+
+if(MSVC)
+    target_compile_options(cipher_assistant_commands PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(cipher_assistant_commands PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# ---------------------------------------------------------------------------
 # cipher  —  main executable
 # ---------------------------------------------------------------------------
 add_executable(cipher src/main.cpp)
-target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands)
+target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands cipher_assistant_commands)
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -143,4 +180,29 @@ if(BUILD_TESTING)
     add_executable(cipher_assistant_tests tests/test_assistant_backend.cpp)
     target_link_libraries(cipher_assistant_tests PRIVATE cipher_assistant)
     add_test(NAME cipher_assistant_tests COMMAND cipher_assistant_tests)
+
+    # Deterministic stand-in for the Claude Code CLI. Not a test itself; never
+    # contacts a service. Named so the CI pipeline-verifier glob does not pick it up.
+    add_executable(cipher_fake_cli tests/fixtures/fake_cli.cpp)
+
+    # Bounded process runner, exercised against the fake CLI.
+    add_executable(cipher_process_tests tests/test_process_runner.cpp)
+    target_link_libraries(cipher_process_tests PRIVATE cipher_process)
+    target_compile_definitions(cipher_process_tests PRIVATE
+        "CIPHER_FAKE_CLI_PATH=\"$<TARGET_FILE:cipher_fake_cli>\"")
+    add_dependencies(cipher_process_tests cipher_fake_cli)
+    add_test(NAME cipher_process_tests COMMAND cipher_process_tests)
+
+    # Claude Code and Hermes adapters: scripted-runner contract tests plus end-to-end.
+    add_executable(cipher_assistant_cli_tests tests/test_assistant_cli.cpp)
+    target_link_libraries(cipher_assistant_cli_tests PRIVATE cipher_assistant)
+    target_compile_definitions(cipher_assistant_cli_tests PRIVATE
+        "CIPHER_FAKE_CLI_PATH=\"$<TARGET_FILE:cipher_fake_cli>\"")
+    add_dependencies(cipher_assistant_cli_tests cipher_fake_cli)
+    add_test(NAME cipher_assistant_cli_tests COMMAND cipher_assistant_cli_tests)
+
+    # REPL commands for ask and ai.
+    add_executable(cipher_assistant_commands_tests tests/test_assistant_commands.cpp)
+    target_link_libraries(cipher_assistant_commands_tests PRIVATE cipher_assistant_commands)
+    add_test(NAME cipher_assistant_commands_tests COMMAND cipher_assistant_commands_tests)
 endif()

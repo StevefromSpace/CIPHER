@@ -84,6 +84,20 @@ performs bounded stream reads. OpenClaw subprocess collection terminates the
 direct child on timeout or output overflow; process-tree cleanup beyond that
 direct child has not been established as a cross-platform guarantee.
 
+## Optional provider CLIs (ask / ai)
+
+```
+cipher (main.cpp)
+  |-- cipher_assistant_commands (ask, ai list; depends on cipher_assistant)
+        |-- cipher_assistant (IAssistantBackend, AssistantManager, ClaudeCodeBackend, HermesBackend)
+              |-- cipher_process (SystemProcessRunner, IProcessRunner; no shell, bounded I/O)
+```
+
+- `AssistantManager::submit` remains the only path to a backend, so central validation applies.
+- `ClaudeCodeBackend` depends on `IProcessRunner`, so its contract is tested with a scripted runner. End-to-end tests use the `cipher_fake_cli` fixture (test-only).
+- Hermes is registered for display only. It never executes a request in this milestone.
+- `cipher_core` and `cipher_memory` do not depend on any of these libraries.
+
 ## Boundaries to preserve as CIPHER grows
 
 ```text

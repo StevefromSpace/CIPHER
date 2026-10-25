@@ -203,6 +203,9 @@ public:
     virtual bool is_available() = 0;
     virtual AssistantCapabilities capabilities() const = 0;
     virtual AssistantResponse execute_request(const AssistantRequest& request) = 0;
+
+    // Human-readable availability or auth detail from the last is_available() check.
+    virtual std::string diagnostic() const { return {}; }
 };
 
 /**

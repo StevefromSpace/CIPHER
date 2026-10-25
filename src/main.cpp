@@ -1,7 +1,10 @@
+#include "cipher/assistant_cli.hpp"
+#include "cipher/assistant_commands.hpp"
 #include "cipher/cipher_core.hpp"
 #include "cipher/config.hpp"
 #include "cipher/logger.hpp"
 #include "cipher/memory_commands.hpp"
+#include "cipher/process_runner.hpp"
 
 #include <iostream>
 #include <string>
@@ -90,6 +93,10 @@ int main() {
         return 1;
     }
 
+    // Optional assistant providers. Nothing is contacted until the owner runs `ask`.
+    cipher::SystemProcessRunner process_runner;
+    cipher::AssistantCommands assistant(process_runner, cipher::find_executable_on_path("claude"));
+
     std::cout << "CIPHER v" << cipher::CipherCore::version() << '\n';
     std::cout << "Contextual Intelligence Platform for Home, Enterprise & Research\n";
     std::cout << "Type 'help' to begin. This build runs locally and has no AI runtime.\n\n";
@@ -109,12 +116,21 @@ int main() {
             continue;
         }
 
+        const cipher::AssistantCommandResult assistant_reply = assistant.execute(input);
+        if (assistant_reply.handled) {
+            std::cout << assistant_reply.text << '\n';
+            continue;
+        }
+
         const cipher::CommandResponse response = core.execute(input);
         if (!response.text.empty()) {
             std::cout << response.text << '\n';
         }
         if (!memory_reply.text.empty()) {
             std::cout << memory_reply.text << '\n';
+        }
+        if (!assistant_reply.text.empty()) {
+            std::cout << assistant_reply.text << '\n';
         }
         if (response.exit_requested) {
             log.info("CIPHER session ended (user request)");
