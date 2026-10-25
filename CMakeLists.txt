@@ -143,4 +143,9 @@ if(BUILD_TESTING)
     add_executable(cipher_assistant_tests tests/test_assistant_backend.cpp)
     target_link_libraries(cipher_assistant_tests PRIVATE cipher_assistant)
     add_test(NAME cipher_assistant_tests COMMAND cipher_assistant_tests)
+
+    # v0.4 no-model verification: core, memory and provider layer with no provider.
+    add_executable(cipher_no_model_tests tests/test_no_model_runtime.cpp)
+    target_link_libraries(cipher_no_model_tests PRIVATE cipher_core cipher_memory_commands cipher_assistant)
+    add_test(NAME cipher_no_model_tests COMMAND cipher_no_model_tests)
 endif()
