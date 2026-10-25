@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <vector>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -153,17 +154,32 @@ bool start_in_job(const ProcessRequest& request, Pipe& in, Pipe& out, Pipe& err,
 
     const std::wstring working_directory = to_wide(request.working_directory);
     std::wstring command_line = build_command_line(request);
-    STARTUPINFOW startup{};
-    startup.cb = sizeof(startup);
-    startup.dwFlags = STARTF_USESTDHANDLES;
-    startup.hStdInput = in.read_end.get();
-    startup.hStdOutput = out.write_end.get();
-    startup.hStdError = err.write_end.get();
+    // Restrict inheritance to the three child-side ends; bInheritHandles=TRUE alone would leak every inheritable handle.
+    HANDLE inherited[] = {in.read_end.get(), out.write_end.get(), err.write_end.get()};
+    SIZE_T attribute_size = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &attribute_size);
+    std::vector<char> attribute_buffer(attribute_size);
+    auto* attributes = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attribute_buffer.data());
+    if (!InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_size) ||
+        !UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
+                                   sizeof(inherited), nullptr, nullptr)) {
+        error = "could not restrict inherited handles (error " + std::to_string(GetLastError()) + ")";
+        return false;
+    }
+    STARTUPINFOEXW startup{};
+    startup.StartupInfo.cb = sizeof(startup);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput = in.read_end.get();
+    startup.StartupInfo.hStdOutput = out.write_end.get();
+    startup.StartupInfo.hStdError = err.write_end.get();
+    startup.lpAttributeList = attributes;
     PROCESS_INFORMATION info{};
     const BOOL created = CreateProcessW(
         to_wide(request.executable).c_str(), command_line.data(), nullptr, nullptr, TRUE,
-        CREATE_SUSPENDED | CREATE_NO_WINDOW, nullptr,
-        working_directory.empty() ? nullptr : working_directory.c_str(), &startup, &info);
+        CREATE_SUSPENDED | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT, nullptr,
+        working_directory.empty() ? nullptr : working_directory.c_str(),
+        reinterpret_cast<LPSTARTUPINFOW>(&startup), &info);
+    DeleteProcThreadAttributeList(attributes);
     // The child owns the inheritable ends now; the parent keeps only its own.
     in.read_end.reset();
     out.write_end.reset();

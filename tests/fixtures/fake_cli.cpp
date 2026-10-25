@@ -7,12 +7,15 @@
 //                                 "loggedin" (default), "loggedout", or anything
 //                                 else for malformed output.
 //   fake_cli --argv-check ...     Prints its arguments joined by '|'.
+//   fake_cli --handle-check <n>   Windows only. Prints "visible" if the handle value n is
+//                                 valid in this process, else "not-visible".
 //   fake_cli --print ...          Reads the whole prompt from stdin. A prompt that
 //                                 starts with "MODE:" selects a behaviour; any
 //                                 other prompt is echoed back as "stdin:<prompt>".
 // ---------------------------------------------------------------------------
 
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -20,6 +23,10 @@
 #include <iterator>
 #include <string>
 #include <thread>
+
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -53,6 +60,22 @@ int run_argv_check(int argc, char** argv) {
     }
     std::cout << '\n';
     return 0;
+}
+
+int run_handle_check(int argc, char** argv) {
+#if defined(_WIN32)
+    if (argc < 3) return 2;
+    const auto value = std::strtoull(argv[2], nullptr, 10);
+    DWORD flags = 0;
+    const bool visible = GetHandleInformation(reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(value)), &flags) != 0;
+    std::cout << (visible ? "visible" : "not-visible") << '\n';
+    return 0;
+#else
+    static_cast<void>(argc);
+    static_cast<void>(argv);
+    std::cout << "unsupported\n";
+    return 2;
+#endif
 }
 
 int run_print_mode() {
@@ -93,6 +116,9 @@ int main(int argc, char** argv) {
     }
     if (argc >= 2 && std::string(argv[1]) == "--argv-check") {
         return run_argv_check(argc, argv);
+    }
+    if (argc >= 2 && std::string(argv[1]) == "--handle-check") {
+        return run_handle_check(argc, argv);
     }
     if (argc >= 2 && std::string(argv[1]) == "--print") {
         return run_print_mode();

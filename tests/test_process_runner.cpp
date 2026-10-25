@@ -9,9 +9,14 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <string>
+
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 #ifndef CIPHER_FAKE_CLI_PATH
 #error "CIPHER_FAKE_CLI_PATH must be defined by the build"
@@ -170,6 +175,33 @@ void test_working_directory_is_applied() {
     std::filesystem::remove_all(TEMP_DIR, ec);
 }
 
+#if defined(_WIN32)
+// ---------------------------------------------------------------------------
+// 9. Only the child's stdio handles are inherited (Windows).
+//    A sentinel inheritable handle in the parent must not be visible to the child.
+// ---------------------------------------------------------------------------
+void test_sentinel_handle_is_not_inherited() {
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    HANDLE sentinel = CreateEventW(&attributes, TRUE, FALSE, nullptr);
+    check(sentinel != nullptr, "sentinel inheritable handle is created", "CreateEventW failed");
+    if (sentinel == nullptr) {
+        return;
+    }
+
+    cipher::ProcessRequest request;
+    request.executable = CIPHER_FAKE_CLI_PATH;
+    request.arguments = {"--handle-check", std::to_string(reinterpret_cast<std::uintptr_t>(sentinel))};
+    request.timeout_seconds = 10.0;
+    const auto result = cipher::SystemProcessRunner().run(request);
+    CloseHandle(sentinel);
+
+    check(result.started, "handle-check child starts", result.error);
+    check(strip_carriage_returns(result.stdout_text) == "not-visible\n",
+          "sentinel handle is not inherited by the child",
+          "child reported: " + result.stdout_text);
+}
+#endif
+
 } // anonymous namespace
 
 int main() {
@@ -183,6 +215,9 @@ int main() {
     test_missing_executable_is_not_started();
     test_arguments_are_not_shell_interpreted();
     test_working_directory_is_applied();
+#if defined(_WIN32)
+    test_sentinel_handle_is_not_inherited();
+#endif
 
     std::cout << "\n-------------------------------------------------------------\n";
     std::cout << "Tests passed: " << g_passes << '\n';
