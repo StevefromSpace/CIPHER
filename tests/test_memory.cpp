@@ -576,6 +576,47 @@ void test_whitespace_category_and_entry_count_validation() {
     cleanup_temp();
 }
 
+// ---------------------------------------------------------------------------
+// 15. Filesystem inspection failure is not a missing file (POSIX only).
+//     A directory with no permissions makes exists() fail with EACCES.
+//     Windows ACL denial is not reproduced here (no portable failure hook).
+// ---------------------------------------------------------------------------
+#if !defined(_WIN32)
+void test_inspection_failure_is_not_missing_file() {
+    const std::string locked_dir = TEMP_TEST_DIR + "/locked";
+    const std::string locked_file = locked_dir + "/cipher_memory.v1";
+
+    setup_temp();
+    std::error_code ec;
+    std::filesystem::create_directories(locked_dir, ec);
+
+    cipher::MemoryStore seed;
+    seed.set("seed_item", "Persisted", "general");
+    seed.save(locked_file);
+    std::filesystem::permissions(locked_dir, std::filesystem::perms::none, ec);
+
+    std::error_code probe_ec;
+    std::filesystem::exists(locked_file, probe_ec);
+    if (!probe_ec) {
+        std::cout << "SKIP: test_inspection_failure_is_not_missing_file (permission denial not enforced, e.g. running as root)\n";
+        std::filesystem::permissions(locked_dir, std::filesystem::perms::owner_all, ec);
+        cleanup_temp();
+        return;
+    }
+
+    cipher::MemoryStore store;
+    store.set("in_memory_item", "Must survive", "general");
+    auto res = store.load(locked_file);
+    check(!res.ok, "load reports error when filesystem inspection fails",
+          "load treated an inspection failure as a missing file");
+    check(store.has("in_memory_item"), "failed load does not clear in-memory store",
+          "failed load silently replaced the store with an empty one");
+
+    std::filesystem::permissions(locked_dir, std::filesystem::perms::owner_all, ec);
+    cleanup_temp();
+}
+#endif
+
 } // anonymous namespace
 
 int main() {
@@ -595,6 +636,9 @@ int main() {
     test_repeatable_save_load();
     test_existing_file_replacement_and_lock_failure();
     test_whitespace_category_and_entry_count_validation();
+#if !defined(_WIN32)
+    test_inspection_failure_is_not_missing_file();
+#endif
 
     std::cout << "\n-------------------------------------------------------------\n";
     std::cout << "Tests passed: " << g_passes << '\n';
