@@ -56,6 +56,12 @@ jobs:
       - name: Test (CTest)
         run: ctest --test-dir build -C Release --output-on-failure
 
+      # 5. Show PASS/SKIP/FAIL for the memory regression test on Linux.
+      #    CTest hides successful output, so a SKIP would otherwise look identical to a PASS.
+      - name: Memory inspection regression (PASS/SKIP visible)
+        if: runner.os == 'Linux'
+        run: ./build/cipher_memory_tests 2>&1 | grep -E '^(PASS|SKIP|FAIL):' | grep -i 'inspection\|load reports\|failed load'
+
   python-tests:
     name: Assistant Adapters & Pipeline Tests (Python)
     runs-on: ubuntu-24.04

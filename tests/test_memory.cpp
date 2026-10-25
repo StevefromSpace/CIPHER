@@ -579,7 +579,9 @@ void test_whitespace_category_and_entry_count_validation() {
 // ---------------------------------------------------------------------------
 // 15. Filesystem inspection failure is not a missing file (POSIX only).
 //     A directory with no permissions makes exists() fail with EACCES.
-//     Windows ACL denial is not reproduced here (no portable failure hook).
+//     Windows is not covered: in a probe (MSVC 2022), a Deny FILE_TRAVERSE ACE on the directory
+//     did not make exists() fail for the owning user, and no other Windows failure was found
+//     that is portable. The cause is not established. A test seam is needed; see issue #4.
 // ---------------------------------------------------------------------------
 #if !defined(_WIN32)
 void test_inspection_failure_is_not_missing_file() {
