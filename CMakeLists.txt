@@ -105,6 +105,21 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# cipher_tools  —  v0.5 permissioned tool registry (static, built-in only)
+# ---------------------------------------------------------------------------
+add_library(cipher_tools
+    src/tool_registry.cpp
+)
+target_include_directories(cipher_tools PUBLIC include)
+target_link_libraries(cipher_tools PUBLIC cipher_assistant cipher_core)
+
+if(MSVC)
+    target_compile_options(cipher_tools PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(cipher_tools PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# ---------------------------------------------------------------------------
 # cipher  —  main executable
 # ---------------------------------------------------------------------------
 add_executable(cipher src/main.cpp)
@@ -148,4 +163,9 @@ if(BUILD_TESTING)
     add_executable(cipher_no_model_tests tests/test_no_model_runtime.cpp)
     target_link_libraries(cipher_no_model_tests PRIVATE cipher_core cipher_memory_commands cipher_assistant)
     add_test(NAME cipher_no_model_tests COMMAND cipher_no_model_tests)
+
+    # v0.5 Phase 1-2: tool registry, lifecycle, permission gate and audit.
+    add_executable(cipher_tool_registry_tests tests/test_tool_registry.cpp)
+    target_link_libraries(cipher_tool_registry_tests PRIVATE cipher_tools)
+    add_test(NAME cipher_tool_registry_tests COMMAND cipher_tool_registry_tests)
 endif()
