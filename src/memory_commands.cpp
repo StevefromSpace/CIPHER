@@ -42,8 +42,8 @@ bool is_memory_command(const std::string& command) {
 
 } // namespace
 
-MemoryCommands::MemoryCommands(std::string file_path)
-    : file_path_(std::move(file_path)) {}
+MemoryCommands::MemoryCommands(std::string file_path, PermissionPolicy policy)
+    : file_path_(std::move(file_path)), policy_(std::move(policy)) {}
 
 MemoryResult MemoryCommands::open() {
     if (!enabled()) {
@@ -101,6 +101,10 @@ std::string MemoryCommands::run(const std::string& command, const std::string& a
 }
 
 std::string MemoryCommands::remember(const std::string& id, const std::string& content) {
+    const std::string denial = check_permission("remember", id);
+    if (!denial.empty()) {
+        return denial;
+    }
     const MemoryStore before = store_;
     // An update keeps the category the owner set, including hand-edits in the file.
     const auto existing = store_.get(id);
@@ -125,6 +129,10 @@ std::string MemoryCommands::recall(const std::string& id) const {
 }
 
 std::string MemoryCommands::forget(const std::string& id) {
+    const std::string denial = check_permission("forget", id);
+    if (!denial.empty()) {
+        return denial;
+    }
     const MemoryStore before = store_;
     if (!store_.remove(id)) {
         return "No memory with id '" + id + "'.";
@@ -142,6 +150,23 @@ std::string MemoryCommands::list_ids() const {
         listing += "\n  " + entry.id;
     }
     return listing;
+}
+
+// Empty string when the action may run. Monitor is allowed; Ask and Block are
+// denied. The blacklist and whitelist inside PermissionPolicy decide the tier.
+std::string MemoryCommands::check_permission(const std::string& action, const std::string& id) const {
+    ActionDescriptor descriptor;
+    descriptor.name = action;
+    descriptor.target = id;
+    descriptor.category = "memory";
+    descriptor.default_tier = RiskTier::Monitor;
+
+    const RiskTier tier = policy_.evaluate(descriptor);
+    if (tier == RiskTier::Safe || tier == RiskTier::Monitor) {
+        return {};
+    }
+    return "Denied by permission policy (" + to_string(tier) + "): " + action + " '" + id +
+           "'. Nothing was changed.";
 }
 
 // Returns an empty string on success. On failure, restores `before` and

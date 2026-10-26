@@ -256,6 +256,77 @@ void test_failed_save_rolls_back_memory() {
           "unsaved entry is still visible in memory");
 }
 
+// A session whose policy blacklists remember and forget on ids starting with "secret".
+// evaluate() matches "<action> <id>", so these patterns are "<action> secret*".
+cipher::MemoryCommands open_gated_session(const std::string& path) {
+    cipher::PermissionPolicy policy;
+    policy.add_blacklist_pattern("remember secret*");
+    policy.add_blacklist_pattern("forget secret*");
+    cipher::MemoryCommands session(path, policy);
+    session.open();
+    return session;
+}
+
+void test_gate_allows_monitor_remember_and_forget() {
+    const std::string path = fresh_path("gate_allows");
+    auto session = open_gated_session(path);
+    const auto saved = session.execute("remember note allowed text");
+    check(contains(saved.text, "Remembered 'note'"),
+          "gate: allowed remember (Monitor default) succeeds",
+          "got: " + saved.text);
+    const auto forgotten = session.execute("forget note");
+    check(contains(forgotten.text, "Forgot 'note'"),
+          "gate: allowed forget (Monitor default) succeeds",
+          "got: " + forgotten.text);
+}
+
+void test_gate_denied_remember_leaves_file_byte_identical() {
+    const std::string path = fresh_path("gate_denied_remember");
+    {
+        cipher::MemoryCommands seed(path);
+        seed.open();
+        seed.execute("remember keep_me original text");
+    }
+    const std::string before = read_file(path);
+
+    auto session = open_gated_session(path);
+    const auto result = session.execute("remember secret_key new value");
+    check(contains(result.text, "Denied by permission policy") && contains(result.text, "Nothing was changed"),
+          "gate: denied remember tells the user it was denied",
+          "got: " + result.text);
+    check(read_file(path) == before,
+          "gate: denied remember leaves the memory file byte-identical",
+          "the memory file changed after a denied remember");
+    check(contains(session.execute("recall keep_me").text, "original text"),
+          "gate: existing contents remain after a denied remember",
+          "existing entry was altered");
+    check(contains(session.execute("recall secret_key").text, "No memory with id 'secret_key'"),
+          "gate: denied remember does not change the in-memory store",
+          "denied entry is visible in memory");
+}
+
+void test_gate_denied_forget_leaves_file_byte_identical() {
+    const std::string path = fresh_path("gate_denied_forget");
+    {
+        cipher::MemoryCommands seed(path);
+        seed.open();
+        seed.execute("remember secret_key protected");
+    }
+    const std::string before = read_file(path);
+
+    auto session = open_gated_session(path);
+    const auto result = session.execute("forget secret_key");
+    check(contains(result.text, "Denied by permission policy"),
+          "gate: denied forget tells the user it was denied",
+          "got: " + result.text);
+    check(read_file(path) == before,
+          "gate: denied forget leaves the memory file byte-identical",
+          "the memory file changed after a denied forget");
+    check(contains(session.execute("recall secret_key").text, "protected"),
+          "gate: denied forget keeps the entry in memory",
+          "entry was removed despite the denial");
+}
+
 void test_usage_and_routing_do_not_need_disk() {
     cipher::MemoryCommands session("");
     session.open();
@@ -281,6 +352,9 @@ int main() {
     test_corrupt_file_is_never_overwritten();
     test_failed_save_rolls_back_memory();
     test_usage_and_routing_do_not_need_disk();
+    test_gate_allows_monitor_remember_and_forget();
+    test_gate_denied_remember_leaves_file_byte_identical();
+    test_gate_denied_forget_leaves_file_byte_identical();
 
     std::cout << '\n';
     if (g_failures != 0) {

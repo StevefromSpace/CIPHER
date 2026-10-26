@@ -82,7 +82,7 @@ add_library(cipher_memory_commands
     src/memory_commands.cpp
 )
 target_include_directories(cipher_memory_commands PUBLIC include)
-target_link_libraries(cipher_memory_commands PUBLIC cipher_memory)
+target_link_libraries(cipher_memory_commands PUBLIC cipher_memory cipher_assistant)
 
 if(MSVC)
     target_compile_options(cipher_memory_commands PRIVATE /W4 /permissive-)

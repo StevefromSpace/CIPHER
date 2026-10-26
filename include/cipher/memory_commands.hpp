@@ -14,8 +14,11 @@
 //     replaced by an empty store.
 //   - A mutation that cannot be saved is rolled back, so the in-memory store
 //     never diverges from the file on disk.
+//   - remember and forget are gated by PermissionPolicy at RiskTier::Monitor.
+//     A denied action returns before any store change or file write.
 // ---------------------------------------------------------------------------
 
+#include "cipher/assistant_backend.hpp"
 #include "cipher/memory.hpp"
 
 #include <string>
@@ -31,7 +34,9 @@ struct MemoryCommandResult {
 
 class MemoryCommands {
 public:
-    explicit MemoryCommands(std::string file_path);
+    // The policy decides whether remember and forget may run. Its blacklist and
+    // whitelist are authoritative over the Monitor default.
+    explicit MemoryCommands(std::string file_path, PermissionPolicy policy = PermissionPolicy{});
 
     // Loads the store from the configured file. An empty path succeeds and
     // leaves memory disabled. A missing file succeeds with an empty store.
@@ -48,8 +53,11 @@ private:
     std::string forget(const std::string& id);
     std::string list_ids() const;
     std::string save_or_roll_back(const MemoryStore& before);
+    // Empty string when the action may run; otherwise the denial message.
+    std::string check_permission(const std::string& action, const std::string& id) const;
 
     std::string file_path_;
+    PermissionPolicy policy_;
     MemoryStore store_;
     bool available_ = false;  // true only after a successful open()
 };
