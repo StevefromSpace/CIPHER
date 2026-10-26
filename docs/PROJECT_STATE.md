@@ -57,7 +57,9 @@ CIPHER is an independent, local-first assistant platform built incrementally in 
 
 ---
 
-## 4. Current Implemented Capabilities (v0.2 Baseline)
+## 4. Current Implemented Capabilities (v0.2 Baseline, plus later milestones)
+
+This section lists the v0.2 baseline. Later additions (v0.3 memory library and REPL commands, v0.4 assistant adapters) are tracked in `docs/ROADMAP.md`, and their current branch state is on the PR stack listed there.
 
 The codebase currently contains three modular C++17 libraries and a command-line executable:
 
@@ -269,6 +271,10 @@ To prevent confusion or hallucination by future AI agents, the following capabil
 
 ## 10. Next Recommended Tasks
 
-1. **Owner Review (v0.3 Foundation & Pipeline):** The project owner should review `include/cipher/memory.hpp`, `src/memory.cpp`, `tests/test_memory.cpp`, and the Dual-Claude pipeline tooling (`tools/pipeline/`) to maintain understanding of the v0.3 foundation.
-2. **Next Milestone (memory permission gate):** REPL memory commands and the `memory_file` key are implemented on `feat/repl-memory-commands` (`cipher_memory_commands`). The remaining item is routing memory writes through the permission gate, which is not implemented yet.
+Milestone order is v0.2 → v0.3 → v0.4 → v0.5. See the Milestone Status table in `docs/ROADMAP.md`.
+
+1. **Owner Review (WAITING_FOR_OWNER, v0.2 and v0.3 gates):** The owner must review the v0.2 source files (configuration, logger, version) and the v0.3 foundation (`include/cipher/memory.hpp`, `src/memory.cpp`, `tests/test_memory.cpp`, `tools/pipeline/`). The agent cannot mark these complete.
+2. **v0.3 memory permission gate (next, after v0.2 is formally cleared):** REPL `remember` and `forget` (`cipher_memory_commands`, on the PR #2 stack) must pass `PermissionPolicy` before mutating the memory file. Decided default tier: `Monitor` for both; blacklist and override rules stay authoritative. Denied operations must leave the memory file unchanged. Use the existing `RiskTier`/`PermissionPolicy`; do not depend on the v0.5 tool registry (PR #12).
    * Keep the strict decoupling: the memory layer depends only on `cipher_memory`, and `cipher_core` does not depend on memory.
+3. **v0.4 no-model verification:** Verify the core is useful with no assistant or model attached. The llama.cpp prototype is a separate scope decision.
+4. **v0.5:** Not started. Begins only after v0.2–v0.4 are complete; PR #12 is reassessed then.
