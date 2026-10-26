@@ -1,6 +1,7 @@
 #include "cipher/tool_registry.hpp"
 
 #include "cipher/cipher_core.hpp"
+#include "cipher/memory.hpp"
 
 #include <ctime>
 #include <exception>
@@ -170,6 +171,27 @@ void register_builtin_tools(ToolRegistry& registry) {
             const char* platform = "POSIX";
 #endif
             return "CIPHER v" + std::string(CipherCore::version()) + "\nBuild: " + build + "\nPlatform: " + platform;
+        }});
+}
+
+void register_memory_tools(ToolRegistry& registry, const std::string& memory_file_path) {
+    registry.register_tool(ToolDefinition{
+        "memory.list",
+        "Lists memory entry IDs only. Contents are never returned.",
+        "memory",
+        RiskTier::Monitor,
+        SideEffect::ReadLocal,
+        [memory_file_path](const std::string&) {
+            MemoryStore store;
+            const MemoryResult loaded = store.load(memory_file_path);
+            if (!loaded.is_ok()) {
+                throw std::runtime_error("memory file could not be read: " + memory_file_path);
+            }
+            std::string listing;
+            for (const MemoryEntry& entry : store.all()) {
+                listing += entry.id + "\n";
+            }
+            return listing.empty() ? std::string("No memory entries.") : listing;
         }});
 }
 

@@ -111,7 +111,7 @@ add_library(cipher_tools
     src/tool_registry.cpp
 )
 target_include_directories(cipher_tools PUBLIC include)
-target_link_libraries(cipher_tools PUBLIC cipher_assistant cipher_core)
+target_link_libraries(cipher_tools PUBLIC cipher_assistant cipher_core cipher_memory)
 
 if(MSVC)
     target_compile_options(cipher_tools PRIVATE /W4 /permissive-)

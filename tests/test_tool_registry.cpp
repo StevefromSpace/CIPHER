@@ -1,5 +1,8 @@
+#include "cipher/memory.hpp"
 #include "cipher/tool_registry.hpp"
 
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <stdexcept>
@@ -237,6 +240,72 @@ void test_builtin_tools_registered_and_safe() {
           "builtins: system.info reports version only", "system.info output wrong");
 }
 
+std::string temp_memory_path(const std::string& name) {
+    return (std::filesystem::temp_directory_path() / ("cipher_memory_list_" + name + ".txt")).string();
+}
+
+void test_memory_list_returns_ids_only() {
+    const std::string path = temp_memory_path("ids");
+    cipher::MemoryStore store;
+    store.set("alpha", "SECRETCONTENT", "general");
+    const cipher::MemoryResult saved = store.save(path);
+
+    cipher::ToolRegistry registry;
+    cipher::register_memory_tools(registry, path);
+    const cipher::ToolResult result = registry.invoke("memory.list", "", "");
+    check(saved.is_ok() && result.outcome == cipher::ToolOutcome::Completed && result.executed &&
+              result.output.find("alpha") != std::string::npos,
+          "memory.list: lists entry IDs", "ID missing from listing");
+    check(result.output.find("SECRETCONTENT") == std::string::npos,
+          "memory.list: contents never returned", "entry content leaked into listing");
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
+void test_memory_list_missing_file_completes_empty() {
+    const std::string path = temp_memory_path("missing");
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+
+    cipher::ToolRegistry registry;
+    cipher::register_memory_tools(registry, path);
+    const cipher::ToolResult result = registry.invoke("memory.list", "", "");
+    check(result.outcome == cipher::ToolOutcome::Completed && result.output == "No memory entries.",
+          "memory.list: missing file completes with empty listing", "missing file did not complete empty");
+}
+
+void test_memory_list_corrupt_file_fails_not_denied() {
+    const std::string path = temp_memory_path("corrupt");
+    {
+        std::ofstream out(path);
+        out << "this is not a memory record\n";
+    }
+
+    cipher::ToolRegistry registry;
+    cipher::register_memory_tools(registry, path);
+    const cipher::ToolResult result = registry.invoke("memory.list", "", "");
+    check(result.outcome == cipher::ToolOutcome::Failed && result.executed,
+          "memory.list: corrupt file is Failed with executed=true", "corrupt file did not fail as executed");
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
+void test_memory_list_blacklist_denies_without_reading() {
+    const std::string path = temp_memory_path("blacklist");
+    cipher::MemoryStore store;
+    store.set("alpha", "content", "general");
+    store.save(path);
+
+    cipher::ToolRegistry registry;
+    cipher::register_memory_tools(registry, path);
+    registry.policy().add_blacklist_pattern("memory.list secret*");
+    const cipher::ToolResult result = registry.invoke("memory.list", "secret-area", "");
+    check(result.outcome == cipher::ToolOutcome::Denied && !result.executed && result.output.find("alpha") == std::string::npos,
+          "memory.list: blacklisted target denied, nothing listed", "blacklisted memory.list was not denied");
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
 } // namespace
 
 int main() {
@@ -250,6 +319,10 @@ int main() {
     test_failed_handler_is_distinct_from_denied();
     test_audit_records_denial_and_execution_without_payload();
     test_builtin_tools_registered_and_safe();
+    test_memory_list_returns_ids_only();
+    test_memory_list_missing_file_completes_empty();
+    test_memory_list_corrupt_file_fails_not_denied();
+    test_memory_list_blacklist_denies_without_reading();
 
     std::cout << "\n" << g_passes << " passed, " << g_failures << " failed\n";
     return g_failures == 0 ? 0 : 1;
