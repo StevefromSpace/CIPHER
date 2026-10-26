@@ -76,7 +76,8 @@ The dates are planning targets, not promises. Work at a pace that preserves lear
 
 - [ ] Review the v0.3 source files and understand the memory subsystem and pipeline tools.
       *(The owner must do this step.)*
-- [ ] Integrate persistent memory into command REPL and permission gate (Next incremental milestone).
+- [x] Integrate persistent memory into command REPL (`remember`, `recall`, `forget`, `memories`; opt-in via `memory_file`; `cipher_memory_commands` library, 29 assertions).
+- [ ] Integrate persistent memory into the permission gate (not started; the permission gate itself is not implemented).
 
 ## Next milestones
 

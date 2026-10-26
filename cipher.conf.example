@@ -52,3 +52,25 @@ log_level = info
 # Default: (empty — stderr only)
 # ---------------------------------------------------------------------------
 # log_file = cipher.log
+
+
+# ---------------------------------------------------------------------------
+# memory_file
+#
+# Optional path to the persistent memory file. When set, CIPHER enables the
+# remember, recall, forget, and memories commands. Each change is saved to
+# this file immediately. The file is plain text and can be read or edited by
+# hand.
+#
+# If the file exists but cannot be parsed, CIPHER stops at startup and does
+# not overwrite it. A missing file starts an empty memory.
+#
+# Store only what you choose to remember. Do not store passwords, API keys,
+# or tokens here.
+#
+# Do not set this to a path inside the project repository unless you have
+# also added the file to .gitignore. Memory files hold personal data.
+#
+# Default: (empty — memory commands disabled)
+# ---------------------------------------------------------------------------
+# memory_file = cipher_memory.txt

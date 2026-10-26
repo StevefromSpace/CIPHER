@@ -121,6 +121,11 @@ ConfigResult parse_lines(std::istream& stream) {
             // the default).
             result.config.log_file = value;
 
+        } else if (key == "memory_file") {
+            // Any non-empty string is accepted here. The memory layer reports
+            // load or save failures at runtime. An empty value disables memory.
+            result.config.memory_file = value;
+
         } else {
             // Reject unknown keys so that misspelled settings are visible.
             result.errors.push_back({
@@ -168,6 +173,7 @@ Config ConfigParser::defaults() noexcept {
     Config cfg;
     cfg.log_level = LogLevel::INFO;
     cfg.log_file  = "";
+    cfg.memory_file = "";
     return cfg;
 }
 

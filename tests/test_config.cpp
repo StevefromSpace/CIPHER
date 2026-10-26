@@ -148,6 +148,26 @@ static void test_load_from_string_log_file_empty_value() {
           "Expected empty string");
 }
 
+static void test_load_from_string_memory_file() {
+    const cipher::ConfigResult r =
+        cipher::ConfigParser::load_from_string("memory_file = notes/memory.txt\n");
+    check(r.ok(), "memory_file: no errors", "Got unexpected errors");
+    check(r.config.memory_file == "notes/memory.txt",
+          "memory_file: path is stored",
+          "Expected 'notes/memory.txt'");
+}
+
+static void test_memory_file_defaults_to_disabled() {
+    check(cipher::ConfigParser::defaults().memory_file.empty(),
+          "memory_file default: memory is disabled",
+          "Expected empty memory_file in defaults");
+
+    const cipher::ConfigResult r = cipher::ConfigParser::load_from_string("log_level = info\n");
+    check(r.ok() && r.config.memory_file.empty(),
+          "memory_file absent: memory stays disabled",
+          "Expected empty memory_file when the key is absent");
+}
+
 static void test_load_from_string_unknown_key() {
     const cipher::ConfigResult r =
         cipher::ConfigParser::load_from_string("unknown_key = something\n");
@@ -351,6 +371,8 @@ int main() {
     test_load_from_string_valid_log_level();
     test_load_from_string_log_file();
     test_load_from_string_log_file_empty_value();
+    test_load_from_string_memory_file();
+    test_memory_file_defaults_to_disabled();
     test_load_from_string_unknown_key();
     test_load_from_string_invalid_log_level();
     test_load_from_string_no_equals();

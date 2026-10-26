@@ -49,3 +49,7 @@ test_memory_tmp_dir/
 test_cipher_config_tmp.conf
 scratch/
 *.tmp
+
+# Personal persistent memory (memory_file in cipher.conf)
+cipher_memory.txt
+cipher_memory.txt.tmp
