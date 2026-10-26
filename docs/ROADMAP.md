@@ -14,7 +14,7 @@ Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → 
 | v0.2.1 version consistency | COMPLETE | None |
 | v0.3 persistent memory foundation | IMPLEMENTED, OWNER REVIEW OPEN | Permission gate implemented on PR #14 (`69e2ee6`, Draft, base `feat/repl-memory-commands`). `remember`/`forget` default to `Monitor`; denied operations leave the memory file byte-identical. Not merged; owner review (WAITING_FOR_OWNER). |
 | v0.4 replaceable AI runtime interface | CURRENT (no-model verification) | No-model verification suite on PR #15 (`9047f13`, Draft, base PR #14 branch): core, memory and provider layer with no provider attached. The `llama.cpp` or embedded-model prototype is out of scope until owner decision (WAITING_FOR_OWNER). |
-| v0.5 permissioned tools | NOT STARTED | Blocked until v0.2–v0.4 are complete. PR #12 (tool registry slice) is parked as Draft and is not part of current milestone execution. |
+| v0.5 permissioned tools | DESIGN IN REVIEW (WAITING_FOR_OWNER) | Architecture proposal in `docs/V05_TOOL_ARCHITECTURE.md` on branch `docs/v05-tool-architecture`. No implementation started. PR #12 parked; recommendation is to rewrite on `main`, not merge. |
 
 ### Milestone dependencies
 
