@@ -320,3 +320,10 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
     - Python Integrations: 144/144 tests passed (Contract: 22, OpenClaw: 48, Dodaios: 24, Leon: 25, OVOS: 25).
     - Developer Pipeline: 49/49 tests passed.
 * **Future Intent:** Live model invocation and live skill execution remain disabled under CIPHER safety policy until independently verifiable route evidence and sandbox isolation are implemented.
+
+### 18. Permissioned Tool Registry on the Existing PermissionPolicy (v0.5)
+
+- **Status:** Accepted (v0.5 Permissioned Tools, owner approved). Full design in `docs/V05_TOOL_ARCHITECTURE.md`.
+- **Decision:** Tools are identified by a stable dotted ID and registered statically as built-ins only. Each invocation is evaluated by the existing `PermissionPolicy` against `"<tool id> <target>"` before the handler runs. Denied calls never execute. Results carry an `executed` flag, so "ran and failed" is distinct from "never allowed".
+- **Rejected for v0.5:** provider-supplied or plugin tools, model-initiated tool calls, in-process timeouts, process/network/write side effects (refused at registration), shared broadcast bus invocation, and a second permission system.
+- **Consequence:** PR #12 is not merged as-is. Its tier-denial and dry-run logic is reused in a rewrite on `main`.
