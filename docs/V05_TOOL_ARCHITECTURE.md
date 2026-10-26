@@ -1,6 +1,6 @@
 # v0.5 Permissioned Tools: Architecture Proposal
 
-Status: PROPOSED, WAITING_FOR_OWNER. No implementation has started beyond this document.
+Status: APPROVED by owner (design gate closed). Implementation proceeds in the phases in section 8. No implementation exists in this document's PR.
 Scope: the smallest tool architecture that lets CIPHER run owner-requested, permission-gated actions, without giving the assistant unrestricted control.
 
 Baseline verified on `main` at `206b8b7` (PRs #1, #2, #14, #15, #16 merged). `main` CI run 40278596961: Windows, Ubuntu and Python all success.
@@ -183,8 +183,8 @@ Proposed issues, opened only after owner approval of this design:
 1. **Design review** (this document). Owner decisions required.
 2. **Registry and lifecycle.** New library on `main`. Registration rules, lifecycle, audit, dry-run. Built-in tools `time.now`, `system.info`. Tests: each denial path, byte-identical file where a file is involved, duplicate and empty ID rejection, handler exception becomes `Failed` with `executed = true`.
 3. **Owner command.** `tool list`, `tool <id> [args]`, `tool log`. Tests cover the REPL path and existing commands unchanged.
-4. **Read-only filesystem.** `filesystem.read` under an allowlisted root, canonical path, symlink and junction rejection on Windows, size bound. Tests use a temp directory and a traversal attempt.
-5. **Owner confirmation for Ask tier.** Optional for v0.5. Needed before any write tool.
+4. **Read-only filesystem.** `filesystem.read` under an allowlisted root, canonical path, symlink and junction rejection on Windows, size bound. Tests use a temp directory and a traversal attempt. Kept in v0.5 (owner decision 4).
+5. **Owner confirmation for Ask tier.** Kept in v0.5 (owner decision 5). Only explicit owner `yes` runs an `Ask` tool; no write tool is added.
 
 Each phase is its own PR, stacked as needed, with CI verified on the exact SHA.
 
@@ -197,14 +197,14 @@ Each phase is its own PR, stacked as needed, with CI verified on the exact SHA.
 - **Single backend pointer** remains; tool results are not sent to a provider in v0.5. Feeding results back into model context is a later decision that needs its own privacy review.
 - **Owner confirmation** (phase 5) may be needed sooner if the owner wants `Ask` tools in v0.5.
 
-## 10. Owner decisions required
+## 10. Owner decisions (all APPROVED)
 
-1. Approve the architecture in sections 2–3 (tool ID, built-in-only registry, lifecycle, result shape, audit fields).
-2. Approve the initial safe-tool list in section 4, or change it.
-3. Approve the PR #12 recommendation (rewrite on `main`, keep parked until approved; close or keep as history).
-4. Confirm that filesystem read (phase 4) is in v0.5, or defer it to v0.6.
-5. Confirm that owner confirmation for `Ask` tools (phase 5) is in v0.5, or defer it.
-6. Confirm the audit scope in 2.6 (session-only, no argument or output storage).
-7. Approve opening the implementation issues listed in section 7 after approval.
+1. **APPROVED:** architecture in sections 2–3 (tool ID, built-in-only registry, lifecycle, result shape, audit fields).
+2. **APPROVED:** initial safe-tool list `time.now`, `system.info`, `memory.list`.
+3. **APPROVED:** PR #12 is not resurrected as-is. Rewrite the useful concepts on current `main`, reusing outcome types, dry-run and useful tests. PR #12 is not merged.
+4. **APPROVED:** `filesystem.read` stays in v0.5 as a later phase (phase 4).
+5. **APPROVED:** owner confirmation for `Ask` tools stays in v0.5 (phase 5).
+6. **APPROVED:** audit is session-only. Record attempts including denials. Do not persist arguments or tool outputs.
+7. **APPROVED:** open the implementation issues listed in section 7.
 
 No implementation, no billed probes, and no runtime expansion are part of this package. Hermes remains deferred. Obsidian was not synced: the MCP connection is refused (ECONNREFUSED).
