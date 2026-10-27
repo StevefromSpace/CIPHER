@@ -109,6 +109,7 @@ endif()
 # ---------------------------------------------------------------------------
 add_library(cipher_tools
     src/tool_registry.cpp
+    src/tool_commands.cpp
 )
 target_include_directories(cipher_tools PUBLIC include)
 target_link_libraries(cipher_tools PUBLIC cipher_assistant cipher_core cipher_memory)
@@ -123,7 +124,7 @@ endif()
 # cipher  —  main executable
 # ---------------------------------------------------------------------------
 add_executable(cipher src/main.cpp)
-target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands)
+target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands cipher_tools)
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -168,4 +169,9 @@ if(BUILD_TESTING)
     add_executable(cipher_tool_registry_tests tests/test_tool_registry.cpp)
     target_link_libraries(cipher_tool_registry_tests PRIVATE cipher_tools)
     add_test(NAME cipher_tool_registry_tests COMMAND cipher_tool_registry_tests)
+
+    # v0.5 Phase 3: owner `tool` REPL commands.
+    add_executable(cipher_tool_commands_tests tests/test_tool_commands.cpp)
+    target_link_libraries(cipher_tool_commands_tests PRIVATE cipher_tools)
+    add_test(NAME cipher_tool_commands_tests COMMAND cipher_tool_commands_tests)
 endif()

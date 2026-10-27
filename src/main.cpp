@@ -2,6 +2,7 @@
 #include "cipher/config.hpp"
 #include "cipher/logger.hpp"
 #include "cipher/memory_commands.hpp"
+#include "cipher/tool_commands.hpp"
 
 #include <iostream>
 #include <string>
@@ -90,6 +91,9 @@ int main() {
         return 1;
     }
 
+    // Tools are offered input after memory and before the core, like memory.
+    cipher::ToolCommands tools(cfg.memory_file);
+
     std::cout << "CIPHER v" << cipher::CipherCore::version() << '\n';
     std::cout << "Contextual Intelligence Platform for Home, Enterprise & Research\n";
     std::cout << "Type 'help' to begin. This build runs locally and has no AI runtime.\n\n";
@@ -106,6 +110,12 @@ int main() {
         const cipher::MemoryCommandResult memory_reply = memory.execute(input);
         if (memory_reply.handled) {
             std::cout << memory_reply.text << '\n';
+            continue;
+        }
+
+        const cipher::ToolCommandResult tool_reply = tools.execute(input);
+        if (tool_reply.handled) {
+            std::cout << tool_reply.text << '\n';
             continue;
         }
 
