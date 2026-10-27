@@ -100,9 +100,16 @@ ToolResult ToolRegistry::invoke(const std::string& id, const std::string& target
 
     ActionDescriptor action{id, evaluated_target, definition.category, definition.default_tier};
     result.tier = policy_.evaluate(action);
-    if (result.tier == RiskTier::Ask || result.tier == RiskTier::Block) {
+    if (result.tier == RiskTier::Block) {
         result.outcome = ToolOutcome::Denied;
-        result.output = "Denied by permission policy (" + std::string(to_string(result.tier)) + "): " + id + ".";
+        result.output = "Denied by permission policy (block): " + id + ".";
+        record(id, evaluated_target, arguments.size(), result);
+        return result;
+    }
+    // Fail closed: without an owner confirmation callback, an Ask-tier call never runs.
+    if (result.tier == RiskTier::Ask && !(confirm_ && confirm_(definition, evaluated_target))) {
+        result.outcome = ToolOutcome::Denied;
+        result.output = "Owner confirmation was not given: " + id + ".";
         record(id, evaluated_target, arguments.size(), result);
         return result;
     }

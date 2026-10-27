@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace cipher {
@@ -100,8 +101,15 @@ public:
 
     /**
      * @brief Invokes a tool. Permission is evaluated on "<id> <target>" before any handler call.
+     *        An Ask-tier call runs only when the owner confirmation callback returns true.
      */
     ToolResult invoke(const std::string& id, const std::string& target, const std::string& arguments);
+
+    /**
+     * @brief Owner confirmation for Ask-tier tools. Returning false, or having no callback, denies the call.
+     */
+    using AskConfirmation = std::function<bool(const ToolDefinition& definition, const std::string& target)>;
+    void set_ask_confirmation(AskConfirmation confirmation) { confirm_ = std::move(confirmation); }
 
     void set_dry_run(bool enabled) noexcept { dry_run_ = enabled; }
     bool dry_run() const noexcept { return dry_run_; }
@@ -122,6 +130,7 @@ private:
 
     std::map<std::string, Entry> tools_;
     PermissionPolicy policy_;
+    AskConfirmation confirm_;
     bool dry_run_{false};
     std::uint64_t next_sequence_{1};
     std::string session_tag_;
