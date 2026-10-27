@@ -128,9 +128,10 @@ add_library(cipher_ollama
     src/loopback_http.cpp
     src/ollama_backend.cpp
     src/ask_commands.cpp
+    src/model_tool_loop.cpp
 )
 target_include_directories(cipher_ollama PUBLIC include)
-target_link_libraries(cipher_ollama PUBLIC cipher_assistant)
+target_link_libraries(cipher_ollama PUBLIC cipher_assistant cipher_tools)
 if(WIN32)
     target_link_libraries(cipher_ollama PRIVATE ws2_32)
 endif()
@@ -208,4 +209,8 @@ if(BUILD_TESTING)
     add_executable(cipher_ask_commands_tests tests/test_ask_commands.cpp)
     target_link_libraries(cipher_ask_commands_tests PRIVATE cipher_ollama)
     add_test(NAME cipher_ask_commands_tests COMMAND cipher_ask_commands_tests)
+
+    add_executable(cipher_model_tool_loop_tests tests/test_model_tool_loop.cpp)
+    target_link_libraries(cipher_model_tool_loop_tests PRIVATE cipher_ollama)
+    add_test(NAME cipher_model_tool_loop_tests COMMAND cipher_model_tool_loop_tests)
 endif()

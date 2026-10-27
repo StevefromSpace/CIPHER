@@ -114,8 +114,9 @@ v0.5 keeps the log in memory for the session. Persisting it to disk is deferred,
 
 ## 3. Security boundary (non-negotiable)
 
-- **No model-initiated tool calls in v0.5.** Only an owner-typed REPL command (`tool <id> [args]`) can invoke a tool. `request_tools = false` stays in `AssistantRequest`.
-- Providers never receive the tool list, and cannot register tools.
+- **Owner-typed calls and opt-in model-proposed calls.** An owner-typed REPL command (`tool <id> [args]`) can invoke any registered tool. A model may propose a call only when `model_tool_calls = true` and `ollama_port` is set (owner-directed amendment to the original "no model-initiated calls" rule). Each proposal needs the owner's exact `yes`, even for Safe tools, and must be on a fixed offered list (`time.now`, `system.info`). `memory.list` and `filesystem.read` are never offered to the model. `request_tools = false` stays in `AssistantRequest`.
+- Providers receive tool ids and descriptions only as prompt text built by the loop. They never receive a registry, never register tools, and never execute them. The CIPHER-side loop parses a strict `TOOL_CALL: <id>` reply and runs the call itself.
+- Model-proposed calls use a separate registry, so `tool log` shows owner calls only. The audit record has no origin field yet; that is a known gap.
 - Every invocation passes through the policy **before** the handler is called.
 - Denied calls: zero handler calls, no partial mutation, a clear diagnostic. Tested by byte-identical file checks, as with the memory gate.
 - No shell, no arbitrary process execution, no network, no filesystem writes in v0.5. These are refused at registration, not just by policy.

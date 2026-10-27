@@ -154,6 +154,13 @@ ConfigResult parse_lines(std::istream& stream) {
                 result.config.ollama_port = port;
             }
 
+        } else if (key == "model_tool_calls") {
+            if (value != "true" && value != "false") {
+                result.errors.push_back({line_number, "Invalid model_tool_calls '" + value + "'. Use true or false."});
+            } else {
+                result.config.model_tool_calls = value == "true";
+            }
+
         } else {
             // Reject unknown keys so that misspelled settings are visible.
             result.errors.push_back({
@@ -204,6 +211,7 @@ Config ConfigParser::defaults() noexcept {
     cfg.memory_file = "";
     cfg.filesystem_read_root = "";
     cfg.ollama_port = 0;
+    cfg.model_tool_calls = false;
     return cfg;
 }
 

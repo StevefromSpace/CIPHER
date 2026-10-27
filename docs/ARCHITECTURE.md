@@ -162,7 +162,7 @@ adapters do not change that: their live routes remain disabled or fail closed un
 their explicit gates and evidence requirements are met.
 
 Not implemented yet (planned for future milestones):
-- Model-facing tool calls and tool-output feedback to the model
+- Model-facing tool calls beyond `time.now` and `system.info` (memory and file tools are not offered to the model)
 - Memory-to-provider privacy design (no memory is sent to any provider)
 - In-process local model runtime (the Ollama backend uses an external server)
 - Persistent-memory permission gating (REPL commands and `memory_file` configuration are implemented)

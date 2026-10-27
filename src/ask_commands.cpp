@@ -1,4 +1,5 @@
 #include "cipher/ask_commands.hpp"
+#include "cipher/model_tool_loop.hpp"
 
 namespace cipher {
 
@@ -13,8 +14,8 @@ std::string trim(const std::string& text) {
 
 } // namespace
 
-AskCommands::AskCommands(IAssistantBackend* backend, double timeout_seconds)
-    : backend_(backend), timeout_seconds_(timeout_seconds) {}
+AskCommands::AskCommands(IAssistantBackend* backend, double timeout_seconds, ModelToolLoop* tool_loop)
+    : backend_(backend), timeout_seconds_(timeout_seconds), tool_loop_(tool_loop) {}
 
 AskCommandResult AskCommands::execute(const std::string& input) {
     const std::string line = trim(input);
@@ -33,6 +34,11 @@ AskCommandResult AskCommands::execute(const std::string& input) {
     const std::string prompt = trim(line.substr(3));
     if (prompt.empty()) {
         result.text = "Usage: ask <question>";
+        return result;
+    }
+
+    if (tool_loop_ != nullptr) {
+        result.text = tool_loop_->run(prompt);
         return result;
     }
 
