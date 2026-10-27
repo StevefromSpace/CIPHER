@@ -110,6 +110,7 @@ endif()
 add_library(cipher_tools
     src/tool_registry.cpp
     src/tool_commands.cpp
+    src/filesystem_tools.cpp
 )
 target_include_directories(cipher_tools PUBLIC include)
 target_link_libraries(cipher_tools PUBLIC cipher_assistant cipher_core cipher_memory)
@@ -174,4 +175,9 @@ if(BUILD_TESTING)
     add_executable(cipher_tool_commands_tests tests/test_tool_commands.cpp)
     target_link_libraries(cipher_tool_commands_tests PRIVATE cipher_tools)
     add_test(NAME cipher_tool_commands_tests COMMAND cipher_tool_commands_tests)
+
+    # v0.5 Phase 4: read-only filesystem.read under an allowlisted root.
+    add_executable(cipher_filesystem_tools_tests tests/test_filesystem_tools.cpp)
+    target_link_libraries(cipher_filesystem_tools_tests PRIVATE cipher_tools)
+    add_test(NAME cipher_filesystem_tools_tests COMMAND cipher_filesystem_tools_tests)
 endif()

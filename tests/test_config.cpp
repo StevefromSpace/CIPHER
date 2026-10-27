@@ -168,6 +168,18 @@ static void test_memory_file_defaults_to_disabled() {
           "Expected empty memory_file when the key is absent");
 }
 
+static void test_filesystem_read_root_defaults_to_unavailable() {
+    check(cipher::ConfigParser::defaults().filesystem_read_root.empty(),
+          "filesystem_read_root default: filesystem.read is not registered",
+          "Expected empty filesystem_read_root in defaults");
+
+    const cipher::ConfigResult r =
+        cipher::ConfigParser::load_from_string("filesystem_read_root = notes\n");
+    check(r.ok() && r.config.filesystem_read_root == "notes",
+          "filesystem_read_root: root is stored",
+          "Expected filesystem_read_root 'notes'");
+}
+
 static void test_load_from_string_unknown_key() {
     const cipher::ConfigResult r =
         cipher::ConfigParser::load_from_string("unknown_key = something\n");
@@ -373,6 +385,7 @@ int main() {
     test_load_from_string_log_file_empty_value();
     test_load_from_string_memory_file();
     test_memory_file_defaults_to_disabled();
+    test_filesystem_read_root_defaults_to_unavailable();
     test_load_from_string_unknown_key();
     test_load_from_string_invalid_log_level();
     test_load_from_string_no_equals();

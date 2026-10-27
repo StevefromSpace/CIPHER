@@ -41,6 +41,11 @@ enum class ToolOutcome {
  */
 using ToolHandler = std::function<std::string(const std::string& arguments)>;
 
+/**
+ * @brief Maps arguments to the policy target (for example a canonical path). Throwing denies the call.
+ */
+using TargetResolver = std::function<std::string(const std::string& arguments)>;
+
 struct ToolDefinition {
     std::string id;
     std::string description;
@@ -48,6 +53,8 @@ struct ToolDefinition {
     RiskTier default_tier{RiskTier::Ask};
     SideEffect side_effects{SideEffect::None};
     ToolHandler handler;
+    /// Optional. When set, the policy target is the resolver's result, not the caller's target.
+    TargetResolver resolve_target;
 };
 
 struct ToolResult {

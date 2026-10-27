@@ -85,19 +85,32 @@ ToolResult ToolRegistry::invoke(const std::string& id, const std::string& target
     }
 
     const ToolDefinition& definition = found->second.definition;
-    ActionDescriptor action{id, target, definition.category, definition.default_tier};
+    std::string evaluated_target = target;
+    if (definition.resolve_target) {
+        try {
+            evaluated_target = definition.resolve_target(arguments);
+        } catch (const std::exception& error) {
+            // Fail closed: an argument that cannot be resolved never reaches the policy or the handler.
+            result.outcome = ToolOutcome::Denied;
+            result.output = error.what();
+            record(id, "", arguments.size(), result);
+            return result;
+        }
+    }
+
+    ActionDescriptor action{id, evaluated_target, definition.category, definition.default_tier};
     result.tier = policy_.evaluate(action);
     if (result.tier == RiskTier::Ask || result.tier == RiskTier::Block) {
         result.outcome = ToolOutcome::Denied;
         result.output = "Denied by permission policy (" + std::string(to_string(result.tier)) + "): " + id + ".";
-        record(id, target, arguments.size(), result);
+        record(id, evaluated_target, arguments.size(), result);
         return result;
     }
 
     if (dry_run_) {
         result.outcome = ToolOutcome::DryRun;
         result.output = "Dry run: " + id + " was not executed.";
-        record(id, target, arguments.size(), result);
+        record(id, evaluated_target, arguments.size(), result);
         return result;
     }
 
@@ -112,7 +125,7 @@ ToolResult ToolRegistry::invoke(const std::string& id, const std::string& target
         result.outcome = ToolOutcome::Failed;
         result.output = "Unknown error";
     }
-    record(id, target, arguments.size(), result);
+    record(id, evaluated_target, arguments.size(), result);
     return result;
 }
 

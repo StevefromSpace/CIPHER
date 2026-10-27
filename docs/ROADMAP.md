@@ -14,7 +14,7 @@ Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → 
 | v0.2.1 version consistency | COMPLETE | None |
 | v0.3 persistent memory foundation | IMPLEMENTED, OWNER REVIEW OPEN | Permission gate implemented on PR #14 (`69e2ee6`, Draft, base `feat/repl-memory-commands`). `remember`/`forget` default to `Monitor`; denied operations leave the memory file byte-identical. Not merged; owner review (WAITING_FOR_OWNER). |
 | v0.4 replaceable AI runtime interface | CURRENT (no-model verification) | No-model verification suite on PR #15 (`9047f13`, Draft, base PR #14 branch): core, memory and provider layer with no provider attached. The `llama.cpp` or embedded-model prototype is out of scope until owner decision (WAITING_FOR_OWNER). |
-| v0.5 permissioned tools | APPROVED DESIGN, IMPLEMENTATION NOT STARTED | Design `docs/V05_TOOL_ARCHITECTURE.md` (ADR 18 Accepted). All seven owner decisions approved. PR #12 not merged; rewrite on `main` in implementation phases. |
+| v0.5 permissioned tools | IN PROGRESS | Design `docs/V05_TOOL_ARCHITECTURE.md` (ADR 18 Accepted). Phases 1–3 merged (PR #19 registry and built-in tools, PR #20 owner `tool` commands). Phase 4 `filesystem.read` on PR for `feat/v05-filesystem-read` (not merged, owner review). Phase 5 owner confirmation for Ask tier not started. PR #12 not merged; rewrite on `main` in implementation phases. |
 
 ### Milestone dependencies
 
@@ -163,11 +163,14 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
 - [ ] Prototype direct in-process local runtime adapter (e.g., `llama.cpp` or embedded model) when local inference milestone begins.
 - [ ] Keep the core useful when no model or assistant is available (verification not yet done; see Milestone Status).
 
-### v0.5: Permissioned tools (NOT STARTED)
+### v0.5: Permissioned tools (IN PROGRESS)
 
 - Introduce a tool registry, explicit permissions, action logs, and dry-run mode.
 - Begin with safe read-only tools before allowing changes.
-- Not started. PR #12 (tool registry slice, draft, parked) will be reassessed against the completed v0.2–v0.4 work when this milestone begins.
+- Merged: Phases 1–3 (PR #19 registry, `time.now`, `system.info`, `memory.list`; PR #20 owner `tool list`, `tool <id>`, `tool log`).
+- In review: Phase 4 read-only `filesystem.read` under `filesystem_read_root`.
+- Not started: Phase 5 owner confirmation for the Ask tier. PR #12 is not merged and is untouched; the owner decides its disposition.
+- Note: this milestone started before the v0.3 and v0.4 owner-review gates closed. That was an explicit owner direction (2026-10-27).
 
 ### Later: voice, interfaces, planning, learning, and self-improvement
 

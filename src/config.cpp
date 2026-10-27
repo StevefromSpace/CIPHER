@@ -126,6 +126,10 @@ ConfigResult parse_lines(std::istream& stream) {
             // load or save failures at runtime. An empty value disables memory.
             result.config.memory_file = value;
 
+        } else if (key == "filesystem_read_root") {
+            // Any non-empty string is accepted here. The tool checks the folder at call time.
+            result.config.filesystem_read_root = value;
+
         } else {
             // Reject unknown keys so that misspelled settings are visible.
             result.errors.push_back({
@@ -174,6 +178,7 @@ Config ConfigParser::defaults() noexcept {
     cfg.log_level = LogLevel::INFO;
     cfg.log_file  = "";
     cfg.memory_file = "";
+    cfg.filesystem_read_root = "";
     return cfg;
 }
 

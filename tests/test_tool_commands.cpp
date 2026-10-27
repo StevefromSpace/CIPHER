@@ -55,7 +55,7 @@ int main() {
 
     // --- routing -----------------------------------------------------------
     {
-        cipher::ToolCommands tools("");
+        cipher::ToolCommands tools("", "");
         check(!tools.execute("time").handled, "routing: non-tool word is not handled",
               "expected 'time' to pass through to the core");
         check(!tools.execute("toolbox list").handled, "routing: prefix of 'tool' is not handled",
@@ -66,7 +66,7 @@ int main() {
 
     // --- usage and list ----------------------------------------------------
     {
-        cipher::ToolCommands tools("");
+        cipher::ToolCommands tools("", "");
         const cipher::ToolCommandResult usage = tools.execute("tool");
         check(usage.handled && contains(usage.text, "tool list") && contains(usage.text, "tool log"),
               "usage: bare tool shows usage", "usage text missing: " + usage.text);
@@ -80,14 +80,14 @@ int main() {
     }
 
     {
-        cipher::ToolCommands tools(memory_path);
+        cipher::ToolCommands tools(memory_path, "");
         check(contains(tools.execute("tool list").text, "memory.list  [monitor]"),
               "list: memory.list registered when memory_file is set", "memory.list missing");
     }
 
     // --- invocation --------------------------------------------------------
     {
-        cipher::ToolCommands tools("");
+        cipher::ToolCommands tools("", "");
         const cipher::ToolCommandResult timed = tools.execute("tool time.now");
         check(timed.handled && contains(timed.text, "time.now: Completed (tier safe, executed)"),
               "invoke: time.now completes and is marked executed", timed.text);
@@ -98,7 +98,7 @@ int main() {
     }
 
     {
-        cipher::ToolCommands tools(memory_path);
+        cipher::ToolCommands tools(memory_path, "");
         const cipher::ToolCommandResult listed = tools.execute("tool memory.list");
         check(contains(listed.text, "alpha") && !contains(listed.text, "SECRET-BODY-TEXT"),
               "invoke: memory.list shows IDs only", listed.text);
@@ -106,7 +106,7 @@ int main() {
 
     // --- permission denial: handler must not run ----------------------------
     {
-        cipher::ToolCommands tools("");
+        cipher::ToolCommands tools("", "");
         tools.registry().policy().add_blacklist_pattern("time.now*");
         const cipher::ToolCommandResult denied = tools.execute("tool time.now");
         check(contains(denied.text, "Denied") && contains(denied.text, "not executed"),
@@ -117,7 +117,7 @@ int main() {
 
     // --- log: attempts recorded, arguments and output never shown -----------
     {
-        cipher::ToolCommands tools("");
+        cipher::ToolCommands tools("", "");
         check(contains(tools.execute("tool log").text, "No tool attempts this session."),
               "log: empty before any attempt", "expected empty-log message");
 
