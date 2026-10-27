@@ -29,6 +29,19 @@
 namespace cipher {
 namespace {
 
+// Accepts only plain decimal digits in 1-65535, so "+80" or "80x" are rejected.
+bool parse_port(const std::string& text, int& out) {
+    if (text.empty() || text.size() > 5) return false;
+    int value = 0;
+    for (const char c : text) {
+        if (c < '0' || c > '9') return false;
+        value = value * 10 + (c - '0');
+    }
+    if (value < 1 || value > 65535) return false;
+    out = value;
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // trim
 // Removes leading and trailing ASCII whitespace from a string.
@@ -130,6 +143,17 @@ ConfigResult parse_lines(std::istream& stream) {
             // Any non-empty string is accepted here. The tool checks the folder at call time.
             result.config.filesystem_read_root = value;
 
+        } else if (key == "ollama_port") {
+            int port = 0;
+            if (!parse_port(value, port)) {
+                result.errors.push_back({
+                    line_number,
+                    "Invalid ollama_port '" + value + "'. Use a number from 1 to 65535."
+                });
+            } else {
+                result.config.ollama_port = port;
+            }
+
         } else {
             // Reject unknown keys so that misspelled settings are visible.
             result.errors.push_back({
@@ -179,6 +203,7 @@ Config ConfigParser::defaults() noexcept {
     cfg.log_file  = "";
     cfg.memory_file = "";
     cfg.filesystem_read_root = "";
+    cfg.ollama_port = 0;
     return cfg;
 }
 

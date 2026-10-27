@@ -43,6 +43,7 @@ bool ensure_winsock() {
     return initialized;
 }
 
+// shortcut: the timeout applies to each send/recv, not the whole request, so a slow trickle can exceed it; upgrade to a total deadline before any non-owner caller.
 void set_socket_timeouts(SocketHandle sock, double timeout_seconds) {
     const DWORD millis = static_cast<DWORD>(timeout_seconds * 1000.0);
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&millis), sizeof(millis));
@@ -58,6 +59,7 @@ bool is_timeout_error() { return errno == EAGAIN || errno == EWOULDBLOCK; }
 
 bool ensure_winsock() { return true; }
 
+// shortcut: the timeout applies to each send/recv, not the whole request, so a slow trickle can exceed it; upgrade to a total deadline before any non-owner caller.
 void set_socket_timeouts(SocketHandle sock, double timeout_seconds) {
     timeval tv{};
     tv.tv_sec = static_cast<long>(timeout_seconds);

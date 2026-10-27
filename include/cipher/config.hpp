@@ -23,6 +23,7 @@
 //   log_file    — path to an optional log file        (default: empty = stderr only)
 //   memory_file — path to the persistent memory file  (default: empty = memory disabled)
 //   filesystem_read_root — folder that filesystem.read may read from (default: empty = tool unavailable)
+//   ollama_port — 127.0.0.1 port of a local Ollama server for the `ask` command (default: 0 = disabled)
 //
 // What is NOT stored here:
 //   Passwords, API keys, tokens, or any other secrets.  The example file
@@ -63,6 +64,7 @@ struct Config {
     std::string log_file;                    // Empty = stderr only
     std::string memory_file;                 // Empty = memory commands disabled
     std::string filesystem_read_root;        // Empty = filesystem.read not registered
+    int         ollama_port = 0;             // 0 = `ask` disabled; otherwise 1-65535
 };
 
 // ---------------------------------------------------------------------------
