@@ -102,3 +102,14 @@ log_level = info
 # Default: 0 (disabled)
 # ---------------------------------------------------------------------------
 # ollama_port = 11434
+
+# ---------------------------------------------------------------------------
+# model_tool_calls
+#
+# true lets a model reply with `TOOL_CALL: time.now` or `TOOL_CALL: system.info`
+# during `ask`. Each proposed call needs you to type exactly `yes`. Memory and
+# file tools are never offered to the model. Effective only when ollama_port is set.
+#
+# Default: false
+# ---------------------------------------------------------------------------
+# model_tool_calls = false

@@ -207,6 +207,22 @@ static void test_ollama_port_rejects_invalid_values() {
     }
 }
 
+static void test_model_tool_calls_defaults_off_and_parses_bool() {
+    check(!cipher::ConfigParser::defaults().model_tool_calls,
+          "model_tool_calls default: off",
+          "Expected model_tool_calls false in defaults");
+
+    const cipher::ConfigResult on = cipher::ConfigParser::load_from_string("model_tool_calls = true\n");
+    check(on.ok() && on.config.model_tool_calls,
+          "model_tool_calls: true is stored",
+          "Expected model_tool_calls true");
+
+    const cipher::ConfigResult bad = cipher::ConfigParser::load_from_string("model_tool_calls = yes\n");
+    check(!bad.ok() && bad.errors[0].line == 1 && !bad.config.model_tool_calls,
+          "model_tool_calls: only true or false is accepted",
+          "Expected an error on line 1 for 'yes'");
+}
+
 static void test_load_from_string_unknown_key() {
     const cipher::ConfigResult r =
         cipher::ConfigParser::load_from_string("unknown_key = something\n");
@@ -415,6 +431,7 @@ int main() {
     test_filesystem_read_root_defaults_to_unavailable();
     test_ollama_port_defaults_to_disabled_and_parses_valid_ports();
     test_ollama_port_rejects_invalid_values();
+    test_model_tool_calls_defaults_off_and_parses_bool();
     test_load_from_string_unknown_key();
     test_load_from_string_invalid_log_level();
     test_load_from_string_no_equals();
