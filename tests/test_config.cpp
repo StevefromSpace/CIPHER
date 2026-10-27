@@ -180,6 +180,33 @@ static void test_filesystem_read_root_defaults_to_unavailable() {
           "Expected filesystem_read_root 'notes'");
 }
 
+static void test_ollama_port_defaults_to_disabled_and_parses_valid_ports() {
+    check(cipher::ConfigParser::defaults().ollama_port == 0,
+          "ollama_port default: ask is disabled",
+          "Expected ollama_port 0 in defaults");
+
+    const cipher::ConfigResult r = cipher::ConfigParser::load_from_string("ollama_port = 11434\n");
+    check(r.ok() && r.config.ollama_port == 11434,
+          "ollama_port: valid port is stored",
+          "Expected ollama_port 11434");
+
+    const cipher::ConfigResult high = cipher::ConfigParser::load_from_string("ollama_port = 65535\n");
+    check(high.ok() && high.config.ollama_port == 65535,
+          "ollama_port: 65535 is accepted",
+          "Expected ollama_port 65535");
+}
+
+static void test_ollama_port_rejects_invalid_values() {
+    const char* bad[] = {"ollama_port = 0\n", "ollama_port = 65536\n", "ollama_port = +80\n",
+                         "ollama_port = 80x\n", "ollama_port = abc\n", "ollama_port =\n"};
+    for (const char* text : bad) {
+        const cipher::ConfigResult r = cipher::ConfigParser::load_from_string(text);
+        check(!r.ok() && r.errors[0].line == 1 && r.config.ollama_port == 0,
+              std::string("ollama_port: rejected ") + text,
+              "Expected an error on line 1 and port 0 for: " + std::string(text));
+    }
+}
+
 static void test_load_from_string_unknown_key() {
     const cipher::ConfigResult r =
         cipher::ConfigParser::load_from_string("unknown_key = something\n");
@@ -386,6 +413,8 @@ int main() {
     test_load_from_string_memory_file();
     test_memory_file_defaults_to_disabled();
     test_filesystem_read_root_defaults_to_unavailable();
+    test_ollama_port_defaults_to_disabled_and_parses_valid_ports();
+    test_ollama_port_rejects_invalid_values();
     test_load_from_string_unknown_key();
     test_load_from_string_invalid_log_level();
     test_load_from_string_no_equals();

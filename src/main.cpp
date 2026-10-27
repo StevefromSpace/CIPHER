@@ -1,10 +1,13 @@
+#include "cipher/ask_commands.hpp"
 #include "cipher/cipher_core.hpp"
 #include "cipher/config.hpp"
 #include "cipher/logger.hpp"
 #include "cipher/memory_commands.hpp"
+#include "cipher/ollama_backend.hpp"
 #include "cipher/tool_commands.hpp"
 
 #include <iostream>
+#include <memory>
 #include <string>
 
 // ---------------------------------------------------------------------------
@@ -94,9 +97,18 @@ int main() {
     // Tools are offered input after memory and before the core, like memory.
     cipher::ToolCommands tools(cfg.memory_file, cfg.filesystem_read_root);
 
+    // The local Ollama backend is opt-in. With ollama_port unset, `ask` reports that it is disabled.
+    std::unique_ptr<cipher::OllamaBackend> ollama;
+    if (cfg.ollama_port != 0) {
+        cipher::OllamaConfig ollama_config;
+        ollama_config.port = cfg.ollama_port;
+        ollama = std::make_unique<cipher::OllamaBackend>(ollama_config);
+    }
+    cipher::AskCommands ask(ollama.get());
+
     std::cout << "CIPHER v" << cipher::CipherCore::version() << '\n';
     std::cout << "Contextual Intelligence Platform for Home, Enterprise & Research\n";
-    std::cout << "Type 'help' to begin. This build runs locally and has no AI runtime.\n\n";
+    std::cout << "Type 'help' to begin. This build runs locally; `ask` needs ollama_port in cipher.conf.\n\n";
 
     std::string input;
     while (true) {
@@ -116,6 +128,12 @@ int main() {
         const cipher::ToolCommandResult tool_reply = tools.execute(input);
         if (tool_reply.handled) {
             std::cout << tool_reply.text << '\n';
+            continue;
+        }
+
+        const cipher::AskCommandResult ask_reply = ask.execute(input);
+        if (ask_reply.handled) {
+            std::cout << ask_reply.text << '\n';
             continue;
         }
 

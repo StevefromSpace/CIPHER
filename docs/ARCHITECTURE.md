@@ -155,13 +155,15 @@ etc.), guaranteeing that the startup banner, command outputs, and logs remain sy
 
 The C++ executable remains a single-process command-line program with
 configuration, diagnostic logging, and a standalone local persistent-memory
-library. It has no integrated model runtime, authentication system, sandbox, or
-system-control tools. The provider adapters do not change that: their live routes
-remain disabled or fail closed unless their explicit gates and evidence requirements
-are met.
+library. It has no model runtime enabled by default. An optional Ollama loopback
+backend is reachable only through the owner-typed `ask` command when `ollama_port`
+is set. It has no authentication system, sandbox, or system-control tools. The provider
+adapters do not change that: their live routes remain disabled or fail closed unless
+their explicit gates and evidence requirements are met.
 
 Not implemented yet (planned for future milestones):
-- Permissioned tool registry (v0.5)
-- Direct in-process local model runtime
+- Model-facing tool calls and tool-output feedback to the model
+- Memory-to-provider privacy design (no memory is sent to any provider)
+- In-process local model runtime (the Ollama backend uses an external server)
 - Persistent-memory permission gating (REPL commands and `memory_file` configuration are implemented)
 - Voice and alternative interfaces (later)

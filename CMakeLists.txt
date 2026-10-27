@@ -122,11 +122,12 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# cipher_ollama  —  loopback HTTP client and Ollama assistant backend (v0.5 Step 1)
+# cipher_ollama  —  loopback HTTP client, Ollama assistant backend, and `ask` command
 # ---------------------------------------------------------------------------
 add_library(cipher_ollama
     src/loopback_http.cpp
     src/ollama_backend.cpp
+    src/ask_commands.cpp
 )
 target_include_directories(cipher_ollama PUBLIC include)
 target_link_libraries(cipher_ollama PUBLIC cipher_assistant)
@@ -144,7 +145,7 @@ endif()
 # cipher  —  main executable
 # ---------------------------------------------------------------------------
 add_executable(cipher src/main.cpp)
-target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands cipher_tools)
+target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands cipher_tools cipher_ollama)
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -203,4 +204,8 @@ if(BUILD_TESTING)
     add_executable(cipher_ollama_tests tests/test_ollama_backend.cpp)
     target_link_libraries(cipher_ollama_tests PRIVATE cipher_ollama)
     add_test(NAME cipher_ollama_tests COMMAND cipher_ollama_tests)
+
+    add_executable(cipher_ask_commands_tests tests/test_ask_commands.cpp)
+    target_link_libraries(cipher_ask_commands_tests PRIVATE cipher_ollama)
+    add_test(NAME cipher_ask_commands_tests COMMAND cipher_ask_commands_tests)
 endif()

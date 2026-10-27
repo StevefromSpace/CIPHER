@@ -90,3 +90,15 @@ log_level = info
 # Default: (empty — filesystem.read not available)
 # ---------------------------------------------------------------------------
 # filesystem_read_root = C:/Users/you/Documents/notes
+
+# ---------------------------------------------------------------------------
+# ollama_port
+#
+# Optional port of a local Ollama server on 127.0.0.1. Enables the owner-typed
+# `ask <question>` command. CIPHER only sends to 127.0.0.1 and refuses to send
+# if the route is not verified local. Ask sends the typed text only: no memory,
+# no tools.
+#
+# Default: 0 (disabled)
+# ---------------------------------------------------------------------------
+# ollama_port = 11434
