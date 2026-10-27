@@ -25,25 +25,6 @@ bool is_valid_tool_id(const std::string& id) {
     return true;
 }
 
-// Local wall-clock time as "YYYY-MM-DD HH:MM:SS". Mirrors the core format;
-// duplicated because cipher_core keeps its helper private.
-std::string local_time_text() {
-    const std::time_t now = std::time(nullptr);
-    std::tm local_tm{};
-#if defined(_WIN32)
-    if (localtime_s(&local_tm, &now) != 0) {
-        return "The local system time is unavailable.";
-    }
-#else
-    if (localtime_r(&now, &local_tm) == nullptr) {
-        return "The local system time is unavailable.";
-    }
-#endif
-    char buffer[32];
-    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &local_tm);
-    return buffer;
-}
-
 std::string make_session_tag() {
     std::random_device device;
     const std::uint32_t value = device();
@@ -86,6 +67,11 @@ std::vector<std::string> ToolRegistry::tool_ids() const {
         ids.push_back(item.first);
     }
     return ids;
+}
+
+const ToolDefinition* ToolRegistry::find(const std::string& id) const {
+    const auto found = tools_.find(id);
+    return found == tools_.end() ? nullptr : &found->second.definition;
 }
 
 ToolResult ToolRegistry::invoke(const std::string& id, const std::string& target, const std::string& arguments) {
@@ -144,6 +130,22 @@ void ToolRegistry::record(const std::string& id, const std::string& target, std:
     audit_.push_back(entry);
 }
 
+std::string format_local_time(std::time_t when) {
+    std::tm local_tm{};
+#if defined(_WIN32)
+    if (localtime_s(&local_tm, &when) != 0) {
+        return "The local system time is unavailable.";
+    }
+#else
+    if (localtime_r(&when, &local_tm) == nullptr) {
+        return "The local system time is unavailable.";
+    }
+#endif
+    char buffer[32];
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &local_tm);
+    return buffer;
+}
+
 void register_builtin_tools(ToolRegistry& registry) {
     registry.register_tool(ToolDefinition{
         "time.now",
@@ -151,7 +153,7 @@ void register_builtin_tools(ToolRegistry& registry) {
         "system",
         RiskTier::Safe,
         SideEffect::None,
-        [](const std::string&) { return local_time_text(); }});
+        [](const std::string&) { return format_local_time(std::time(nullptr)); }});
 
     registry.register_tool(ToolDefinition{
         "system.info",

@@ -74,6 +74,11 @@ struct AuditRecord {
 };
 
 /**
+ * @brief Local wall-clock time as "YYYY-MM-DD HH:MM:SS".
+ */
+std::string format_local_time(std::time_t when);
+
+/**
  * @brief Static, built-in-only tool registry gated by the existing PermissionPolicy.
  */
 class ToolRegistry {
@@ -97,6 +102,9 @@ public:
     PermissionPolicy& policy() noexcept { return policy_; }
     const std::vector<AuditRecord>& audit_log() const noexcept { return audit_; }
     std::vector<std::string> tool_ids() const;
+
+    /// Returns the registered definition, or nullptr for an unknown ID.
+    const ToolDefinition* find(const std::string& id) const;
 
 private:
     struct Entry {
