@@ -3,6 +3,7 @@
 
 #include "cipher/tool_registry.hpp"
 
+#include <iostream>
 #include <string>
 
 namespace cipher {
@@ -25,10 +26,18 @@ struct ToolCommandResult {
  *
  * `memory.list` is registered only when a memory file is configured, and `filesystem.read`
  * only when a filesystem root is configured, so the tool set matches what the owner can use.
+ *
+ * Ask-tier tools are confirmed on this REPL: the owner must type exactly `yes`. EOF or any
+ * other answer denies the call. The streams are parameters so tests can drive the prompt.
  */
 class ToolCommands {
 public:
-    ToolCommands(const std::string& memory_file_path, const std::string& filesystem_root_path);
+    ToolCommands(const std::string& memory_file_path, const std::string& filesystem_root_path,
+                 std::istream& answers = std::cin, std::ostream& prompts = std::cout);
+
+    // The registry's confirmation callback captures this object, so it must not be copied.
+    ToolCommands(const ToolCommands&) = delete;
+    ToolCommands& operator=(const ToolCommands&) = delete;
 
     ToolCommandResult execute(const std::string& input);
 
@@ -39,8 +48,11 @@ private:
     std::string list() const;
     std::string log() const;
     std::string invoke(const std::string& id, const std::string& arguments);
+    bool confirm(const ToolDefinition& definition, const std::string& target);
 
     ToolRegistry registry_;
+    std::istream& answers_;
+    std::ostream& prompts_;
 };
 
 } // namespace cipher

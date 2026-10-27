@@ -42,7 +42,9 @@ std::string outcome_name(ToolOutcome outcome) {
 
 } // namespace
 
-ToolCommands::ToolCommands(const std::string& memory_file_path, const std::string& filesystem_root_path) {
+ToolCommands::ToolCommands(const std::string& memory_file_path, const std::string& filesystem_root_path,
+                           std::istream& answers, std::ostream& prompts)
+    : answers_(answers), prompts_(prompts) {
     register_builtin_tools(registry_);
     if (!memory_file_path.empty()) {
         register_memory_tools(registry_, memory_file_path);
@@ -50,6 +52,9 @@ ToolCommands::ToolCommands(const std::string& memory_file_path, const std::strin
     if (!filesystem_root_path.empty()) {
         register_filesystem_tools(registry_, filesystem_root_path);
     }
+    registry_.set_ask_confirmation([this](const ToolDefinition& definition, const std::string& target) {
+        return confirm(definition, target);
+    });
 }
 
 ToolCommandResult ToolCommands::execute(const std::string& input) {
@@ -108,6 +113,19 @@ std::string ToolCommands::invoke(const std::string& id, const std::string& argum
     const ToolResult result = registry_.invoke(id, "", arguments);
     return id + ": " + outcome_name(result.outcome) + " (tier " + to_string(result.tier) +
            (result.executed ? ", executed)" : ", not executed)") + "\n" + result.output;
+}
+
+bool ToolCommands::confirm(const ToolDefinition& definition, const std::string& target) {
+    prompts_ << "Owner confirmation: run " << definition.id;
+    if (!target.empty()) {
+        prompts_ << " (" << target << ")";
+    }
+    prompts_ << "? Type yes to confirm: " << std::flush;
+    std::string answer;
+    if (!std::getline(answers_, answer)) {
+        return false;
+    }
+    return trim(answer) == "yes";
 }
 
 } // namespace cipher
