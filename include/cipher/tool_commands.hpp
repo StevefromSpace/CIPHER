@@ -23,12 +23,12 @@ struct ToolCommandResult {
  * Only the owner's typed input reaches this class. Providers and the core never call it.
  * Invocations pass through the registry's permission gate before any handler runs.
  *
- * `memory.list` is registered only when a memory file is configured, so the tool set
- * matches what the owner can actually use.
+ * `memory.list` is registered only when a memory file is configured, and `filesystem.read`
+ * only when a filesystem root is configured, so the tool set matches what the owner can use.
  */
 class ToolCommands {
 public:
-    explicit ToolCommands(const std::string& memory_file_path);
+    ToolCommands(const std::string& memory_file_path, const std::string& filesystem_root_path);
 
     ToolCommandResult execute(const std::string& input);
 

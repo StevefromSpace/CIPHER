@@ -92,7 +92,7 @@ int main() {
     }
 
     // Tools are offered input after memory and before the core, like memory.
-    cipher::ToolCommands tools(cfg.memory_file);
+    cipher::ToolCommands tools(cfg.memory_file, cfg.filesystem_read_root);
 
     std::cout << "CIPHER v" << cipher::CipherCore::version() << '\n';
     std::cout << "Contextual Intelligence Platform for Home, Enterprise & Research\n";

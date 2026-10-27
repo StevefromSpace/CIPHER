@@ -74,3 +74,19 @@ log_level = info
 # Default: (empty — memory commands disabled)
 # ---------------------------------------------------------------------------
 # memory_file = cipher_memory.txt
+
+
+# ---------------------------------------------------------------------------
+# filesystem_read_root
+#
+# Optional folder that the owner-only `tool filesystem.read <relative path>`
+# command may read from. Reads are read-only, limited to files under this
+# folder, and capped at 64 KiB. Paths with `..`, absolute paths, symlinks,
+# and junctions are refused.
+#
+# Do not point this at a folder that holds secrets (keys, tokens, password
+# stores) or at your whole home directory.
+#
+# Default: (empty — filesystem.read not available)
+# ---------------------------------------------------------------------------
+# filesystem_read_root = C:/Users/you/Documents/notes

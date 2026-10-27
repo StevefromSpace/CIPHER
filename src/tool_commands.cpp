@@ -1,5 +1,7 @@
 #include "cipher/tool_commands.hpp"
 
+#include "cipher/filesystem_tools.hpp"
+
 #include <string>
 
 namespace cipher {
@@ -40,10 +42,13 @@ std::string outcome_name(ToolOutcome outcome) {
 
 } // namespace
 
-ToolCommands::ToolCommands(const std::string& memory_file_path) {
+ToolCommands::ToolCommands(const std::string& memory_file_path, const std::string& filesystem_root_path) {
     register_builtin_tools(registry_);
     if (!memory_file_path.empty()) {
         register_memory_tools(registry_, memory_file_path);
+    }
+    if (!filesystem_root_path.empty()) {
+        register_filesystem_tools(registry_, filesystem_root_path);
     }
 }
 
