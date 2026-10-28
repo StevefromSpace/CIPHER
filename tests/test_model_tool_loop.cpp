@@ -569,7 +569,7 @@ void test_v1_memory_search_governed() {
         cipher::ModelToolLoop loop = h.make_loop(cipher::model_offered_tool_ids());
         const std::string text = loop.run("q");
         const bool leaked = contains(h.backend.prompts.size() > 1 ? h.backend.prompts[1] : "", "launch code");
-        check(h.confirmations == 1 && leaked == (denied == 0),
+        check(h.confirmations == 1 && h.last_target == "zebra" && leaked == (denied == 0),
               denied ? "v1 memory: deny policy hides entries from the model" : "v1 memory: search returns matches after yes",
               "text was: " + text);
     }

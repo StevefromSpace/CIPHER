@@ -257,9 +257,18 @@ void register_memory_tools(ToolRegistry& registry, const std::string& memory_fil
                 const RiskTier tier = memory_policy.evaluate(descriptor);
                 if (tier != RiskTier::Safe && tier != RiskTier::Monitor) continue;
                 if (++count > kMemorySearchMaxHits) break;
-                hits += entry.id + " [" + entry.category + "]: " + one_line_snippet(entry.content) + "\n";
+                hits += one_line_snippet(entry.id) + " [" + one_line_snippet(entry.category) + "]: " +
+                        one_line_snippet(entry.content) + "\n";
             }
             return hits.empty() ? std::string("No matching memory entries.") : hits;
+        },
+        // The owner sees the model-chosen keyword in the confirmation prompt.
+        [](const std::string& arguments) {
+            const std::string keyword = lowered(arguments);
+            if (keyword.empty() || keyword.size() > kMemorySearchMaxKeywordBytes) {
+                throw std::runtime_error("memory.search needs a keyword of 1 to 64 bytes.");
+            }
+            return keyword;
         }});
 
     registry.register_tool(ToolDefinition{

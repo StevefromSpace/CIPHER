@@ -122,7 +122,11 @@ constexpr std::size_t MAX_LIST_ENTRIES = 100;
 // Names only (directories end in '/'). Symlinks, junctions and CIPHER's private files are left out.
 std::string list_directory(const fs::path& directory, const std::vector<std::string>& private_files) {
     std::vector<std::string> names;
-    for (const fs::directory_entry& entry : fs::directory_iterator(directory)) {
+    std::error_code open_error;
+    fs::directory_iterator iterator(directory, open_error);
+    // Fixed message: a filesystem_error would embed the absolute root path.
+    if (open_error) throw std::runtime_error("filesystem.list: the folder could not be read.");
+    for (const fs::directory_entry& entry : iterator) {
         if (is_reparse_point_or_symlink(entry.path())) continue;
         std::error_code error;
         const bool is_dir = entry.is_directory(error);
