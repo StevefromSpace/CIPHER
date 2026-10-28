@@ -161,6 +161,13 @@ ConfigResult parse_lines(std::istream& stream) {
                 result.config.model_tool_calls = value == "true";
             }
 
+        } else if (key == "memory_deny") {
+            if (value.empty()) {
+                result.errors.push_back({line_number, "memory_deny needs a pattern, for example 'share *'."});
+            } else {
+                result.config.memory_deny.push_back(value);
+            }
+
         } else {
             // Reject unknown keys so that misspelled settings are visible.
             result.errors.push_back({

@@ -157,6 +157,21 @@ static void test_load_from_string_memory_file() {
           "Expected 'notes/memory.txt'");
 }
 
+static void test_memory_deny_collects_patterns() {
+    check(cipher::ConfigParser::defaults().memory_deny.empty(),
+          "memory_deny default: no patterns", "Expected no memory_deny patterns in defaults");
+
+    const cipher::ConfigResult r = cipher::ConfigParser::load_from_string(
+        "memory_deny = share *\nmemory_deny = *secret\n");
+    check(r.ok() && r.config.memory_deny.size() == 2 && r.config.memory_deny[0] == "share *" &&
+              r.config.memory_deny[1] == "*secret",
+          "memory_deny: each line adds a pattern in order", "Patterns were not stored");
+
+    const cipher::ConfigResult empty = cipher::ConfigParser::load_from_string("memory_deny =\n");
+    check(!empty.ok() && empty.config.memory_deny.empty(),
+          "memory_deny: empty pattern is rejected", "Expected an error for an empty pattern");
+}
+
 static void test_memory_file_defaults_to_disabled() {
     check(cipher::ConfigParser::defaults().memory_file.empty(),
           "memory_file default: memory is disabled",
