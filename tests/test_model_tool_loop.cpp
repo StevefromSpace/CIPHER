@@ -537,6 +537,17 @@ void test_v1_recovery_after_refused_path() {
           "v1 recovery: a refused call is reported and the model may correct itself", "text was: " + text);
 }
 
+void test_v1_malformed_reply_gets_correction() {
+    Harness h;
+    h.backend.replies = {"TOOL_CALL: time.now\nTOOL_CALL: system.info", "TOOL_CALL: time.now", "It is noon."};
+    cipher::register_builtin_tools(h.registry);
+    cipher::ModelToolLoop loop = h.make_loop(cipher::model_offered_tool_ids());
+    const std::string text = loop.run("q");
+    check(starts_with(text, "It is noon.") && h.backend.prompts.size() == 3 &&
+              contains(h.backend.prompts[1], "not one valid tool request") && h.registry.audit_log().size() == 1,
+          "v1 malformed: a two-line reply is corrected and nothing from it runs", "text was: " + text);
+}
+
 void test_v1_repeat_failures_stop() {
     FsHarness h;
     h.backend.replies = {"TOOL_CALL: filesystem.read missing.txt"};
@@ -603,6 +614,7 @@ int main() {
     test_fs_read_through_llama_like_backend();
     test_v1_multi_step_list_then_read_with_trace();
     test_v1_recovery_after_refused_path();
+    test_v1_malformed_reply_gets_correction();
     test_v1_repeat_failures_stop();
     test_v1_list_refuses_escape();
     test_v1_memory_search_governed();
