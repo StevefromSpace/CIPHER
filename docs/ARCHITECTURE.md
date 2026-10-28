@@ -163,7 +163,7 @@ their explicit gates and evidence requirements are met.
 
 Not implemented yet (planned for future milestones):
 - Model-facing tool calls beyond `time.now` and `system.info` (memory and file tools are not offered to the model)
-- Memory-to-provider privacy design (no memory is sent to any provider)
+- Automatic memory retrieval into prompts (memory reaches a model only via owner-typed `ask --memory <id>`, local route only; see DECISIONS §20)
 - In-process local model runtime (the Ollama backend uses an external server)
 - Persistent-memory permission gating (REPL commands and `memory_file` configuration are implemented)
 - Voice and alternative interfaces (later)

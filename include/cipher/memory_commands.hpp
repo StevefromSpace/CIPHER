@@ -16,6 +16,8 @@
 //     never diverges from the file on disk.
 //   - remember and forget are gated by PermissionPolicy at RiskTier::Monitor.
 //     A denied action returns before any store change or file write.
+//   - share is the only way memory text leaves this class for a model. It is
+//     gated as action "share" and returns one owner-named entry.
 // ---------------------------------------------------------------------------
 
 #include "cipher/assistant_backend.hpp"
@@ -44,6 +46,9 @@ public:
     MemoryResult open();
 
     MemoryCommandResult execute(const std::string& input);
+
+    // For `ask --memory <id>`: true with the entry text in `out`, or false with the refusal in `out`.
+    bool share(const std::string& id, std::string& out) const;
 
 private:
     bool enabled() const noexcept { return !file_path_.empty(); }

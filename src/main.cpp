@@ -122,7 +122,7 @@ int main() {
     } else if (cfg.model_tool_calls) {
         std::cerr << "model_tool_calls is set but ollama_port is not; model tool calls stay off.\n";
     }
-    cipher::AskCommands ask(ollama.get(), 120.0, tool_loop.get());
+    cipher::AskCommands ask(ollama.get(), 120.0, tool_loop.get(), &memory);
 
     std::cout << "CIPHER v" << cipher::CipherCore::version() << '\n';
     std::cout << "Contextual Intelligence Platform for Home, Enterprise & Research\n";
@@ -151,6 +151,9 @@ int main() {
 
         const cipher::AskCommandResult ask_reply = ask.execute(input);
         if (ask_reply.handled) {
+            if (!ask_reply.shared_memory_id.empty()) {
+                log.info("ask --memory: memory id '" + ask_reply.shared_memory_id + "' passed to the local backend");
+            }
             std::cout << ask_reply.text << '\n';
             continue;
         }

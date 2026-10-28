@@ -335,3 +335,11 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
 - **Kept as CIPHER code:** the loopback HTTP client (`src/loopback_http.cpp`). cpp-httplib (MIT) was considered. It does not shrink the code that matters: the 127.0.0.1-only connect, the 4 MiB response bound and the timeout would still need CIPHER wrappers, and it adds a ~10k-line header for a 240-line client. Revisit if CIPHER needs TLS, keep-alive or a server.
 - **Not delegated:** agent and tool-calling runtimes (Ollama native tool calling, LangChain-style frameworks, MCP hosts) were not adopted as the tool loop. The tool registry, permission policy, owner confirmation, offered-tool list, audit and routing stay CIPHER code. A runtime may later sit behind `IAssistantBackend` as a text provider only.
 - **Also:** model-proposed calls now share the owner's registry and are audited with `origin=model`, closing the v0.5 known gap.
+
+### 20. Owner-Shared Memory for the Local Model (v0.6)
+
+- **Status:** Accepted.
+- **Decision:** Memory reaches a model only through the owner-typed `ask --memory <id> <question>`. CIPHER retrieves exactly that one entry, checks the permission policy for action `share` on the id (a `share <id>` blacklist pattern refuses it), and sends it with `local_only` set, so the request fails closed unless the backend route is `VerifiedLocal`. The existing prompt budget (32 KiB) bounds the size. Sharing is allowed by default like `recall`, because the owner typing the id is the authorization; a `share <id>` pattern refuses an id. The REPL logs the shared id, never the content.
+- **No tools with memory:** a shared-memory ask bypasses the model tool loop, so a model that has seen memory can never propose a tool call in that turn.
+- **Unchanged defaults:** plain `ask`, the tool loop and every other route send no memory. There is no automatic retrieval, search or summarisation of memory into prompts, and no memory tool is offered to the model.
+- **Reuse assessment:** memory frameworks (Mem0, Letta, LangChain memory) were not adopted. They decide on their own what to store and retrieve, which is the policy CIPHER must own; the remaining work here is a one-entry lookup.

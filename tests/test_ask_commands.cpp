@@ -1,5 +1,9 @@
 #include "cipher/ask_commands.hpp"
+#include "cipher/memory_commands.hpp"
+#include "cipher/model_tool_loop.hpp"
+#include "cipher/tool_registry.hpp"
 
+#include <filesystem>
 #include <iostream>
 #include <string>
 
@@ -136,6 +140,131 @@ void test_backend_error_is_printed_with_status() {
           "text was: " + result.text);
 }
 
+// ---------------------------------------------------------------------------
+// ask --memory: owner-named memory sharing (v0.6)
+// ---------------------------------------------------------------------------
+
+const char* const kCanary = "CANARY-7f3a-private-note";
+
+// An opened memory session on a fresh temp file holding one entry, "note", whose text is kCanary.
+cipher::MemoryCommands memory_with_canary(const std::string& name, cipher::PermissionPolicy policy = {}) {
+    const auto dir = std::filesystem::temp_directory_path() / "cipher_ask_commands_tests";
+    std::filesystem::create_directories(dir);
+    const auto path = dir / (name + ".txt");
+    std::filesystem::remove(path);
+    cipher::MemoryCommands memory(path.string(), policy);
+    memory.open();
+    memory.execute(std::string("remember note ") + kCanary);
+    return memory;
+}
+
+bool contains(const std::string& text, const std::string& needle) {
+    return text.find(needle) != std::string::npos;
+}
+
+void test_plain_ask_never_attaches_memory() {
+    ScriptedBackend backend;
+    backend.reply = ok_reply("ok");
+    const auto memory = memory_with_canary("plain");
+    cipher::AskCommands ask(&backend, 30.0, nullptr, &memory);
+
+    ask.execute("ask what is in note?");
+    check(backend.dispatches == 1 && !contains(backend.last_request.prompt, kCanary),
+          "plain ask: memory never enters the prompt", "prompt was: " + backend.last_request.prompt);
+}
+
+void test_memory_share_sends_named_entry_only() {
+    ScriptedBackend backend;
+    backend.reply = ok_reply("summary");
+    const auto memory = memory_with_canary("share");
+    cipher::AskCommands ask(&backend, 30.0, nullptr, &memory);
+
+    const cipher::AskCommandResult result = ask.execute("ask --memory note summarise it");
+    check(backend.dispatches == 1 && contains(backend.last_request.prompt, kCanary) &&
+              contains(backend.last_request.prompt, "summarise it"),
+          "share: prompt holds the named entry and the question", "prompt was: " + backend.last_request.prompt);
+    check(backend.last_request.local_only && !backend.last_request.request_tools,
+          "share: request is local_only without tools", "request flags changed");
+    check(contains(result.text, "Shared memory 'note'") && contains(result.text, "summary"),
+          "share: reply says which memory was shared", "text was: " + result.text);
+    check(result.shared_memory_id == "note", "share: shared id is reported for the log",
+          "id was: " + result.shared_memory_id);
+}
+
+void test_memory_flag_parsing() {
+    ScriptedBackend backend;
+    backend.reply = ok_reply("ok");
+    const auto memory = memory_with_canary("parse");
+    cipher::AskCommands ask(&backend, 30.0, nullptr, &memory);
+
+    const cipher::AskCommandResult glued = ask.execute("ask --memorynote hi");
+    check(glued.shared_memory_id.empty() && !contains(backend.last_request.prompt, kCanary),
+          "share: --memory glued to the id is a plain ask", "prompt was: " + backend.last_request.prompt);
+
+    const cipher::AskCommandResult tabbed = ask.execute("ask --memory\tnote\thi");
+    check(tabbed.shared_memory_id == "note" && contains(backend.last_request.prompt, kCanary),
+          "share: tabs separate the flag, id and question", "text was: " + tabbed.text);
+}
+
+void test_memory_share_refuses_before_dispatch() {
+    ScriptedBackend backend;
+    backend.reply = ok_reply("never");
+
+    cipher::AskCommands no_memory(&backend);
+    const cipher::AskCommandResult disabled = no_memory.execute("ask --memory note hi");
+    check(contains(disabled.text, "memory_file") && disabled.shared_memory_id.empty() && backend.dispatches == 0,
+          "share: disabled memory refuses", "dispatched or wrong text");
+
+    const auto memory = memory_with_canary("refuse");
+    cipher::AskCommands ask(&backend, 30.0, nullptr, &memory);
+    check(contains(ask.execute("ask --memory missing hi").text, "No memory with id 'missing'") &&
+              backend.dispatches == 0,
+          "share: unknown id refuses", "dispatched or wrong text");
+    check(ask.execute("ask --memory note").text == "Usage: ask --memory <id> <question>" && backend.dispatches == 0,
+          "share: missing question prints usage", "dispatched or wrong text");
+}
+
+void test_memory_share_respects_policy() {
+    ScriptedBackend backend;
+    backend.reply = ok_reply("never");
+    cipher::PermissionPolicy policy;
+    policy.add_blacklist_pattern("share note");
+    const auto memory = memory_with_canary("policy", policy);
+    cipher::AskCommands ask(&backend, 30.0, nullptr, &memory);
+
+    const cipher::AskCommandResult result = ask.execute("ask --memory note hi");
+    check(contains(result.text, "Denied by permission policy") && backend.dispatches == 0,
+          "share: blacklisted id is never sent", "text was: " + result.text);
+}
+
+void test_memory_share_fails_closed_on_non_local_route() {
+    ScriptedBackend backend;
+    backend.route = cipher::ProcessingRoute::Unknown;
+    backend.reply = ok_reply("never");
+    const auto memory = memory_with_canary("route");
+    cipher::AskCommands ask(&backend, 30.0, nullptr, &memory);
+
+    const cipher::AskCommandResult result = ask.execute("ask --memory note hi");
+    check(backend.dispatches == 0 && starts_with(result.text, "ask failed ("),
+          "share: non-local route never receives memory", "text was: " + result.text);
+}
+
+void test_memory_share_bypasses_tool_loop() {
+    ScriptedBackend backend;
+    backend.reply = ok_reply("TOOL_CALL: time.now");
+    cipher::ToolRegistry registry;
+    int confirmations = 0;
+    cipher::ModelToolLoop loop(backend, registry,
+                               [&](const std::string&, const std::string&) { ++confirmations; return true; },
+                               30.0, cipher::model_offered_tool_ids());
+    const auto memory = memory_with_canary("loop");
+    cipher::AskCommands ask(&backend, 30.0, &loop, &memory);
+
+    const cipher::AskCommandResult result = ask.execute("ask --memory note hi");
+    check(backend.dispatches == 1 && confirmations == 0 && contains(result.text, "TOOL_CALL: time.now"),
+          "share: no tools are offered or run with shared memory", "text was: " + result.text);
+}
+
 } // namespace
 
 int main() {
@@ -145,6 +274,13 @@ int main() {
     test_success_sends_local_only_request_without_tools();
     test_non_local_route_fails_closed_before_dispatch();
     test_backend_error_is_printed_with_status();
+    test_plain_ask_never_attaches_memory();
+    test_memory_share_sends_named_entry_only();
+    test_memory_flag_parsing();
+    test_memory_share_refuses_before_dispatch();
+    test_memory_share_respects_policy();
+    test_memory_share_fails_closed_on_non_local_route();
+    test_memory_share_bypasses_tool_loop();
 
     std::cout << "\n" << g_passes << " passed, " << g_failures << " failed\n";
     return g_failures == 0 ? 0 : 1;
