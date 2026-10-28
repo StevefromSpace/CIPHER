@@ -168,6 +168,13 @@ ConfigResult parse_lines(std::istream& stream) {
                 result.config.memory_deny.push_back(value);
             }
 
+        } else if (key == "llama_model_path") {
+            if (value.empty()) {
+                result.errors.push_back({line_number, "llama_model_path needs the path of a local .gguf model file."});
+            } else {
+                result.config.llama_model_path = value;
+            }
+
         } else {
             // Reject unknown keys so that misspelled settings are visible.
             result.errors.push_back({
@@ -176,6 +183,11 @@ ConfigResult parse_lines(std::istream& stream) {
                 "'. Check the spelling against cipher.conf.example."
             });
         }
+    }
+
+    // One backend serves `ask`. Choosing between two silently would hide which one sees the owner's prompts.
+    if (result.config.ollama_port != 0 && !result.config.llama_model_path.empty()) {
+        result.errors.push_back({0, "Set either ollama_port or llama_model_path, not both. `ask` uses one local backend."});
     }
 
     // If any errors occurred, reset the config to safe defaults so the caller

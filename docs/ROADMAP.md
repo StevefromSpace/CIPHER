@@ -13,7 +13,7 @@ Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → 
 | v0.2 configuration and diagnostics | COMPLETE | Owner-cleared. PR #13 merged to `main` (merge `dde6bc1`, from `7a27130`). Unreadable `cipher.conf` is a startup error; missing file uses defaults. |
 | v0.2.1 version consistency | COMPLETE | None |
 | v0.3 persistent memory foundation | IMPLEMENTED, OWNER REVIEW OPEN | Permission gate implemented on PR #14 (`69e2ee6`, Draft, base `feat/repl-memory-commands`). `remember`/`forget` default to `Monitor`; denied operations leave the memory file byte-identical. Not merged; owner review (WAITING_FOR_OWNER). |
-| v0.4 replaceable AI runtime interface | CURRENT (no-model verification) | No-model verification suite on PR #15 (`9047f13`, Draft, base PR #14 branch): core, memory and provider layer with no provider attached. The `llama.cpp` or embedded-model prototype is out of scope until owner decision (WAITING_FOR_OWNER). |
+| v0.4 replaceable AI runtime interface | CURRENT (no-model verification) | No-model verification suite on PR #15 (`9047f13`, Draft, base PR #14 branch): core, memory and provider layer with no provider attached. The in-process `llama.cpp` runtime was approved by the owner (2026-10-28) and is delivered under v0.6 (DECISIONS §21). |
 | v0.5 permissioned tools | DESIGN SCOPE COMPLETE, OWNER REVIEW OPEN | Design `docs/V05_TOOL_ARCHITECTURE.md` (ADR 18 Accepted). All five documented phases merged (PR #19 registry and built-in tools, PR #20 owner `tool` commands, PR #21 `filesystem.read`, PR #22 owner confirmation for Ask tier). No later phase is documented. PR #12 not merged; owner decides its disposition. |
 
 ### Milestone dependencies
@@ -33,7 +33,7 @@ Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → 
 
 ### Known limitations and deferred work
 
-- No native CIPHER inference runtime. Provider adapters are not runtime-verified for live use.
+- The in-process llama.cpp backend is CPU-only, text-only and returns whole answers (no streaming); it is opt-in at build time. Provider adapters are not runtime-verified for live use.
 - Persistent memory is explicit and human-readable only; no semantic search or automatic extraction.
 - Process-tree termination on POSIX does not cover descendants that call `setsid` (Issue #6).
 - Open-source license not yet chosen.
@@ -160,7 +160,7 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
   * Baseline Rollback Tag Publication: Published `rollback-hardening-gate-2.1-baseline` to remote `origin` at `ccc33273cdf3e36851b2b5b40847b90676362269`.
   * Complete Test Coverage: 5 CTest targets (75 cases, 264 assertions, 100%), 144 adapter unit tests (100%), 49 pipeline unit tests (100%).
 - [x] Configure dedicated CI test job for assistant integrations and developer pipeline.
-- [ ] Prototype direct in-process local runtime adapter (e.g., `llama.cpp` or embedded model) when local inference milestone begins.
+- [x] Direct in-process local runtime adapter: `llama.cpp` backend, delivered in v0.6 (DECISIONS §21).
 - [ ] Keep the core useful when no model or assistant is available (verification not yet done; see Milestone Status).
 
 ### v0.5: Permissioned tools (DESIGN SCOPE COMPLETE, OWNER REVIEW OPEN)
@@ -178,7 +178,9 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
 - Merged: PR #28 adds owner-typed `ask --memory <id> <question>`. It is the only path from memory to a model: one entry, permission action `share`, local route only, no tool loop, and the id is logged but not the content. See DECISIONS §20.
 - Next candidates:
   - Merged: `memory_deny` patterns in `cipher.conf` (blacklist for remember/recall/forget/share).
-  - An in-process runtime (llama.cpp) behind `IAssistantBackend`. This is still the v0.4 item that waits for the owner.
+  - Merged: in-process llama.cpp backend (below).
+- In-process llama.cpp runtime: `LlamaCppBackend` behind `IAssistantBackend`, opt-in build `-DCIPHER_WITH_LLAMA=ON`, pinned llama.cpp v0.7.0 (SHA-256 checked), `llama_model_path` in `cipher.conf`. Text only, CPU, one model loaded at startup, empty context per request, no fallback between backends. Verified by real inference on a pinned tiny GGUF in the `llama-runtime` CI job (Ubuntu and Windows). See DECISIONS §21.
+- Known limits: no GPU build, no streaming, no model tool calls through llama.cpp, generation settings (context, output length, temperature) are fixed defaults, not yet in `cipher.conf`.
 
 ### Later: voice, interfaces, planning, learning, and self-improvement
 

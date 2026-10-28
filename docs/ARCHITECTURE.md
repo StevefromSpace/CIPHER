@@ -84,6 +84,35 @@ performs bounded stream reads. OpenClaw subprocess collection terminates the
 direct child on timeout or output overflow; process-tree cleanup beyond that
 direct child has not been established as a cross-platform guarantee.
 
+## Local model backends (v0.6)
+
+`ask` talks to exactly one `IAssistantBackend`, chosen in `cipher.conf`:
+
+```text
+owner-typed ask  (+ ask --memory <id>, after memory_deny check)
+       |
+       v
+AssistantManager::submit   -- validation, prompt budget, local_only => VerifiedLocal only
+       |
+       +-- OllamaBackend    (cipher_ollama)  ollama_port      -> 127.0.0.1 HTTP server
+       +-- LlamaCppBackend  (cipher_llama)   llama_model_path -> GGUF file, in this process
+```
+
+- `LlamaCppBackend` (`include/cipher/llama_backend.hpp`) is built only with
+  `-DCIPHER_WITH_LLAMA=ON`, which fetches the pinned llama.cpp release (see
+  THIRD_PARTY_NOTICES.md §6). The default build has no llama.cpp code.
+- llama.cpp provides inference only. It sees just the prompt CIPHER passes it;
+  it has no access to memory, tools, permissions or config. Its answers are
+  returned as text and are never parsed for tool requests (model tool calls are
+  Ollama-only in v0.6).
+- The model loads once at startup. A missing or invalid model stops startup
+  with a clear error; there is no fallback to another backend. Setting both
+  `ollama_port` and `llama_model_path` is a configuration error.
+- Each request starts from an empty KV cache, so one `ask` cannot see another.
+- The route is `VerifiedLocal` only once the model has loaded; llama.cpp's
+  HTTP, OpenSSL and RPC options are switched off in the build.
+- Requests honor `timeout_seconds` through llama.cpp's abort callback (CPU).
+
 ## Boundaries to preserve as CIPHER grows
 
 ```text
@@ -156,14 +185,16 @@ etc.), guaranteeing that the startup banner, command outputs, and logs remain sy
 The C++ executable remains a single-process command-line program with
 configuration, diagnostic logging, and a standalone local persistent-memory
 library. It has no model runtime enabled by default. An optional Ollama loopback
-backend is reachable only through the owner-typed `ask` command when `ollama_port`
-is set. It has no authentication system, sandbox, or system-control tools. The provider
+backend, or an optional in-process llama.cpp backend (`-DCIPHER_WITH_LLAMA=ON`),
+is reachable only through the owner-typed `ask` command when `ollama_port` or
+`llama_model_path` is set. It has no authentication system, sandbox, or system-control tools. The provider
 adapters do not change that: their live routes remain disabled or fail closed unless
 their explicit gates and evidence requirements are met.
 
 Not implemented yet (planned for future milestones):
 - Model-facing tool calls beyond `time.now` and `system.info` (memory and file tools are not offered to the model)
 - Automatic memory retrieval into prompts (memory reaches a model only via owner-typed `ask --memory <id>`, local route only; see DECISIONS §20)
-- In-process local model runtime (the Ollama backend uses an external server)
+- GPU acceleration and streaming output for the in-process llama.cpp backend (CPU, whole answer at once)
+- Model tool calls through the llama.cpp backend (text only in v0.6)
 - Persistent-memory permission gating (REPL commands and `memory_file` configuration are implemented)
 - Voice and alternative interfaces (later)

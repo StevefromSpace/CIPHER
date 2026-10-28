@@ -1,6 +1,6 @@
 # Third-Party Notices and Intellectual Property Provenance
 
-CIPHER (Contextual Intelligence Platform for Home, Enterprise & Research) is an independent, local-first platform built with zero mandatory external runtime dependencies. One header-only library is vendored at build time (section 5).
+CIPHER (Contextual Intelligence Platform for Home, Enterprise & Research) is an independent, local-first platform built with zero mandatory external runtime dependencies. One header-only library is vendored at build time (section 5). The optional in-process model backend fetches one pinned source dependency, llama.cpp, only when built with `-DCIPHER_WITH_LLAMA=ON` (section 6).
 
 During **Operation Source Intelligence** (Milestone v0.4), research clones of four open-source personal assistant projects were audited for architectural mechanisms, security invariants, and design patterns. The research clones reside strictly outside the CIPHER repository in external research directories.
 
@@ -146,6 +146,39 @@ limitations under the License.
 * **Upstream License:** MIT License
 * **Copyright:** Copyright (c) 2013-2023 Niels Lohmann
 * **Use in CIPHER:** JSON encoding and decoding in the Ollama backend (`src/ollama_backend.cpp`) only. Compiled into `cipher_ollama`; not exposed in public headers.
+* **License Notice (MIT):**
+```text
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+---
+
+## 6. llama.cpp and ggml (optional, fetched at build time)
+
+* **Repository:** [https://github.com/ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp)
+* **Version:** release `v0.7.0` (commit `620d2225cc436ab0b001e3200e590e3b286ef9ab`, bundled ggml `0.27.0`)
+* **Source:** `https://github.com/ggml-org/llama.cpp/archive/refs/tags/v0.7.0.tar.gz`, downloaded by CMake `FetchContent` only when `CIPHER_WITH_LLAMA=ON`, rejected unless its SHA-256 is `55d67acf3ad2ad747a9bbeb75f9f0e173dbcc0d1753a471038a90c819421c5e1`. Not stored in this repository. Offline builds pass an already-extracted copy with `-DFETCHCONTENT_SOURCE_DIR_LLAMA_CPP=<dir>`.
+* **Upstream License:** MIT License
+* **Copyright:** Copyright (c) 2023-2026 The ggml authors
+* **Use in CIPHER:** model loading, tokenization, sampling and CPU inference for the in-process backend (`src/llama_backend.cpp`) only. Statically linked into `cipher_llama` (libraries `llama`, `ggml`, `ggml-base`, `ggml-cpu`); llama.cpp's tools, server, examples, tests, `common`, OpenSSL/HTTP support and the ggml RPC backend are switched off. Not exposed in public CIPHER headers.
+* **Default build:** unaffected. Without `CIPHER_WITH_LLAMA=ON` nothing is downloaded or compiled.
+* **CI test model (not shipped):** `tinyllamas/stories260K.gguf` from [ggml-org/models](https://huggingface.co/ggml-org/models) at commit `499bc8821c6b12b4e53c5bffcb21ec206f212d81`, SHA-256 `270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d`. Downloaded only by the `llama-runtime` CI job to test real inference; never committed or bundled.
 * **License Notice (MIT):**
 ```text
 Permission is hereby granted, free of charge, to any person obtaining a copy

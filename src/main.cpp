@@ -2,6 +2,9 @@
 #include "cipher/cipher_core.hpp"
 #include "cipher/config.hpp"
 #include "cipher/logger.hpp"
+#ifdef CIPHER_WITH_LLAMA
+#include "cipher/llama_backend.hpp"
+#endif
 #include "cipher/memory_commands.hpp"
 #include "cipher/model_tool_loop.hpp"
 #include "cipher/ollama_backend.hpp"
@@ -103,15 +106,36 @@ int main() {
     // Tools are offered input after memory and before the core, like memory.
     cipher::ToolCommands tools(cfg.memory_file, cfg.filesystem_read_root);
 
-    // The local Ollama backend is opt-in. With ollama_port unset, `ask` reports that it is disabled.
-    std::unique_ptr<cipher::OllamaBackend> ollama;
+    // The local backends are opt-in; config allows at most one. With neither set, `ask` reports that it is disabled.
+    std::unique_ptr<cipher::IAssistantBackend> backend;
+    cipher::OllamaBackend* ollama = nullptr;
     if (cfg.ollama_port != 0) {
         cipher::OllamaConfig ollama_config;
         ollama_config.port = cfg.ollama_port;
-        ollama = std::make_unique<cipher::OllamaBackend>(ollama_config);
+        auto owned = std::make_unique<cipher::OllamaBackend>(ollama_config);
+        ollama = owned.get();
+        backend = std::move(owned);
+    } else if (!cfg.llama_model_path.empty()) {
+#ifdef CIPHER_WITH_LLAMA
+        cipher::LlamaCppConfig llama_config;
+        llama_config.model_path = cfg.llama_model_path;
+        auto llama = std::make_unique<cipher::LlamaCppBackend>(llama_config);
+        // The owner asked for this model; a model that does not load stops startup instead of disabling `ask`.
+        if (!llama->is_available()) {
+            std::cerr << "CIPHER: " << llama->load_error() << '\n';
+            return 1;
+        }
+        log.info("llama.cpp model loaded in-process: " + cfg.llama_model_path);
+        backend = std::move(llama);
+#else
+        std::cerr << "CIPHER: llama_model_path is set, but this build has no llama.cpp backend. "
+                     "Rebuild with -DCIPHER_WITH_LLAMA=ON or remove the key.\n";
+        return 1;
+#endif
     }
     // Model tool calls are opt-in and need ollama_port. They share the owner's registry, so the owner's
     // policy also gates them and `tool log` shows them with origin=model. Only the fixed offered list is exposed.
+    // v0.6 keeps llama.cpp text-only: its answers are never parsed for tool requests.
     std::unique_ptr<cipher::ModelToolLoop> tool_loop;
     if (ollama && cfg.model_tool_calls) {
         tool_loop = std::make_unique<cipher::ModelToolLoop>(
@@ -126,11 +150,11 @@ int main() {
     } else if (cfg.model_tool_calls) {
         std::cerr << "model_tool_calls is set but ollama_port is not; model tool calls stay off.\n";
     }
-    cipher::AskCommands ask(ollama.get(), 120.0, tool_loop.get(), &memory);
+    cipher::AskCommands ask(backend.get(), 120.0, tool_loop.get(), &memory);
 
     std::cout << "CIPHER v" << cipher::CipherCore::version() << '\n';
     std::cout << "Contextual Intelligence Platform for Home, Enterprise & Research\n";
-    std::cout << "Type 'help' to begin. This build runs locally; `ask` needs ollama_port in cipher.conf.\n\n";
+    std::cout << "Type 'help' to begin. This build runs locally; `ask` needs ollama_port or llama_model_path in cipher.conf.\n\n";
 
     std::string input;
     while (true) {

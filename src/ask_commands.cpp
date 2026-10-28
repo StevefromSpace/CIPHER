@@ -29,7 +29,8 @@ AskCommandResult AskCommands::execute(const std::string& input) {
     result.handled = true;
 
     if (backend_ == nullptr) {
-        result.text = "ask is disabled. Set ollama_port in cipher.conf to a local Ollama port.";
+        result.text = "ask is disabled. Set ollama_port (a local Ollama port) or llama_model_path "
+                      "(a local .gguf file) in cipher.conf.";
         return result;
     }
 
