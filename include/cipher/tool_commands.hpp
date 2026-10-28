@@ -38,7 +38,8 @@ class ToolCommands {
 public:
     ToolCommands(const std::string& memory_file_path, const std::string& filesystem_root_path,
                  std::istream& answers = std::cin, std::ostream& prompts = std::cout,
-                 const std::vector<std::string>& other_private_files = {});
+                 const std::vector<std::string>& other_private_files = {},
+                 PermissionPolicy memory_policy = PermissionPolicy());
 
     // The registry's confirmation callback captures this object, so it must not be copied.
     ToolCommands(const ToolCommands&) = delete;

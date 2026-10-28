@@ -105,7 +105,7 @@ int main() {
 
     // Tools are offered input after memory and before the core, like memory.
     cipher::ToolCommands tools(cfg.memory_file, cfg.filesystem_read_root, std::cin, std::cout,
-                               {cfg.log_file, CONFIG_FILE});
+                               {cfg.log_file, CONFIG_FILE}, memory_policy);
 
     // The local backends are opt-in; config allows at most one. With neither set, `ask` reports that it is disabled.
     std::unique_ptr<cipher::IAssistantBackend> backend;

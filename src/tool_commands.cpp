@@ -46,11 +46,12 @@ std::string outcome_name(ToolOutcome outcome) {
 
 ToolCommands::ToolCommands(const std::string& memory_file_path, const std::string& filesystem_root_path,
                            std::istream& answers, std::ostream& prompts,
-                           const std::vector<std::string>& other_private_files)
+                           const std::vector<std::string>& other_private_files,
+                           PermissionPolicy memory_policy)
     : answers_(answers), prompts_(prompts) {
     register_builtin_tools(registry_);
     if (!memory_file_path.empty()) {
-        register_memory_tools(registry_, memory_file_path);
+        register_memory_tools(registry_, memory_file_path, std::move(memory_policy));
     }
     if (!filesystem_root_path.empty()) {
         std::vector<std::string> private_files = other_private_files;
