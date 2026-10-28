@@ -223,13 +223,13 @@ static void test_ollama_port_rejects_invalid_values() {
 }
 
 static void test_llama_model_path_parses_and_excludes_ollama_port() {
-    check(cipher::ConfigParser::defaults().llama_model_path.empty(),
+    check(cipher::ConfigParser::defaults().llama.model_path.empty(),
           "llama_model_path default: llama.cpp backend off",
           "Expected an empty llama_model_path in defaults");
 
     const cipher::ConfigResult r =
         cipher::ConfigParser::load_from_string("llama_model_path = models/tiny.gguf\n");
-    check(r.ok() && r.config.llama_model_path == "models/tiny.gguf",
+    check(r.ok() && r.config.llama.model_path == "models/tiny.gguf",
           "llama_model_path: path is stored",
           "Expected llama_model_path 'models/tiny.gguf'");
 
@@ -242,9 +242,66 @@ static void test_llama_model_path_parses_and_excludes_ollama_port() {
     const cipher::ConfigResult both = cipher::ConfigParser::load_from_string(
         "ollama_port = 11434\nllama_model_path = models/tiny.gguf\n");
     check(!both.ok() && both.errors[0].line == 0 && both.config.ollama_port == 0 &&
-              both.config.llama_model_path.empty(),
+              both.config.llama.model_path.empty(),
           "llama_model_path: rejected together with ollama_port",
           "Expected a file-level error and defaults when both backends are set");
+}
+
+static void test_llama_settings_default_to_previous_fixed_values() {
+    const cipher::LlamaCppConfig d = cipher::ConfigParser::defaults().llama;
+    check(d.context_tokens == 4096 && d.max_output_tokens == 512 && d.temperature == 0.8f,
+          "llama settings default: 4096 context, 512 output, 0.8 temperature",
+          "Defaults changed; existing cipher.conf files would behave differently");
+
+    const cipher::ConfigResult only_path =
+        cipher::ConfigParser::load_from_string("llama_model_path = models/tiny.gguf\n");
+    check(only_path.ok() && only_path.config.llama.context_tokens == 4096 &&
+              only_path.config.llama.max_output_tokens == 512 && only_path.config.llama.temperature == 0.8f,
+          "llama settings: omitted keys keep the defaults", "Expected defaults when only the path is set");
+}
+
+static void test_llama_settings_parse_valid_values() {
+    const cipher::ConfigResult r = cipher::ConfigParser::load_from_string(
+        "llama_model_path = m.gguf\nllama_context_tokens = 8192\n"
+        "llama_max_output_tokens = 256\nllama_temperature = 0.25\n");
+    check(r.ok() && r.config.llama.context_tokens == 8192 && r.config.llama.max_output_tokens == 256 &&
+              r.config.llama.temperature == 0.25f,
+          "llama settings: all three are stored", "Expected 8192 / 256 / 0.25");
+
+    const struct { const char* text; float expected; } temps[] = {{"0", 0.0f}, {"1", 1.0f}, {"1.5", 1.5f}, {"2.", 2.0f}};
+    for (const auto& t : temps) {
+        const cipher::ConfigResult tr =
+            cipher::ConfigParser::load_from_string(std::string("llama_temperature = ") + t.text + "\n");
+        check(tr.ok() && tr.config.llama.temperature == t.expected,
+              std::string("llama_temperature: accepted ") + t.text, "Expected it to parse");
+    }
+
+    const cipher::ConfigResult max = cipher::ConfigParser::load_from_string(
+        "llama_context_tokens = 2147483647\nllama_max_output_tokens = 1\n");
+    check(max.ok() && max.config.llama.context_tokens == 2147483647 && max.config.llama.max_output_tokens == 1,
+          "llama token counts: accept 1 and the int32 maximum", "Expected the full int32 range");
+}
+
+static void test_llama_settings_reject_invalid_values() {
+    const char* bad_counts[] = {"", "0", "-1", "+5", "12x", "1.5", " 1 2", "2147483648", "99999999999", "0x10"};
+    for (const char* key : {"llama_context_tokens", "llama_max_output_tokens"}) {
+        for (const char* text : bad_counts) {
+            const cipher::ConfigResult r =
+                cipher::ConfigParser::load_from_string(std::string(key) + " = " + text + "\n");
+            check(!r.ok() && r.errors[0].line == 1 && r.config.llama.context_tokens == 4096 &&
+                      r.config.llama.max_output_tokens == 512,
+                  std::string(key) + ": rejected '" + text + "'", "Expected an error on line 1 and defaults");
+        }
+    }
+
+    const char* bad_temps[] = {"", "-0.1", "-1", "nan", "NaN", "inf", "-inf", "infinity", "1e39", "0.8x",
+                               "0,8", "abc", ".", "1 2"};
+    for (const char* text : bad_temps) {
+        const cipher::ConfigResult r =
+            cipher::ConfigParser::load_from_string(std::string("llama_temperature = ") + text + "\n");
+        check(!r.ok() && r.errors[0].line == 1 && r.config.llama.temperature == 0.8f,
+              std::string("llama_temperature: rejected '") + text + "'", "Expected an error on line 1 and defaults");
+    }
 }
 
 static void test_model_tool_calls_defaults_off_and_parses_bool() {
@@ -472,6 +529,9 @@ int main() {
     test_ollama_port_defaults_to_disabled_and_parses_valid_ports();
     test_ollama_port_rejects_invalid_values();
     test_llama_model_path_parses_and_excludes_ollama_port();
+    test_llama_settings_default_to_previous_fixed_values();
+    test_llama_settings_parse_valid_values();
+    test_llama_settings_reject_invalid_values();
     test_model_tool_calls_defaults_off_and_parses_bool();
     test_load_from_string_unknown_key();
     test_load_from_string_invalid_log_level();

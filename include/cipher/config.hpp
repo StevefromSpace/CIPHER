@@ -28,6 +28,10 @@
 //   memory_deny — repeatable; a pattern that refuses memory actions, e.g. `share *` (default: none)
 //   llama_model_path — local .gguf file for the in-process llama.cpp backend; needs a
 //                      -DCIPHER_WITH_LLAMA=ON build and excludes ollama_port (default: empty = off)
+//   llama_context_tokens — llama.cpp context window, prompt + answer, 1-2147483647 (default: 4096)
+//   llama_max_output_tokens — most tokens one answer may generate, 1-2147483647 and below
+//                      llama_context_tokens (default: 512)
+//   llama_temperature — sampling temperature, a finite number >= 0; 0 = greedy (default: 0.8)
 //
 // What is NOT stored here:
 //   Passwords, API keys, tokens, or any other secrets.  The example file
@@ -58,6 +62,18 @@ const char* log_level_name(LogLevel level) noexcept;
 // Returns true and sets `out` on success; returns false on an unknown name.
 bool parse_log_level(const std::string& text, LogLevel& out) noexcept;
 
+/**
+ * @brief Settings for the in-process llama.cpp backend (the llama_* keys).
+ *
+ * The owner supplies model_path. CIPHER never downloads or picks a model.
+ */
+struct LlamaCppConfig {
+    std::string model_path;      // Empty = llama.cpp backend off
+    int context_tokens{4096};    // prompt + answer must fit in this window
+    int max_output_tokens{512};  // generation stops here even without an end token
+    float temperature{0.8f};     // 0 selects greedy (deterministic) decoding
+};
+
 // ---------------------------------------------------------------------------
 // Config
 // Plain data struct that holds every validated configuration value.
@@ -71,7 +87,7 @@ struct Config {
     int         ollama_port = 0;             // 0 = `ask` disabled; otherwise 1-65535
     bool        model_tool_calls = false;    // Effective only when ollama_port is set
     std::vector<std::string> memory_deny;    // Blacklist patterns for memory actions ("<action> <id>")
-    std::string llama_model_path;            // Empty = llama.cpp backend off
+    LlamaCppConfig llama;                    // llama_* keys
 };
 
 // ---------------------------------------------------------------------------

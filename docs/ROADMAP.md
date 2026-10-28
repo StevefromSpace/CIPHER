@@ -180,7 +180,8 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
   - Merged: `memory_deny` patterns in `cipher.conf` (blacklist for remember/recall/forget/share).
   - Merged: in-process llama.cpp backend (below).
 - In-process llama.cpp runtime: `LlamaCppBackend` behind `IAssistantBackend`, opt-in build `-DCIPHER_WITH_LLAMA=ON`, pinned llama.cpp v0.7.0 (SHA-256 checked), `llama_model_path` in `cipher.conf`. Text only, CPU, one model loaded at startup, empty context per request, no fallback between backends. Verified by real inference on a pinned tiny GGUF in the `llama-runtime` CI job (Ubuntu and Windows). See DECISIONS §21.
-- Known limits: no GPU build, no streaming, no model tool calls through llama.cpp, generation settings (context, output length, temperature) are fixed defaults, not yet in `cipher.conf`.
+- Configurable generation settings: `llama_context_tokens`, `llama_max_output_tokens` and `llama_temperature` in `cipher.conf` (defaults 4096 / 512 / 0.8, unchanged when omitted). Validated at parse time; real-inference tests check each value changes llama.cpp's behavior. See DECISIONS §21.
+- Known limits: no GPU build, no streaming, no model tool calls through llama.cpp.
 
 ### Later: voice, interfaces, planning, learning, and self-improvement
 

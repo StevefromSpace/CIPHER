@@ -2,8 +2,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <locale>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -29,15 +33,33 @@
 namespace cipher {
 namespace {
 
-// Accepts only plain decimal digits in 1-65535, so "+80" or "80x" are rejected.
-bool parse_port(const std::string& text, int& out) {
-    if (text.empty() || text.size() > 5) return false;
-    int value = 0;
+// Accepts only plain decimal digits in 1..max, so "+80", "80x" or "-1" are rejected.
+bool parse_positive_int(const std::string& text, long long max, int& out) {
+    if (text.empty() || text.size() > 10) return false;  // 10 digits cannot overflow long long
+    long long value = 0;
     for (const char c : text) {
         if (c < '0' || c > '9') return false;
         value = value * 10 + (c - '0');
     }
-    if (value < 1 || value > 65535) return false;
+    if (value < 1 || value > max) return false;
+    out = static_cast<int>(value);
+    return true;
+}
+
+bool parse_port(const std::string& text, int& out) { return parse_positive_int(text, 65535, out); }
+
+// A token count llama.cpp takes as int32_t.
+bool parse_token_count(const std::string& text, int& out) {
+    return parse_positive_int(text, std::numeric_limits<std::int32_t>::max(), out);
+}
+
+// A finite, non-negative decimal such as "0.8"; "." is the separator whatever the system locale.
+bool parse_temperature(const std::string& text, float& out) {
+    std::istringstream stream(text);
+    stream.imbue(std::locale::classic());
+    float value = 0.0f;
+    if (!(stream >> value) || stream.peek() != std::char_traits<char>::eof()) return false;
+    if (!std::isfinite(value) || value < 0.0f) return false;
     out = value;
     return true;
 }
@@ -172,7 +194,25 @@ ConfigResult parse_lines(std::istream& stream) {
             if (value.empty()) {
                 result.errors.push_back({line_number, "llama_model_path needs the path of a local .gguf model file."});
             } else {
-                result.config.llama_model_path = value;
+                result.config.llama.model_path = value;
+            }
+
+        } else if (key == "llama_context_tokens" || key == "llama_max_output_tokens") {
+            int tokens = 0;
+            if (!parse_token_count(value, tokens)) {
+                result.errors.push_back({line_number, "Invalid " + key + " '" + value + "'. Use a whole number from 1 to 2147483647."});
+            } else if (key == "llama_context_tokens") {
+                result.config.llama.context_tokens = tokens;
+            } else {
+                result.config.llama.max_output_tokens = tokens;
+            }
+
+        } else if (key == "llama_temperature") {
+            float temperature = 0.0f;
+            if (!parse_temperature(value, temperature)) {
+                result.errors.push_back({line_number, "Invalid llama_temperature '" + value + "'. Use a number of 0 or more, such as 0.8; 0 means greedy."});
+            } else {
+                result.config.llama.temperature = temperature;
             }
 
         } else {
@@ -186,7 +226,7 @@ ConfigResult parse_lines(std::istream& stream) {
     }
 
     // One backend serves `ask`. Choosing between two silently would hide which one sees the owner's prompts.
-    if (result.config.ollama_port != 0 && !result.config.llama_model_path.empty()) {
+    if (result.config.ollama_port != 0 && !result.config.llama.model_path.empty()) {
         result.errors.push_back({0, "Set either ollama_port or llama_model_path, not both. `ask` uses one local backend."});
     }
 

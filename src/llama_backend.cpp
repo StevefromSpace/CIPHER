@@ -2,6 +2,7 @@
 
 #include <llama.h>
 
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
@@ -124,9 +125,12 @@ void LlamaCppBackend::ModelDeleter::operator()(llama_model* model) const { llama
 void LlamaCppBackend::ContextDeleter::operator()(llama_context* context) const { llama_free(context); }
 
 LlamaCppBackend::LlamaCppBackend(LlamaCppConfig config) : config_(std::move(config)) {
+    // cipher.conf already checks each value; this guards the cross-key rule and direct callers.
     if (config_.context_tokens < 1 || config_.max_output_tokens < 1 ||
-        config_.max_output_tokens >= config_.context_tokens) {
-        load_error_ = "Invalid llama.cpp settings: need 0 < max_output_tokens < context_tokens.";
+        config_.max_output_tokens >= config_.context_tokens ||
+        !std::isfinite(config_.temperature) || config_.temperature < 0.0f) {
+        load_error_ = "Invalid llama.cpp settings: need 0 < llama_max_output_tokens < llama_context_tokens "
+                      "and a finite llama_temperature >= 0.";
         return;
     }
     load_error_ = check_model_file(config_.model_path);
