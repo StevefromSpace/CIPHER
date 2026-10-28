@@ -74,13 +74,18 @@ const ToolDefinition* ToolRegistry::find(const std::string& id) const {
     return found == tools_.end() ? nullptr : &found->second.definition;
 }
 
-ToolResult ToolRegistry::invoke(const std::string& id, const std::string& target, const std::string& arguments) {
+const char* to_string(CallOrigin origin) noexcept {
+    return origin == CallOrigin::Model ? "model" : "owner";
+}
+
+ToolResult ToolRegistry::invoke(const std::string& id, const std::string& target, const std::string& arguments,
+                                CallOrigin origin) {
     ToolResult result;
     const auto found = tools_.find(id);
     if (found == tools_.end()) {
         result.outcome = ToolOutcome::NotFound;
         result.output = "Unknown tool: " + id;
-        record(id, target, arguments.size(), result);
+        record(id, target, arguments.size(), result, origin);
         return result;
     }
 
@@ -93,7 +98,7 @@ ToolResult ToolRegistry::invoke(const std::string& id, const std::string& target
             // Fail closed: an argument that cannot be resolved never reaches the policy or the handler.
             result.outcome = ToolOutcome::Denied;
             result.output = error.what();
-            record(id, "", arguments.size(), result);
+            record(id, "", arguments.size(), result, origin);
             return result;
         }
     }
@@ -103,21 +108,21 @@ ToolResult ToolRegistry::invoke(const std::string& id, const std::string& target
     if (result.tier == RiskTier::Block) {
         result.outcome = ToolOutcome::Denied;
         result.output = "Denied by permission policy (block): " + id + ".";
-        record(id, evaluated_target, arguments.size(), result);
+        record(id, evaluated_target, arguments.size(), result, origin);
         return result;
     }
     // Fail closed: without an owner confirmation callback, an Ask-tier call never runs.
     if (result.tier == RiskTier::Ask && !(confirm_ && confirm_(definition, evaluated_target))) {
         result.outcome = ToolOutcome::Denied;
         result.output = "Owner confirmation was not given: " + id + ".";
-        record(id, evaluated_target, arguments.size(), result);
+        record(id, evaluated_target, arguments.size(), result, origin);
         return result;
     }
 
     if (dry_run_) {
         result.outcome = ToolOutcome::DryRun;
         result.output = "Dry run: " + id + " was not executed.";
-        record(id, evaluated_target, arguments.size(), result);
+        record(id, evaluated_target, arguments.size(), result, origin);
         return result;
     }
 
@@ -132,11 +137,12 @@ ToolResult ToolRegistry::invoke(const std::string& id, const std::string& target
         result.outcome = ToolOutcome::Failed;
         result.output = "Unknown error";
     }
-    record(id, evaluated_target, arguments.size(), result);
+    record(id, evaluated_target, arguments.size(), result, origin);
     return result;
 }
 
-void ToolRegistry::record(const std::string& id, const std::string& target, std::size_t argument_bytes, const ToolResult& result) {
+void ToolRegistry::record(const std::string& id, const std::string& target, std::size_t argument_bytes, const ToolResult& result,
+                          CallOrigin origin) {
     AuditRecord entry;
     entry.sequence = next_sequence_++;
     entry.correlation_id = session_tag_ + "-" + std::to_string(entry.sequence);
@@ -147,6 +153,7 @@ void ToolRegistry::record(const std::string& id, const std::string& target, std:
     entry.executed = result.executed;
     entry.argument_bytes = argument_bytes;
     entry.timestamp = std::time(nullptr);
+    entry.origin = origin;
     audit_.push_back(entry);
 }
 

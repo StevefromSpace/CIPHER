@@ -100,6 +100,7 @@ std::string ToolCommands::log() const {
             text += "\n";
         }
         text += "#" + std::to_string(entry.sequence) + "  " + entry.correlation_id + "  " + entry.tool_id +
+                "  origin=" + to_string(entry.origin) +
                 "  tier=" + to_string(entry.tier) + "  outcome=" + outcome_name(entry.outcome) +
                 "  executed=" + (entry.executed ? "yes" : "no") +
                 "  argument_bytes=" + std::to_string(entry.argument_bytes) +

@@ -105,6 +105,9 @@ void test_yes_runs_tool_and_feeds_result_back() {
     check(h.backend.prompts.size() == 2 && contains(h.backend.prompts[1], "Tool result for time.now:"),
           "yes: tool result is sent to the model on the next round",
           "second prompt lacked the result");
+    check(h.registry.audit_log().size() == 1 &&
+              h.registry.audit_log()[0].origin == cipher::CallOrigin::Model,
+          "yes: audit record is tagged origin=model", "audit record missing or tagged owner");
 }
 
 void test_no_runs_nothing() {

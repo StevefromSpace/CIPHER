@@ -67,6 +67,13 @@ struct ToolResult {
 };
 
 /**
+ * @brief Who started a tool call: the owner typing a command, or a model proposal the owner approved.
+ */
+enum class CallOrigin { Owner, Model };
+
+const char* to_string(CallOrigin origin) noexcept;
+
+/**
  * @brief One session-only audit record. Arguments and output are never stored.
  */
 struct AuditRecord {
@@ -79,6 +86,7 @@ struct AuditRecord {
     bool executed{false};
     std::size_t argument_bytes{0};
     std::time_t timestamp{0};
+    CallOrigin origin{CallOrigin::Owner};
 };
 
 /**
@@ -103,7 +111,8 @@ public:
      * @brief Invokes a tool. Permission is evaluated on "<id> <target>" before any handler call.
      *        An Ask-tier call runs only when the owner confirmation callback returns true.
      */
-    ToolResult invoke(const std::string& id, const std::string& target, const std::string& arguments);
+    ToolResult invoke(const std::string& id, const std::string& target, const std::string& arguments,
+                      CallOrigin origin = CallOrigin::Owner);
 
     /**
      * @brief Owner confirmation for Ask-tier tools. Returning false, or having no callback, denies the call.
@@ -126,7 +135,8 @@ private:
         ToolDefinition definition;
     };
 
-    void record(const std::string& id, const std::string& target, std::size_t argument_bytes, const ToolResult& result);
+    void record(const std::string& id, const std::string& target, std::size_t argument_bytes, const ToolResult& result,
+                CallOrigin origin);
 
     std::map<std::string, Entry> tools_;
     PermissionPolicy policy_;

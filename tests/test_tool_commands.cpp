@@ -151,7 +151,8 @@ int main() {
 
         tools.execute("tool system.info ARG-SECRET-VALUE");
         const cipher::ToolCommandResult logged = tools.execute("tool log");
-        check(contains(logged.text, "system.info") && contains(logged.text, "argument_bytes=16"),
+        check(contains(logged.text, "system.info") && contains(logged.text, "argument_bytes=16") &&
+              contains(logged.text, "origin=owner"),
               "log: records tool id and argument length", logged.text);
         check(!contains(logged.text, "ARG-SECRET-VALUE") && !contains(logged.text, "CIPHER v"),
               "log: never shows arguments or output", logged.text);

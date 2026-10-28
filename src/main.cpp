@@ -106,14 +106,12 @@ int main() {
         ollama_config.port = cfg.ollama_port;
         ollama = std::make_unique<cipher::OllamaBackend>(ollama_config);
     }
-    // Model tool calls are opt-in and need ollama_port. They use a registry of their own, so the
-    // owner's `tool log` never shows model-originated calls and the model never gets the owner's set.
-    cipher::ToolRegistry model_tools;
+    // Model tool calls are opt-in and need ollama_port. They share the owner's registry, so the owner's
+    // policy also gates them and `tool log` shows them with origin=model. Only the fixed offered list is exposed.
     std::unique_ptr<cipher::ModelToolLoop> tool_loop;
     if (ollama && cfg.model_tool_calls) {
-        cipher::register_builtin_tools(model_tools);
         tool_loop = std::make_unique<cipher::ModelToolLoop>(
-            *ollama, model_tools,
+            *ollama, tools.registry(),
             [](const std::string& tool_id, const std::string& description) {
                 std::cout << "The model asks to run '" << tool_id << "' (" << description
                           << "). Type exact yes to allow: " << std::flush;
