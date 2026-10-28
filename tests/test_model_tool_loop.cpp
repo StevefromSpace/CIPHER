@@ -1,12 +1,17 @@
+#include "cipher/filesystem_tools.hpp"
 #include "cipher/model_tool_loop.hpp"
+#include "cipher/ollama_backend.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// test_model_tool_loop.cpp  —  model-proposed tool calls (v0.5 owner-gated loop)
+// test_model_tool_loop.cpp  â€”  model-proposed tool calls (v0.5 owner-gated loop)
 //
 // A scripted backend returns queued replies, so these tests need no server.
 // They check that every model-proposed call needs owner confirmation, that policy
@@ -67,11 +72,13 @@ struct Harness {
     cipher::ToolRegistry registry;
     int confirmations = 0;
     bool owner_answer = true;
+    std::string last_target;
 
     cipher::ModelToolLoop make_loop(const std::vector<std::string>& offered) {
         return cipher::ModelToolLoop(backend, registry,
-            [this](const std::string&, const std::string&) {
+            [this](const std::string&, const std::string&, const std::string& target) {
                 ++confirmations;
+                last_target = target;
                 return owner_answer;
             },
             30.0, offered);
@@ -248,6 +255,259 @@ void test_oversized_output_is_withheld() {
           "rounds were " + std::to_string(h.backend.prompts.size()));
 }
 
+
+// ---------------------------------------------------------------------------
+// Model-proposed filesystem.read(path)
+// ---------------------------------------------------------------------------
+
+namespace fs = std::filesystem;
+
+// A temp folder holding note.txt and cipher.conf, with cipher.conf registered as a CIPHER-private file.
+struct FsHarness : Harness {
+    fs::path root;
+
+    FsHarness() {
+        static int counter = 0;
+        root = fs::temp_directory_path() / ("cipher_model_fs_" + std::to_string(++counter));
+        fs::remove_all(root);
+        fs::create_directories(root);
+        write("note.txt", "hello from the file");
+        write("cipher.conf", "secret=1");
+        cipher::register_builtin_tools(registry);
+        cipher::register_filesystem_tools(registry, root.string(), {(root / "cipher.conf").string()});
+    }
+    ~FsHarness() { std::error_code ignored; fs::remove_all(root, ignored); }
+
+    void write(const std::string& name, const std::string& text) {
+        std::ofstream(root / name, std::ios::binary) << text;
+    }
+    cipher::ModelToolLoop loop() { return make_loop(cipher::model_offered_tool_ids()); }
+};
+
+void test_fs_valid_read_needs_yes_and_reaches_model() {
+    FsHarness h;
+    h.backend.replies = {"TOOL_CALL: filesystem.read note.txt", "The file greets you."};
+    cipher::ModelToolLoop loop = h.loop();
+
+    check(loop.run("what is in note.txt") == "The file greets you.", "fs read: final answer is returned",
+          "answer missing");
+    check(h.confirmations == 1, "fs read: owner asked exactly once",
+          "confirmations were " + std::to_string(h.confirmations));
+    check(fs::path(h.last_target).filename() == "note.txt" && fs::path(h.last_target).is_absolute(),
+          "fs read: owner sees the resolved absolute target", "target was: " + h.last_target);
+    check(h.backend.prompts.size() == 2 &&
+              contains(h.backend.prompts[1], "Tool result for filesystem.read:\nhello from the file"),
+          "fs read: file content goes back to the model", "second prompt lacked the content");
+    check(contains(h.backend.prompts[0], "filesystem.read:"), "fs read: tool is listed in the prompt",
+          "prompt did not list filesystem.read");
+    check(h.registry.audit_log().size() == 1 &&
+              h.registry.audit_log()[0].origin == cipher::CallOrigin::Model &&
+              h.registry.audit_log()[0].executed,
+          "fs read: audit record is origin=model", "audit record missing");
+}
+
+void test_fs_path_with_spaces_is_one_argument() {
+    FsHarness h;
+    h.write("my notes.txt", "spaced");
+    h.backend.replies = {"TOOL_CALL: filesystem.read my notes.txt", "ok"};
+    cipher::ModelToolLoop loop = h.loop();
+
+    loop.run("q");
+    check(h.backend.prompts.size() == 2 && contains(h.backend.prompts[1], "\nspaced"),
+          "fs read: a path containing spaces is read whole", "file was not read");
+}
+
+void test_fs_denied_or_unanswered_confirmation_never_reads() {
+    {
+        FsHarness h;
+        h.owner_answer = false;
+        h.backend.replies = {"TOOL_CALL: filesystem.read note.txt"};
+        cipher::ModelToolLoop loop = h.loop();
+        const std::string text = loop.run("q");
+        check(text == "Owner confirmation was not given: filesystem.read. Nothing was run." &&
+                  h.registry.audit_log().empty() && h.backend.prompts.size() == 1,
+              "fs read: owner 'no' reads nothing and sends nothing", "text was: " + text);
+    }
+    {
+        // No confirmation callback at all behaves like a refusal.
+        FsHarness h;
+        h.backend.replies = {"TOOL_CALL: filesystem.read note.txt"};
+        cipher::ModelToolLoop loop(h.backend, h.registry, cipher::ModelToolConfirmation{}, 30.0,
+                                   cipher::model_offered_tool_ids());
+        const std::string text = loop.run("q");
+        check(contains(text, "Owner confirmation was not given") && h.registry.audit_log().empty(),
+              "fs read: missing confirmation callback reads nothing", "text was: " + text);
+    }
+}
+
+void test_fs_bad_arguments_run_nothing() {
+    const char* bad[] = {"TOOL_CALL: filesystem.read",                                   // missing path
+                         "TOOL_CALL: filesystem.read    ",                              // blank path
+                         "TOOL_CALL: filesystem.read note.txt\nTOOL_CALL: time.now",   // two lines
+                         "TOOL_CALL: filesystem.read note\t.txt",                      // control character
+                         "TOOL_CALL: time.now note.txt",                               // argument on a bare tool
+                         "TOOL_CALL: system.info x"};
+    for (const char* reply : bad) {
+        FsHarness h;
+        h.backend.replies = {reply};
+        cipher::ModelToolLoop loop = h.loop();
+        const std::string text = loop.run("q");
+        check(text == "The model's tool request was malformed. Nothing was run." && h.confirmations == 0 &&
+                  h.registry.audit_log().empty(),
+              std::string("fs bad argument: nothing runs for ") + reply, "text was: " + text);
+    }
+    FsHarness h;
+    h.backend.replies = {"TOOL_CALL: filesystem.read " + std::string(cipher::ModelToolLoop::kMaxArgumentBytes + 1, 'a')};
+    cipher::ModelToolLoop loop = h.loop();
+    check(contains(loop.run("q"), "malformed") && h.confirmations == 0,
+          "fs bad argument: an over-long path is malformed", "over-long path was accepted");
+}
+
+void test_fs_hostile_paths_are_refused_before_asking_owner() {
+    const char* hostile[] = {"../outside.txt", "sub/../note.txt", "/etc/passwd", "C:/Windows/win.ini",
+                             "C:\\Windows\\win.ini", "\\\\server\\share\\f.txt", "note.txt:stream",
+                             "cipher.conf", "./cipher.conf", "missing.txt", "."};
+    for (const char* path : hostile) {
+        FsHarness h;
+        h.backend.replies = {std::string("TOOL_CALL: filesystem.read ") + path};
+        cipher::ModelToolLoop loop = h.loop();
+        const std::string text = loop.run("q");
+        check(text.rfind("Denied: ", 0) == 0 && h.confirmations == 0 && h.registry.audit_log().empty() &&
+                  h.backend.prompts.size() == 1,
+              std::string("fs hostile path: refused without asking or reading: ") + path, "text was: " + text);
+        check(!contains(text, "secret=1"), std::string("fs hostile path: no content leaks: ") + path,
+              "content leaked");
+    }
+}
+
+void test_fs_private_file_via_hard_link_is_refused() {
+    FsHarness h;
+    std::error_code error;
+    fs::create_hard_link(h.root / "cipher.conf", h.root / "alias.txt", error);
+    if (error) { pass("fs private file: hard link unsupported here, skipped"); return; }
+    h.backend.replies = {"TOOL_CALL: filesystem.read alias.txt"};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("q");
+    check(text.rfind("Denied: ", 0) == 0 && h.confirmations == 0,
+          "fs private file: hard link to cipher.conf is refused", "text was: " + text);
+}
+
+void test_fs_symlink_is_refused() {
+    FsHarness h;
+    std::error_code error;
+    fs::create_symlink(h.root / "note.txt", h.root / "link.txt", error);
+    if (error) { pass("fs symlink: symlinks unsupported here, skipped"); return; }
+    h.backend.replies = {"TOOL_CALL: filesystem.read link.txt"};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("q");
+    check(text.rfind("Denied: ", 0) == 0 && h.confirmations == 0, "fs symlink: link is refused before asking",
+          "text was: " + text);
+}
+
+void test_fs_policy_block_is_refused_without_asking() {
+    FsHarness h;
+    h.registry.policy().add_blacklist_pattern("filesystem.read*");
+    h.backend.replies = {"TOOL_CALL: filesystem.read note.txt"};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("q");
+    check(contains(text, "Denied by permission policy (block): filesystem.read") && h.confirmations == 0,
+          "fs read: a policy block is refused without asking", "text was: " + text);
+}
+
+void test_fs_output_cap_is_enforced() {
+    FsHarness h;
+    h.write("big.txt", std::string(cipher::ModelToolLoop::kMaxToolOutputBytes + 1, 'x'));
+    h.backend.replies = {"TOOL_CALL: filesystem.read big.txt"};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("q");
+    check(contains(text, "larger than 4096 bytes and was not sent to the model") &&
+              h.backend.prompts.size() == 1,
+          "fs cap: a file over 4096 bytes is withheld whole", "text was: " + text);
+
+    FsHarness edge;
+    edge.write("edge.txt", std::string(cipher::ModelToolLoop::kMaxToolOutputBytes, 'y'));
+    edge.backend.replies = {"TOOL_CALL: filesystem.read edge.txt", "done"};
+    cipher::ModelToolLoop edge_loop = edge.loop();
+    check(edge_loop.run("q") == "done", "fs cap: a file of exactly 4096 bytes is sent", "edge file was withheld");
+}
+
+void test_fs_read_refused_on_non_local_route() {
+    FsHarness h;
+    h.backend.route = cipher::ProcessingRoute::Unknown;
+    h.backend.replies = {"TOOL_CALL: filesystem.read note.txt"};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("q");
+    check(contains(text, "not a verified local route") && h.backend.prompts.empty() && h.confirmations == 0,
+          "fs route: nothing is read or sent over a non-local route", "text was: " + text);
+}
+
+void test_fs_unregistered_tool_is_not_offered() {
+    Harness h;
+    h.backend.replies = {"TOOL_CALL: filesystem.read note.txt"};
+    cipher::register_builtin_tools(h.registry);
+    cipher::ModelToolLoop loop = h.make_loop(cipher::model_offered_tool_ids());
+    check(contains(loop.run("q"), "which is not offered") && !contains(h.backend.prompts[0], "filesystem.read"),
+          "fs offered: without a configured root the tool is neither listed nor runnable",
+          "filesystem.read leaked into the prompt or ran");
+}
+
+// Same loop, real OllamaBackend, fake HTTP transport: the Ollama path end to end.
+struct FakeOllama {
+    std::vector<std::string> generate_replies;
+    std::vector<std::string> generate_bodies;
+
+    cipher::HttpResult operator()(int, const std::string&, const std::string& path, const std::string& body, double) {
+        cipher::HttpResult result;
+        result.outcome = cipher::HttpOutcome::Ok;
+        result.status_code = 200;
+        if (path != "/api/generate") { result.body = "{}"; return result; }
+        const std::size_t index = std::min(generate_bodies.size(), generate_replies.size() - 1);
+        generate_bodies.push_back(body);
+        result.body = "{\"model\":\"m\",\"response\":\"" + generate_replies[index] + "\",\"done\":true}";
+        return result;
+    }
+};
+
+void test_fs_read_through_ollama_backend() {
+    FsHarness h;
+    FakeOllama server;
+    server.generate_replies = {"TOOL_CALL: filesystem.read note.txt", "It says hello."};
+    cipher::OllamaBackend ollama(cipher::OllamaConfig{}, std::ref(server));
+    cipher::ModelToolLoop loop(ollama, h.registry,
+        [&h](const std::string&, const std::string&, const std::string&) { ++h.confirmations; return true; },
+        30.0, cipher::model_offered_tool_ids());
+
+    check(loop.run("what does note.txt say") == "It says hello.", "ollama: end-to-end answer is returned",
+          "answer missing");
+    check(h.confirmations == 1, "ollama: owner asked once", "confirmations were " + std::to_string(h.confirmations));
+    check(server.generate_bodies.size() == 2 && contains(server.generate_bodies[1], "hello from the file"),
+          "ollama: file content is only in the follow-up request to the local server", "content missing");
+    check(!server.generate_bodies.empty() && !contains(server.generate_bodies[0], "hello from the file"),
+          "ollama: the first request carries no file content", "content in first request");
+}
+
+// llama.cpp cannot be driven without a model file; this scripted backend reports the same capabilities
+// (VerifiedLocal, no native tools) and proves the loop is backend-agnostic. The real in-process backend
+// is wired to the same loop in main.cpp.
+class LlamaLikeBackend : public ScriptedBackend {
+public:
+    std::string backend_id() const override { return "llama_cpp"; }
+};
+
+void test_fs_read_through_llama_like_backend() {
+    FsHarness h;
+    LlamaLikeBackend llama;
+    llama.replies = {"TOOL_CALL: filesystem.read note.txt", "Llama read it."};
+    cipher::ModelToolLoop loop(llama, h.registry,
+        [&h](const std::string&, const std::string&, const std::string&) { ++h.confirmations; return true; },
+        30.0, cipher::model_offered_tool_ids());
+
+    check(loop.run("q") == "Llama read it." && h.confirmations == 1,
+          "llama: same TOOL_CALL protocol works without native tool calling", "loop did not complete");
+    check(llama.prompts.size() == 2 && contains(llama.prompts[1], "hello from the file"),
+          "llama: result reaches the model on the next round", "content missing");
+}
+
 } // namespace
 
 int main() {
@@ -261,6 +521,19 @@ int main() {
     test_non_local_route_withholds_tool_output();
     test_memory_list_is_never_offered();
     test_oversized_output_is_withheld();
+    test_fs_valid_read_needs_yes_and_reaches_model();
+    test_fs_path_with_spaces_is_one_argument();
+    test_fs_denied_or_unanswered_confirmation_never_reads();
+    test_fs_bad_arguments_run_nothing();
+    test_fs_hostile_paths_are_refused_before_asking_owner();
+    test_fs_private_file_via_hard_link_is_refused();
+    test_fs_symlink_is_refused();
+    test_fs_policy_block_is_refused_without_asking();
+    test_fs_output_cap_is_enforced();
+    test_fs_read_refused_on_non_local_route();
+    test_fs_unregistered_tool_is_not_offered();
+    test_fs_read_through_ollama_backend();
+    test_fs_read_through_llama_like_backend();
 
     std::cout << "\n" << g_passes << " passed, " << g_failures << " failed\n";
     return g_failures == 0 ? 0 : 1;

@@ -13,12 +13,16 @@ namespace cipher {
 
 /**
  * @brief Owner confirmation for one model-proposed call. Returns true only for an exact "yes".
+ *        `target` is what the tool resolved the model's argument to (the canonical file for
+ *        filesystem.read), or empty for a tool without an argument.
  */
-using ModelToolConfirmation = std::function<bool(const std::string& tool_id, const std::string& description)>;
+using ModelToolConfirmation =
+    std::function<bool(const std::string& tool_id, const std::string& description, const std::string& target)>;
 
 /**
- * @brief Tool IDs the model may request. memory.list and filesystem.read are absent on purpose:
- *        their output is private and no memory-to-provider or file-output policy exists yet.
+ * @brief Tool IDs the model may request. memory.list is absent on purpose: its output is private and
+ *        no memory-to-provider policy exists yet. filesystem.read is offered because the loop only runs
+ *        over a VerifiedLocal route and its output never leaves it.
  */
 std::vector<std::string> model_offered_tool_ids();
 
@@ -27,8 +31,10 @@ std::vector<std::string> model_offered_tool_ids();
  *        at most one tool per round. Every request goes through AssistantManager::submit, and every
  *        tool call goes through owner confirmation and then ToolRegistry::invoke.
  *
- * The model's reply must be exactly "TOOL_CALL: <id>" to request a tool. Anything else that mentions
- * TOOL_CALL is malformed and runs nothing.
+ * The model's reply must be exactly one line, "TOOL_CALL: <id>" or, for filesystem.read,
+ * "TOOL_CALL: filesystem.read <relative path>", to request a tool. Anything else that mentions
+ * TOOL_CALL is malformed and runs nothing. The argument is untrusted: the tool resolves and checks it
+ * before the owner is asked, and the registry checks it again when the call runs.
  */
 class ModelToolLoop {
 public:
@@ -36,6 +42,8 @@ public:
     static constexpr int kMaxModelRounds = 3;
     /// shortcut: tool output above this size is withheld instead of truncated, so the model never sees a partial result.
     static constexpr std::size_t kMaxToolOutputBytes = 4096;
+    /// A longer model-supplied argument is malformed; it keeps the confirmation prompt readable.
+    static constexpr std::size_t kMaxArgumentBytes = 1024;
 
     /// Offered IDs that are not registered are dropped. The registry is used for policy and invocation.
     ModelToolLoop(IAssistantBackend& backend,

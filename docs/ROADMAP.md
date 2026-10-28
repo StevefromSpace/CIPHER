@@ -33,7 +33,7 @@ Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → 
 
 ### Known limitations and deferred work
 
-- The in-process llama.cpp backend is CPU-only, text-only and returns whole answers (no streaming); it is opt-in at build time. Provider adapters are not runtime-verified for live use.
+- The in-process llama.cpp backend is CPU-only, returns whole answers, uses the same text `TOOL_CALL` protocol as Ollama (no native tool calling) (no streaming); it is opt-in at build time. Provider adapters are not runtime-verified for live use.
 - Persistent memory is explicit and human-readable only; no semantic search or automatic extraction.
 - Process-tree termination on POSIX does not cover descendants that call `setsid` (Issue #6).
 - Open-source license not yet chosen.
@@ -176,6 +176,7 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
 
 - Merged: PR #27 vendors nlohmann/json 3.11.3 (MIT) for the Ollama backend. About 180 lines of custom JSON code were removed. It also audits model-proposed tool calls with `origin=model` in the owner's registry. See DECISIONS §19.
 - Merged: PR #28 adds owner-typed `ask --memory <id> <question>`. It is the only path from memory to a model: one entry, permission action `share`, local route only, no tool loop, and the id is logged but not the content. See DECISIONS §20.
+- Operation v1 PR 2: the model may propose `filesystem.read <path>` through the existing text `TOOL_CALL` protocol on Ollama and llama.cpp. CIPHER validates the path, shows the resolved file, requires the exact `yes` per call, caps output at 4096 bytes and keeps it on the VerifiedLocal route. No writes, no multi-step execution.
 - Next candidates:
   - Merged: `memory_deny` patterns in `cipher.conf` (blacklist for remember/recall/forget/share).
   - Merged: in-process llama.cpp backend (below).

@@ -255,7 +255,7 @@ void test_memory_share_bypasses_tool_loop() {
     cipher::ToolRegistry registry;
     int confirmations = 0;
     cipher::ModelToolLoop loop(backend, registry,
-                               [&](const std::string&, const std::string&) { ++confirmations; return true; },
+                               [&](const std::string&, const std::string&, const std::string&) { ++confirmations; return true; },
                                30.0, cipher::model_offered_tool_ids());
     const auto memory = memory_with_canary("loop");
     cipher::AskCommands ask(&backend, 30.0, &loop, &memory);

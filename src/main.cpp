@@ -109,13 +109,10 @@ int main() {
 
     // The local backends are opt-in; config allows at most one. With neither set, `ask` reports that it is disabled.
     std::unique_ptr<cipher::IAssistantBackend> backend;
-    cipher::OllamaBackend* ollama = nullptr;
     if (cfg.ollama_port != 0) {
         cipher::OllamaConfig ollama_config;
         ollama_config.port = cfg.ollama_port;
-        auto owned = std::make_unique<cipher::OllamaBackend>(ollama_config);
-        ollama = owned.get();
-        backend = std::move(owned);
+        backend = std::make_unique<cipher::OllamaBackend>(ollama_config);
     } else if (!cfg.llama.model_path.empty()) {
 #ifdef CIPHER_WITH_LLAMA
         auto llama = std::make_unique<cipher::LlamaCppBackend>(cfg.llama);
@@ -132,22 +129,23 @@ int main() {
         return 1;
 #endif
     }
-    // Model tool calls are opt-in and need ollama_port. They share the owner's registry, so the owner's
-    // policy also gates them and `tool log` shows them with origin=model. Only the fixed offered list is exposed.
-    // v0.6 keeps llama.cpp text-only: its answers are never parsed for tool requests.
+    // Model tool calls are opt-in and work with either local backend through the same text TOOL_CALL protocol.
+    // They share the owner's registry, so the owner's policy also gates them and `tool log` shows them with
+    // origin=model. Only the fixed offered list is exposed.
     std::unique_ptr<cipher::ModelToolLoop> tool_loop;
-    if (ollama && cfg.model_tool_calls) {
+    if (backend && cfg.model_tool_calls) {
         tool_loop = std::make_unique<cipher::ModelToolLoop>(
-            *ollama, tools.registry(),
-            [](const std::string& tool_id, const std::string& description) {
-                std::cout << "The model asks to run '" << tool_id << "' (" << description
-                          << "). Type exact yes to allow: " << std::flush;
+            *backend, tools.registry(),
+            [](const std::string& tool_id, const std::string& description, const std::string& target) {
+                std::cout << "The model asks to run '" << tool_id << "' (" << description << ")";
+                if (!target.empty()) std::cout << " on '" << target << "'";
+                std::cout << ". Type exact yes to allow: " << std::flush;
                 std::string answer;
                 return std::getline(std::cin, answer) && answer == "yes";
             },
             120.0, cipher::model_offered_tool_ids());
     } else if (cfg.model_tool_calls) {
-        std::cerr << "model_tool_calls is set but ollama_port is not; model tool calls stay off.\n";
+        std::cerr << "model_tool_calls is set but no local backend is configured; model tool calls stay off.\n";
     }
     cipher::AskCommands ask(backend.get(), 120.0, tool_loop.get(), &memory);
 

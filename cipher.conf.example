@@ -112,7 +112,7 @@ log_level = info
 # CIPHER through llama.cpp: no server, no network. CIPHER never downloads a
 # model; you supply the file. Needs a build with -DCIPHER_WITH_LLAMA=ON.
 # CIPHER refuses to start if the file is missing or not a valid GGUF model.
-# Text only: the model is never offered tools (model_tool_calls is Ollama-only).
+# Text protocol only: tools are offered via model_tool_calls, never native tool calling.
 # Set either ollama_port or llama_model_path, not both.
 #
 # Default: (none, disabled)
@@ -143,10 +143,12 @@ log_level = info
 # ---------------------------------------------------------------------------
 # model_tool_calls
 #
-# true lets a model reply with `TOOL_CALL: time.now` or `TOOL_CALL: system.info`
-# during `ask`. Each proposed call needs you to type exactly `yes`. Memory and
-# file tools are never offered to the model. Effective only when ollama_port is set;
-# ignored with llama_model_path.
+# true lets a model reply with `TOOL_CALL: time.now`, `TOOL_CALL: system.info` or,
+# when filesystem_read_root is set, `TOOL_CALL: filesystem.read <relative path>`
+# during `ask`. CIPHER validates the path, shows you the resolved file, and each
+# proposed call needs you to type exactly `yes`. The file text goes only to the
+# local model. Memory tools are never offered; there are no write tools. Works
+# with ollama_port or llama_model_path (text protocol, no native tool calling).
 #
 # Default: false
 # ---------------------------------------------------------------------------
