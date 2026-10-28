@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace cipher {
 
@@ -29,11 +30,15 @@ struct ToolCommandResult {
  *
  * Ask-tier tools are confirmed on this REPL: the owner must type exactly `yes`. EOF or any
  * other answer denies the call. The streams are parameters so tests can drive the prompt.
+ *
+ * `filesystem.read` refuses the memory file (and its `.tmp` save file) plus @p other_private_files
+ * (the log and configuration files), so a root that overlaps them cannot expose CIPHER's own data.
  */
 class ToolCommands {
 public:
     ToolCommands(const std::string& memory_file_path, const std::string& filesystem_root_path,
-                 std::istream& answers = std::cin, std::ostream& prompts = std::cout);
+                 std::istream& answers = std::cin, std::ostream& prompts = std::cout,
+                 const std::vector<std::string>& other_private_files = {});
 
     // The registry's confirmation callback captures this object, so it must not be copied.
     ToolCommands(const ToolCommands&) = delete;

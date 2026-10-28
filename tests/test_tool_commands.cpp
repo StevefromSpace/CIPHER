@@ -2,6 +2,7 @@
 #include "cipher/tool_commands.hpp"
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -215,6 +216,32 @@ int main() {
         const cipher::ToolResult result = registry.invoke("test.ask", "", "");
         check(result.outcome == cipher::ToolOutcome::Denied && !result.executed && ask_runs == 0,
               "confirm: registry without a callback denies Ask tier", result.output);
+    }
+
+    // --- filesystem.read must not bypass the memory boundary ----------------
+    {
+        // The memory file sits inside the readable root, as a misconfigured cipher.conf could place it.
+        cipher::ToolCommands tools(memory_path, dir.string());
+        const cipher::ToolCommandResult read = tools.execute("tool filesystem.read memory.jsonl");
+        check(contains(read.text, "Denied") && contains(read.text, "not executed") &&
+                  !contains(read.text, "SECRET-BODY-TEXT"),
+              "privacy: filesystem.read cannot read the memory file", read.text);
+    }
+
+    {
+        // Log and config files are passed in by main; the memory save file (<memory>.tmp) is derived.
+        std::ofstream(dir / "cipher.log") << "SECRET-LOG-TEXT";
+        std::ofstream(dir / "cipher.conf") << "SECRET-CONF-TEXT";
+        std::ofstream(dir / "memory.jsonl.tmp") << "SECRET-TMP-TEXT";
+        std::istringstream answers;
+        std::ostringstream prompts;
+        cipher::ToolCommands tools(memory_path, dir.string(), answers, prompts,
+                                   {(dir / "cipher.log").string(), (dir / "cipher.conf").string()});
+        for (const char* name : {"cipher.log", "cipher.conf", "memory.jsonl.tmp"}) {
+            const cipher::ToolCommandResult read = tools.execute(std::string("tool filesystem.read ") + name);
+            check(contains(read.text, "Denied") && !contains(read.text, "SECRET-"),
+                  std::string("privacy: filesystem.read cannot read ") + name, read.text);
+        }
     }
 
     std::error_code ignored;
