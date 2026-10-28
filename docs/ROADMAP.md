@@ -177,7 +177,7 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
 - Merged: PR #27 vendors nlohmann/json 3.11.3 (MIT) for the Ollama backend. About 180 lines of custom JSON code were removed. It also audits model-proposed tool calls with `origin=model` in the owner's registry. See DECISIONS §19.
 - Merged: PR #28 adds owner-typed `ask --memory <id> <question>`. It is the only path from memory to a model: one entry, permission action `share`, local route only, no tool loop, and the id is logged but not the content. See DECISIONS §20.
 - Next candidates:
-  - Owner-configurable memory permission patterns in `cipher.conf`. Today the policy is built in code.
+  - Merged: `memory_deny` patterns in `cipher.conf` (blacklist for remember/recall/forget/share).
   - An in-process runtime (llama.cpp) behind `IAssistantBackend`. This is still the v0.4 item that waits for the owner.
 
 ### Later: voice, interfaces, planning, learning, and self-improvement

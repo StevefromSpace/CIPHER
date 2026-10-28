@@ -113,3 +113,17 @@ log_level = info
 # Default: false
 # ---------------------------------------------------------------------------
 # model_tool_calls = false
+
+# ---------------------------------------------------------------------------
+# memory_deny
+#
+# A pattern that refuses memory commands. Repeat the line for more patterns.
+# A pattern is matched against "<action> <id>", the action alone, or "memory".
+# Actions: remember, recall, forget, share (share = ask --memory).
+# `*` works only at the start or end of a pattern.
+#   memory_deny = share *     never send any memory to a model
+#   memory_deny = *secret     refuse every action on the id "secret"
+#
+# Default: (none)
+# ---------------------------------------------------------------------------
+# memory_deny = share *

@@ -81,7 +81,11 @@ int main() {
 
     // Memory is opt-in. A memory file that exists but cannot be parsed stops
     // startup, so the next save can never overwrite the owner's data.
-    cipher::MemoryCommands memory(cfg.memory_file);
+    cipher::PermissionPolicy memory_policy;
+    for (const std::string& pattern : cfg.memory_deny) {
+        memory_policy.add_blacklist_pattern(pattern);
+    }
+    cipher::MemoryCommands memory(cfg.memory_file, memory_policy);
     const cipher::MemoryResult memory_result = memory.open();
     if (!memory_result.is_ok()) {
         std::cerr << "CIPHER: could not load memory file '" << cfg.memory_file << "':\n";
