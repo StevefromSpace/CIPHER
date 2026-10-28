@@ -133,7 +133,7 @@ add_library(cipher_ollama
 target_include_directories(cipher_ollama PUBLIC include)
 # Vendored single header (nlohmann/json 3.11.3, MIT); SYSTEM keeps its warnings out of /W4.
 target_include_directories(cipher_ollama SYSTEM PRIVATE third_party)
-target_link_libraries(cipher_ollama PUBLIC cipher_assistant cipher_tools)
+target_link_libraries(cipher_ollama PUBLIC cipher_assistant cipher_tools cipher_memory_commands)
 if(WIN32)
     target_link_libraries(cipher_ollama PRIVATE ws2_32)
 endif()

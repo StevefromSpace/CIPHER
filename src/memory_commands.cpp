@@ -128,6 +128,28 @@ std::string MemoryCommands::recall(const std::string& id) const {
     return entry->content;
 }
 
+bool MemoryCommands::share(const std::string& id, std::string& out) const {
+    if (!enabled()) {
+        out = "ask --memory needs memory_file in cipher.conf.";
+        return false;
+    }
+    if (!available_) {
+        out = UNAVAILABLE_TEXT;
+        return false;
+    }
+    out = check_permission("share", id);
+    if (!out.empty()) {
+        return false;
+    }
+    const auto entry = store_.get(id);
+    if (!entry) {
+        out = "No memory with id '" + id + "'.";
+        return false;
+    }
+    out = entry->content;
+    return true;
+}
+
 std::string MemoryCommands::forget(const std::string& id) {
     const std::string denial = check_permission("forget", id);
     if (!denial.empty()) {
