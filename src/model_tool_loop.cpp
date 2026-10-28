@@ -19,6 +19,11 @@ std::string trim(const std::string& text) {
     return text.substr(first, last - first + 1);
 }
 
+constexpr char kMalformedText[] = "The model's tool request was malformed. Nothing was run.";
+constexpr char kMalformedObservation[] =
+    "Observation: your last reply was not one valid tool request, so nothing was run. "
+    "Reply with exactly one line, TOOL_CALL: <tool id> <argument>, or answer in plain text.";
+
 enum class ArgumentMode { None, Required, Optional };
 
 // Only these tools take a model-supplied argument; every other offered tool must be requested bare.
@@ -26,6 +31,13 @@ ArgumentMode argument_mode(const std::string& tool_id) {
     if (tool_id == "filesystem.read" || tool_id == "memory.search") return ArgumentMode::Required;
     if (tool_id == "filesystem.list") return ArgumentMode::Optional;
     return ArgumentMode::None;
+}
+
+bool argument_fits(const std::string& tool_id, const std::string& argument) {
+    const ArgumentMode mode = argument_mode(tool_id);
+    if (mode == ArgumentMode::None) return argument.empty();
+    if (mode == ArgumentMode::Required) return !argument.empty();
+    return true;
 }
 
 // A tool that ran is not a verified answer: the trace tells the owner what CIPHER actually executed.
@@ -74,19 +86,27 @@ ModelToolLoop::ModelToolLoop(IAssistantBackend& backend,
 }
 
 std::string ModelToolLoop::build_prompt(const std::string& question, const std::vector<std::string>& results) const {
-    std::string prompt =
+    // The question leads: a small local model skips the tool protocol when the tool list comes first.
+    std::string prompt = "Question: " + question + "\n\n"
         "You may request one tool by replying with exactly one line: TOOL_CALL: <tool id>\n"
-        "A tool that takes an argument is requested as: TOOL_CALL: <tool id> <argument>\n"
-        "You may use several tools one after another, one per reply. Once you have enough, answer in plain text.\n"
+        "A tool that takes an argument is requested as: TOOL_CALL: <tool id> <argument>\n";
+    // Only offered tool names may appear in the prompt, so the example depends on the offered list.
+    if (std::find(offered_.begin(), offered_.end(), "filesystem.read") != offered_.end()) {
+        prompt += "Example for a file: TOOL_CALL: filesystem.read notes/todo.txt\n";
+    }
+    prompt += "You may use several tools one after another, one per reply.\n"
         "Available tools:\n";
     for (const std::string& id : offered_) {
         prompt += "- " + id + ": " + registry_.find(id)->description + "\n";
     }
-    prompt += "If no tool is needed, answer the question directly.\n";
+    prompt += "You cannot see files or notes yourself; request a tool to get them.\n"
+        "If no tool is needed, answer the question directly.\n";
     for (const std::string& result : results) {
         prompt += "\n" + result + "\n";
     }
-    prompt += "\nQuestion: " + question;
+    if (!results.empty()) {
+        prompt += "\nIf the tool results answer the question, reply in plain text with no TOOL_CALL line.\n";
+    }
     return prompt;
 }
 
@@ -119,15 +139,15 @@ std::string ModelToolLoop::run(const std::string& question) {
 
         std::string tool_id;
         std::string argument;
-        if (!parse_tool_request(reply, tool_id, argument)) {
-            return "The model's tool request was malformed. Nothing was run.";
-        }
-        if (std::find(offered_.begin(), offered_.end(), tool_id) == offered_.end()) {
+        const bool parsed = parse_tool_request(reply, tool_id, argument);
+        if (parsed && std::find(offered_.begin(), offered_.end(), tool_id) == offered_.end()) {
             return "The model asked for tool '" + tool_id + "', which is not offered. Nothing was run.";
         }
-        const ArgumentMode mode = argument_mode(tool_id);
-        if ((mode == ArgumentMode::None && !argument.empty()) || (mode == ArgumentMode::Required && argument.empty())) {
-            return "The model's tool request was malformed. Nothing was run.";
+        // A malformed request ran nothing, so the model gets a correction, within the same failure budget as refusals.
+        if (!parsed || !argument_fits(tool_id, argument)) {
+            if (++failures >= kMaxToolFailures) return kMalformedText;
+            results.push_back(kMalformedObservation);
+            continue;
         }
         if (round == kMaxModelRounds) {
             return "Tool call limit reached. Nothing was run.";
