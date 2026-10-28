@@ -116,7 +116,7 @@ v0.5 keeps the log in memory for the session. Persisting it to disk is deferred,
 
 - **Owner-typed calls and opt-in model-proposed calls.** An owner-typed REPL command (`tool <id> [args]`) can invoke any registered tool. A model may propose a call only when `model_tool_calls = true` and `ollama_port` is set (owner-directed amendment to the original "no model-initiated calls" rule). Each proposal needs the owner's exact `yes`, even for Safe tools, and must be on a fixed offered list (`time.now`, `system.info`). `memory.list` and `filesystem.read` are never offered to the model. `request_tools = false` stays in `AssistantRequest`.
 - Providers receive tool ids and descriptions only as prompt text built by the loop. They never receive a registry, never register tools, and never execute them. The CIPHER-side loop parses a strict `TOOL_CALL: <id>` reply and runs the call itself.
-- Model-proposed calls use a separate registry, so `tool log` shows owner calls only. The audit record has no origin field yet; that is a known gap.
+- Model-proposed calls use the owner's registry, so the owner's permission policy gates them too. Each audit record carries an origin (`owner` or `model`), and `tool log` shows it as `origin=owner|model`.
 - Every invocation passes through the policy **before** the handler is called.
 - Denied calls: zero handler calls, no partial mutation, a clear diagnostic. Tested by byte-identical file checks, as with the memory gate.
 - No shell, no arbitrary process execution, no network, no filesystem writes in v0.5. These are refused at registration, not just by policy.
@@ -195,7 +195,7 @@ Each phase is its own PR, stacked as needed, with CI verified on the exact SHA.
 - **Windows path canonicalization** (junctions, 8.3 short names, case) is hard to get right. Phase 4 needs tests on Windows specifically, and this is the largest security risk in the milestone.
 - **Pattern matching on arguments** (`filesystem.read C:\*`) can be bypassed by `..` or alternate spellings. Matching must run on the canonical target, not the raw argument.
 - **Audit persistence** is deferred. A crash loses the session log.
-- **Single backend pointer** remains; tool results are not sent to a provider in v0.5. Feeding results back into model context is a later decision that needs its own privacy review.
+- **Single backend pointer** remains. Only the opt-in model tool loop sends tool results to a provider: the output of an owner-confirmed `time.now` or `system.info` call, capped at 4096 bytes, to a VerifiedLocal backend. Memory and file contents are never sent.
 - **Owner confirmation** (phase 5) may be needed sooner if the owner wants `Ask` tools in v0.5.
 
 ## 10. Owner decisions (all APPROVED)

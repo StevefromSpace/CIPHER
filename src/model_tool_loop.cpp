@@ -107,7 +107,7 @@ std::string ModelToolLoop::run(const std::string& question) {
             return "Owner confirmation was not given: " + tool_id + ". Nothing was run.";
         }
 
-        const ToolResult result = registry_.invoke(tool_id, "", "");
+        const ToolResult result = registry_.invoke(tool_id, "", "", CallOrigin::Model);
         if (!result.executed) {
             return result.output;
         }

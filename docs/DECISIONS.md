@@ -327,3 +327,11 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
 - **Decision:** Tools are identified by a stable dotted ID and registered statically as built-ins only. Each invocation is evaluated by the existing `PermissionPolicy` against `"<tool id> <target>"` before the handler runs. Denied calls never execute. Results carry an `executed` flag, so "ran and failed" is distinct from "never allowed".
 - **Rejected for v0.5:** provider-supplied or plugin tools, model-initiated tool calls, in-process timeouts, process/network/write side effects (refused at registration), shared broadcast bus invocation, and a second permission system.
 - **Consequence:** PR #12 is not merged as-is. Its tier-denial and dry-run logic is reused in a rewrite on `main`.
+
+### 19. Reuse Before Build: Vendored JSON, Owned Control Plane (v0.6)
+
+- **Status:** Accepted.
+- **Decision:** Generic plumbing is reused when a mature, permissively licensed, dependency-free option exists. The Ollama backend's hand-written JSON reader and writer (about 180 lines) are replaced by the vendored single header `third_party/nlohmann/json.hpp` (nlohmann/json 3.11.3, MIT, SHA-256 `9bea4c8066ef4a1c206b2be5a36302f8926f7fdc6087af5d20b417d0cf103ea6`). It is used with the non-throwing parse and the replacing UTF-8 error handler, so a bad body or prompt becomes an error result, never an exception.
+- **Kept as CIPHER code:** the loopback HTTP client (`src/loopback_http.cpp`). cpp-httplib (MIT) was considered. It does not shrink the code that matters: the 127.0.0.1-only connect, the 4 MiB response bound and the timeout would still need CIPHER wrappers, and it adds a ~10k-line header for a 240-line client. Revisit if CIPHER needs TLS, keep-alive or a server.
+- **Not delegated:** agent and tool-calling runtimes (Ollama native tool calling, LangChain-style frameworks, MCP hosts) were not adopted as the tool loop. The tool registry, permission policy, owner confirmation, offered-tool list, audit and routing stay CIPHER code. A runtime may later sit behind `IAssistantBackend` as a text provider only.
+- **Also:** model-proposed calls now share the owner's registry and are audited with `origin=model`, closing the v0.5 known gap.
