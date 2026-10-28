@@ -3,6 +3,8 @@
 #include "cipher/filesystem_tools.hpp"
 
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace cipher {
 namespace {
@@ -43,14 +45,20 @@ std::string outcome_name(ToolOutcome outcome) {
 } // namespace
 
 ToolCommands::ToolCommands(const std::string& memory_file_path, const std::string& filesystem_root_path,
-                           std::istream& answers, std::ostream& prompts)
+                           std::istream& answers, std::ostream& prompts,
+                           const std::vector<std::string>& other_private_files)
     : answers_(answers), prompts_(prompts) {
     register_builtin_tools(registry_);
     if (!memory_file_path.empty()) {
         register_memory_tools(registry_, memory_file_path);
     }
     if (!filesystem_root_path.empty()) {
-        register_filesystem_tools(registry_, filesystem_root_path);
+        std::vector<std::string> private_files = other_private_files;
+        if (!memory_file_path.empty()) {
+            private_files.push_back(memory_file_path);
+            private_files.push_back(memory_file_path + ".tmp");
+        }
+        register_filesystem_tools(registry_, filesystem_root_path, std::move(private_files));
     }
     registry_.set_ask_confirmation([this](const ToolDefinition& definition, const std::string& target) {
         return confirm(definition, target);

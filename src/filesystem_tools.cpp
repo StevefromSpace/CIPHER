@@ -5,6 +5,8 @@
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -49,7 +51,8 @@ bool is_reparse_point_or_symlink(const fs::path& path) {
 
 // Returns the canonical path of a regular file under the canonical root.
 // Throws std::runtime_error with the reason when the argument is refused.
-fs::path resolve_under_root(const fs::path& canonical_root, const std::string& argument) {
+fs::path resolve_under_root(const fs::path& canonical_root, const std::string& argument,
+                            const std::vector<std::string>& private_files) {
     const std::string relative_text = trim(argument);
     if (relative_text.empty()) {
         throw std::runtime_error("filesystem.read needs a relative path under the allowed folder.");
@@ -85,6 +88,16 @@ fs::path resolve_under_root(const fs::path& canonical_root, const std::string& a
     if (canonical_file.string().compare(0, root_prefix.size(), root_prefix) != 0) {
         throw std::runtime_error("filesystem.read: path resolves outside the allowed folder.");
     }
+
+    // Memory, log and config files are CIPHER's own data and stay behind memory_deny and the owner's REPL.
+    // equivalent() compares file identity, so case, 8.3 names and hard links cannot dodge it; a private
+    // path that does not exist yet yields an error and no match, and is checked again on the next call.
+    for (const std::string& private_file : private_files) {
+        std::error_code error;
+        if (!private_file.empty() && fs::equivalent(canonical_file, private_file, error) && !error) {
+            throw std::runtime_error("filesystem.read refuses CIPHER's own memory, log and configuration files.");
+        }
+    }
     return canonical_file;
 }
 
@@ -100,15 +113,16 @@ fs::path canonical_root_or_throw(const std::string& root) {
 
 } // namespace
 
-void register_filesystem_tools(ToolRegistry& registry, const std::string& root) {
+void register_filesystem_tools(ToolRegistry& registry, const std::string& root,
+                               std::vector<std::string> private_files) {
     registry.register_tool(ToolDefinition{
         "filesystem.read",
         "Reads one text file under the allowed folder. Arguments are a relative path.",
         "filesystem",
         RiskTier::Monitor,
         SideEffect::ReadLocal,
-        [root](const std::string& arguments) {
-            const fs::path file = resolve_under_root(canonical_root_or_throw(root), arguments);
+        [root, private_files](const std::string& arguments) {
+            const fs::path file = resolve_under_root(canonical_root_or_throw(root), arguments, private_files);
             if (fs::file_size(file) > MAX_READ_BYTES) {
                 throw std::runtime_error("filesystem.read: file is larger than the 64 KiB limit.");
             }
@@ -118,8 +132,8 @@ void register_filesystem_tools(ToolRegistry& registry, const std::string& root) 
             }
             return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
         },
-        [root](const std::string& arguments) {
-            return resolve_under_root(canonical_root_or_throw(root), arguments).string();
+        [root, private_files](const std::string& arguments) {
+            return resolve_under_root(canonical_root_or_throw(root), arguments, private_files).string();
         }});
 }
 

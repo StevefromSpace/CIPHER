@@ -82,7 +82,8 @@ log_level = info
 # Optional folder that the owner-only `tool filesystem.read <relative path>`
 # command may read from. Reads are read-only, limited to files under this
 # folder, and capped at 64 KiB. Paths with `..`, absolute paths, symlinks,
-# and junctions are refused.
+# and junctions are refused. CIPHER's own memory file, log file, and
+# cipher.conf are refused even when they sit under this folder.
 #
 # Do not point this at a folder that holds secrets (keys, tokens, password
 # stores) or at your whole home directory.

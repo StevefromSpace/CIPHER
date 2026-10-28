@@ -178,6 +178,65 @@ void test_symlink_is_rejected(const Sandbox& sandbox) {
           "Expected Denied for a path through a symlink");
 }
 
+void test_private_files_are_refused(const Sandbox& sandbox) {
+    write_text(sandbox.root / "cipher_memory.txt", "PRIVATE-MEMORY");
+    write_text(sandbox.root / "logs" / "cipher.log", "PRIVATE-LOG");
+    cipher::ToolRegistry registry;
+    cipher::register_filesystem_tools(registry, sandbox.root.string(),
+                                      {(sandbox.root / "cipher_memory.txt").string(),
+                                       (sandbox.root / "logs" / "cipher.log").string(),
+                                       (sandbox.root / "not-yet-created.conf").string(), ""});
+
+    for (const char* path : {"cipher_memory.txt", "logs/cipher.log"}) {
+        const cipher::ToolResult result = call(registry, path);
+        check(result.outcome == cipher::ToolOutcome::Denied && !result.executed &&
+                  result.output.find("PRIVATE-") == std::string::npos,
+              std::string("filesystem.read: private file is denied: ") + path,
+              "Expected Denied, executed=false and no contents");
+    }
+
+    // Other spellings of the same file must hit the same denial.
+    const cipher::ToolResult redundant = call(registry, "logs//cipher.log");
+    check(redundant.outcome == cipher::ToolOutcome::Denied && !redundant.executed,
+          "filesystem.read: redundant separators do not dodge the private-file check",
+          "Expected Denied for logs//cipher.log");
+#ifdef _WIN32
+    const cipher::ToolResult upper = call(registry, "CIPHER_MEMORY.TXT");
+    check(upper.outcome == cipher::ToolOutcome::Denied && !upper.executed,
+          "filesystem.read: case variant of a private file is denied",
+          "Expected Denied for a differently cased name");
+    const cipher::ToolResult backslash = call(registry, "logs\\cipher.log");
+    check(backslash.outcome == cipher::ToolOutcome::Denied && !backslash.executed,
+          "filesystem.read: backslash spelling of a private file is denied",
+          "Expected Denied for logs\\cipher.log");
+#endif
+
+    // A hard link is the same file, so it cannot be used to read the private content.
+    std::error_code error;
+    fs::create_hard_link(sandbox.root / "cipher_memory.txt", sandbox.root / "alias.txt", error);
+    if (error) {
+        std::cout << "SKIP: hard-link alias (cannot create hard link: " << error.message() << ")\n";
+    } else {
+        const cipher::ToolResult alias = call(registry, "alias.txt");
+        check(alias.outcome == cipher::ToolOutcome::Denied && !alias.executed,
+              "filesystem.read: hard link to a private file is denied",
+              "Expected Denied for a hard link alias");
+    }
+
+    // A private path that did not exist at registration is protected once it appears.
+    write_text(sandbox.root / "not-yet-created.conf", "PRIVATE-CONF");
+    const cipher::ToolResult later = call(registry, "not-yet-created.conf");
+    check(later.outcome == cipher::ToolOutcome::Denied && !later.executed,
+          "filesystem.read: private file created after registration is denied",
+          "Expected Denied once the file exists");
+
+    // Unlisted neighbours stay readable.
+    const cipher::ToolResult neighbour = call(registry, "notes.txt");
+    check(neighbour.outcome == cipher::ToolOutcome::Completed && neighbour.output == "hello from allowed",
+          "filesystem.read: non-private files still read with a private list set",
+          "Expected Completed for an unlisted file");
+}
+
 } // namespace
 
 int main() {
@@ -191,6 +250,7 @@ int main() {
     test_missing_root_denies_instead_of_crashing(sandbox);
     test_size_bound_fails_after_permission(sandbox);
     test_symlink_is_rejected(sandbox);
+    test_private_files_are_refused(sandbox);
 
     std::cout << "\nResults: " << g_passes << " passed, " << g_failures << " failed\n";
     return g_failures == 0 ? 0 : 1;
