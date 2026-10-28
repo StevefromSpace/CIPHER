@@ -108,6 +108,9 @@ AssistantManager::submit   -- validation, prompt budget, local_only => VerifiedL
 - The model loads once at startup. A missing or invalid model stops startup
   with a clear error; there is no fallback to another backend. Setting both
   `ollama_port` and `llama_model_path` is a configuration error.
+- Generation settings come from `cipher.conf` (`llama_context_tokens`,
+  `llama_max_output_tokens`, `llama_temperature`; defaults 4096 / 512 / 0.8),
+  parsed into `Config::llama` and passed unchanged to `LlamaCppBackend`.
 - Each request starts from an empty KV cache, so one `ask` cannot see another.
 - The route is `VerifiedLocal` only once the model has loaded; llama.cpp's
   HTTP, OpenSSL and RPC options are switched off in the build.

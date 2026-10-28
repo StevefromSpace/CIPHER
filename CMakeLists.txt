@@ -267,7 +267,7 @@ if(BUILD_TESTING)
     # v0.6: in-process llama.cpp backend. Real inference runs only when CIPHER_TEST_GGUF names a model file.
     if(CIPHER_WITH_LLAMA)
         add_executable(cipher_llama_tests tests/test_llama_backend.cpp)
-        target_link_libraries(cipher_llama_tests PRIVATE cipher_llama cipher_ollama)
+        target_link_libraries(cipher_llama_tests PRIVATE cipher_llama cipher_ollama cipher_config)
         add_test(NAME cipher_llama_tests COMMAND cipher_llama_tests)
     endif()
 endif()

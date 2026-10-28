@@ -1,11 +1,14 @@
 #include "cipher/ask_commands.hpp"
+#include "cipher/config.hpp"
 #include "cipher/llama_backend.hpp"
 #include "cipher/memory_commands.hpp"
 
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 
 // ---------------------------------------------------------------------------
@@ -102,6 +105,11 @@ void test_invalid_settings_are_unavailable() {
     config.max_output_tokens = 128;
     cipher::LlamaCppBackend backend(config);
     check_fails_closed(backend, "max_output_tokens >= context_tokens", "Invalid llama.cpp settings");
+
+    cipher::LlamaCppConfig nan_config = config_for("unused.gguf");
+    nan_config.temperature = std::nanf("");
+    cipher::LlamaCppBackend nan_backend(nan_config);
+    check_fails_closed(nan_backend, "NaN temperature", "Invalid llama.cpp settings");
 }
 
 void test_unavailable_backend_never_answers_ask() {
@@ -183,6 +191,46 @@ void test_real_denied_memory_never_reaches_model(cipher::LlamaCppBackend& backen
           "real: denied memory is refused before llama.cpp", "text was: " + result.text);
 }
 
+// Builds the backend the way main() does: cipher.conf text -> Config::llama -> LlamaCppBackend.
+std::unique_ptr<cipher::LlamaCppBackend> backend_from_conf(const std::string& path, const std::string& settings) {
+    const cipher::ConfigResult parsed =
+        cipher::ConfigParser::load_from_string("llama_model_path = " + path + "\n" + settings);
+    if (!parsed.ok()) return nullptr;
+    return std::make_unique<cipher::LlamaCppBackend>(parsed.config.llama);
+}
+
+// Each cipher.conf setting must change what llama.cpp actually does, not just sit in Config.
+void test_real_conf_settings_reach_llama(cipher::LlamaCppBackend& small, const std::string& path) {
+    const auto big = backend_from_conf(path, "llama_context_tokens = 2048\nllama_max_output_tokens = 4\n"
+                                             "llama_temperature = 0\n");
+    check(big && big->is_available(), "real conf: backend loads from cipher.conf settings", "parse or load failed");
+    if (!big || !big->is_available()) return;
+
+    // Too long for small's 512-token context, short enough for 2048: llama.cpp must have the bigger window.
+    std::string prompt;
+    for (int i = 0; i < 600; ++i) prompt += "word ";
+    check(small.execute_request(request_for(prompt)).status == cipher::AssistantStatus::Error &&
+              big->execute_request(request_for(prompt)).is_ok(),
+          "real conf: llama_context_tokens sets the llama.cpp context", "the 2048-token context did not take the prompt");
+
+    // Both greedy; the 4-token answer must be the start of the 32-token one.
+    const cipher::AssistantResponse shorter = big->execute_request(request_for("Once upon a time"));
+    const cipher::AssistantResponse longer = small.execute_request(request_for("Once upon a time"));
+    check(shorter.is_ok() && longer.is_ok() && shorter.text.size() < longer.text.size() &&
+              longer.text.compare(0, shorter.text.size(), shorter.text) == 0,
+          "real conf: llama_max_output_tokens caps the answer",
+          "4-token: '" + shorter.text + "' 32-token: '" + longer.text + "'");
+
+    // Greedy runs repeat (checked above); a hot sampler with a random seed should not.
+    const auto hot = backend_from_conf(path, "llama_context_tokens = 512\nllama_max_output_tokens = 32\n"
+                                             "llama_temperature = 5\n");
+    const bool hot_loaded = hot && hot->is_available();
+    const std::string a = hot_loaded ? hot->execute_request(request_for("Once upon a time")).text : "";
+    const std::string b = hot_loaded ? hot->execute_request(request_for("Once upon a time")).text : "";
+    check(hot_loaded && !a.empty() && a != b, "real conf: llama_temperature reaches the sampler",
+          "two answers at temperature 5 were identical: '" + a + "'");
+}
+
 void run_real_runtime_tests() {
     const char* path = std::getenv("CIPHER_TEST_GGUF");
     if (path == nullptr || *path == '\0') {
@@ -200,6 +248,7 @@ void run_real_runtime_tests() {
     test_real_requests_do_not_share_context(backend);
     test_real_failures_are_reported(backend);
     test_real_denied_memory_never_reaches_model(backend);
+    test_real_conf_settings_reach_llama(backend, path);
 }
 
 } // namespace

@@ -119,6 +119,27 @@ log_level = info
 # llama_model_path = C:/Users/you/models/qwen2.5-3b-instruct-q4_k_m.gguf
 
 # ---------------------------------------------------------------------------
+# llama_context_tokens, llama_max_output_tokens, llama_temperature
+#
+# Generation settings for llama_model_path (ignored without it).
+#   llama_context_tokens    — context window in tokens; prompt and answer
+#                             must fit in it. Larger values use more RAM.
+#                             A whole number from 1 to 2147483647.
+#   llama_max_output_tokens — most tokens one answer may generate. A whole
+#                             number from 1 to 2147483647, and smaller than
+#                             llama_context_tokens.
+#   llama_temperature       — sampling randomness: 0 = greedy (the same
+#                             answer every time), higher = more varied. Any
+#                             finite number of 0 or more, written with '.'.
+# A context too large for the machine's memory stops startup with an error.
+#
+# Defaults: 4096, 512, 0.8
+# ---------------------------------------------------------------------------
+# llama_context_tokens = 4096
+# llama_max_output_tokens = 512
+# llama_temperature = 0.8
+
+# ---------------------------------------------------------------------------
 # model_tool_calls
 #
 # true lets a model reply with `TOOL_CALL: time.now` or `TOOL_CALL: system.info`

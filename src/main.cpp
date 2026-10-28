@@ -115,17 +115,15 @@ int main() {
         auto owned = std::make_unique<cipher::OllamaBackend>(ollama_config);
         ollama = owned.get();
         backend = std::move(owned);
-    } else if (!cfg.llama_model_path.empty()) {
+    } else if (!cfg.llama.model_path.empty()) {
 #ifdef CIPHER_WITH_LLAMA
-        cipher::LlamaCppConfig llama_config;
-        llama_config.model_path = cfg.llama_model_path;
-        auto llama = std::make_unique<cipher::LlamaCppBackend>(llama_config);
+        auto llama = std::make_unique<cipher::LlamaCppBackend>(cfg.llama);
         // The owner asked for this model; a model that does not load stops startup instead of disabling `ask`.
         if (!llama->is_available()) {
             std::cerr << "CIPHER: " << llama->load_error() << '\n';
             return 1;
         }
-        log.info("llama.cpp model loaded in-process: " + cfg.llama_model_path);
+        log.info("llama.cpp model loaded in-process: " + cfg.llama.model_path);
         backend = std::move(llama);
 #else
         std::cerr << "CIPHER: llama_model_path is set, but this build has no llama.cpp backend. "

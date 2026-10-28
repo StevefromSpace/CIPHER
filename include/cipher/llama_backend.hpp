@@ -2,6 +2,7 @@
 #define CIPHER_LLAMA_BACKEND_HPP
 
 #include "cipher/assistant_backend.hpp"
+#include "cipher/config.hpp"
 
 #include <chrono>
 #include <memory>
@@ -12,18 +13,6 @@ struct llama_model;
 struct llama_context;
 
 namespace cipher {
-
-/**
- * @brief Settings for the in-process llama.cpp backend.
- *
- * The owner supplies model_path. CIPHER never downloads or picks a model.
- */
-struct LlamaCppConfig {
-    std::string model_path;
-    int context_tokens{4096};    // prompt + answer must fit in this window
-    int max_output_tokens{512};  // generation stops here even without an end token
-    float temperature{0.8f};     // <= 0 selects greedy (deterministic) decoding
-};
 
 /**
  * @brief Assistant backend that runs a local GGUF model in this process via llama.cpp.
