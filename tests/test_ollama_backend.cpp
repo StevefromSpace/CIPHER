@@ -254,6 +254,16 @@ void test_nested_response_key_is_not_used() {
           "text was: " + resp.text);
 }
 
+void test_invalid_utf8_reply_is_an_error() {
+    // Ollama emits valid UTF-8; a listener that does not fails to an error, never an exception.
+    FakeTransport transport{ok_http(200, "{}"), ok_http(200, "{\"response\":\"cut \xE2\x82\"}")};
+    cipher::OllamaBackend backend(default_config(), std::ref(transport));
+
+    const cipher::AssistantResponse resp = backend.execute_request(make_request("hi"));
+    check(resp.status == cipher::AssistantStatus::Error, "invalid UTF-8 in reply is an error",
+          "text was: " + resp.text);
+}
+
 void test_invalid_utf8_prompt_does_not_throw() {
     FakeTransport transport{ok_http(200, "{}"), ok_http(200, kGenerateOk)};
     cipher::OllamaBackend backend(default_config(), std::ref(transport));
@@ -365,6 +375,7 @@ int main() {
     test_surrogate_pair_is_decoded();
     test_non_string_response_field_is_error();
     test_nested_response_key_is_not_used();
+    test_invalid_utf8_reply_is_an_error();
     test_invalid_utf8_prompt_does_not_throw();
     test_success_path_builds_request_and_decodes_response();
     test_model_override_is_used();

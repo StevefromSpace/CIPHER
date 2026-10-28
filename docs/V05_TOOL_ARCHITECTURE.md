@@ -195,7 +195,7 @@ Each phase is its own PR, stacked as needed, with CI verified on the exact SHA.
 - **Windows path canonicalization** (junctions, 8.3 short names, case) is hard to get right. Phase 4 needs tests on Windows specifically, and this is the largest security risk in the milestone.
 - **Pattern matching on arguments** (`filesystem.read C:\*`) can be bypassed by `..` or alternate spellings. Matching must run on the canonical target, not the raw argument.
 - **Audit persistence** is deferred. A crash loses the session log.
-- **Single backend pointer** remains; tool results are not sent to a provider in v0.5. Feeding results back into model context is a later decision that needs its own privacy review.
+- **Single backend pointer** remains. Only the opt-in model tool loop sends tool results to a provider: the output of an owner-confirmed `time.now` or `system.info` call, capped at 4096 bytes, to a VerifiedLocal backend. Memory and file contents are never sent.
 - **Owner confirmation** (phase 5) may be needed sooner if the owner wants `Ask` tools in v0.5.
 
 ## 10. Owner decisions (all APPROVED)
