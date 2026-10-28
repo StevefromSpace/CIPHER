@@ -153,11 +153,14 @@ private:
 void register_builtin_tools(ToolRegistry& registry);
 
 /**
- * @brief Registers memory.list (Monitor), which lists memory entry IDs only from the given file.
+ * @brief Registers memory.list (Monitor), which lists memory entry IDs only from the given file, and
+ *        memory.search <keyword> (Monitor), which returns at most 5 matching entries cut to 200 bytes each.
+ *        memory.search skips entries that @p memory_policy denies for the action "recall <id>".
  *        The file is read at invocation time. Kept separate from register_builtin_tools so the
  *        built-in set stays path-free.
  */
-void register_memory_tools(ToolRegistry& registry, const std::string& memory_file_path);
+void register_memory_tools(ToolRegistry& registry, const std::string& memory_file_path,
+                           PermissionPolicy memory_policy = PermissionPolicy());
 
 } // namespace cipher
 

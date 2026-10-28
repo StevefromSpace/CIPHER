@@ -1,4 +1,5 @@
 #include "cipher/filesystem_tools.hpp"
+#include "cipher/memory.hpp"
 #include "cipher/model_tool_loop.hpp"
 #include "cipher/ollama_backend.hpp"
 
@@ -62,6 +63,10 @@ public:
     }
 };
 
+bool starts_with(const std::string& text, const std::string& prefix) {
+    return text.rfind(prefix, 0) == 0;
+}
+
 bool contains(const std::string& text, const std::string& part) {
     return text.find(part) != std::string::npos;
 }
@@ -105,7 +110,7 @@ void test_yes_runs_tool_and_feeds_result_back() {
     cipher::register_builtin_tools(h.registry);
     cipher::ModelToolLoop loop = h.make_loop(cipher::model_offered_tool_ids());
 
-    check(loop.run("what time is it") == "It is noon.", "yes: final model answer is returned",
+    check(starts_with(loop.run("what time is it"), "It is noon."), "yes: final model answer is returned",
           "text was not returned");
     check(h.confirmations == 1, "yes: owner asked once, even for a Safe tool",
           "confirmations were " + std::to_string(h.confirmations));
@@ -198,8 +203,8 @@ void test_round_cap_stops_repeated_requests() {
     check(static_cast<int>(h.backend.prompts.size()) == cipher::ModelToolLoop::kMaxModelRounds,
           "round cap: submits are bounded",
           "submits were " + std::to_string(h.backend.prompts.size()));
-    check(h.confirmations == cipher::ModelToolLoop::kMaxModelRounds - 1,
-          "round cap: owner is asked once per executed call only",
+    check(h.confirmations == 1,
+          "round cap: a repeated call is confirmed and run once only",
           "confirmations were " + std::to_string(h.confirmations));
 }
 
@@ -289,7 +294,7 @@ void test_fs_valid_read_needs_yes_and_reaches_model() {
     h.backend.replies = {"TOOL_CALL: filesystem.read note.txt", "The file greets you."};
     cipher::ModelToolLoop loop = h.loop();
 
-    check(loop.run("what is in note.txt") == "The file greets you.", "fs read: final answer is returned",
+    check(starts_with(loop.run("what is in note.txt"), "The file greets you."), "fs read: final answer is returned",
           "answer missing");
     check(h.confirmations == 1, "fs read: owner asked exactly once",
           "confirmations were " + std::to_string(h.confirmations));
@@ -373,7 +378,7 @@ void test_fs_hostile_paths_are_refused_before_asking_owner() {
         cipher::ModelToolLoop loop = h.loop();
         const std::string text = loop.run("q");
         check(text.rfind("Denied: ", 0) == 0 && h.confirmations == 0 && h.registry.audit_log().empty() &&
-                  h.backend.prompts.size() == 1,
+                  static_cast<int>(h.backend.prompts.size()) == cipher::ModelToolLoop::kMaxToolFailures,
               std::string("fs hostile path: refused without asking or reading: ") + path, "text was: " + text);
         check(!contains(text, "secret=1"), std::string("fs hostile path: no content leaks: ") + path,
               "content leaked");
@@ -428,7 +433,7 @@ void test_fs_output_cap_is_enforced() {
     edge.write("edge.txt", std::string(cipher::ModelToolLoop::kMaxToolOutputBytes, 'y'));
     edge.backend.replies = {"TOOL_CALL: filesystem.read edge.txt", "done"};
     cipher::ModelToolLoop edge_loop = edge.loop();
-    check(edge_loop.run("q") == "done", "fs cap: a file of exactly 4096 bytes is sent", "edge file was withheld");
+    check(starts_with(edge_loop.run("q"), "done"), "fs cap: a file of exactly 4096 bytes is sent", "edge file was withheld");
 }
 
 void test_fs_read_refused_on_non_local_route() {
@@ -477,7 +482,7 @@ void test_fs_read_through_ollama_backend() {
         [&h](const std::string&, const std::string&, const std::string&) { ++h.confirmations; return true; },
         30.0, cipher::model_offered_tool_ids());
 
-    check(loop.run("what does note.txt say") == "It says hello.", "ollama: end-to-end answer is returned",
+    check(starts_with(loop.run("what does note.txt say"), "It says hello."), "ollama: end-to-end answer is returned",
           "answer missing");
     check(h.confirmations == 1, "ollama: owner asked once", "confirmations were " + std::to_string(h.confirmations));
     check(server.generate_bodies.size() == 2 && contains(server.generate_bodies[1], "hello from the file"),
@@ -502,13 +507,75 @@ void test_fs_read_through_llama_like_backend() {
         [&h](const std::string&, const std::string&, const std::string&) { ++h.confirmations; return true; },
         30.0, cipher::model_offered_tool_ids());
 
-    check(loop.run("q") == "Llama read it." && h.confirmations == 1,
+    check(starts_with(loop.run("q"), "Llama read it.") && h.confirmations == 1,
           "llama: same TOOL_CALL protocol works without native tool calling", "loop did not complete");
     check(llama.prompts.size() == 2 && contains(llama.prompts[1], "hello from the file"),
           "llama: result reaches the model on the next round", "content missing");
 }
 
 } // namespace
+
+void test_v1_multi_step_list_then_read_with_trace() {
+    FsHarness h;
+    h.backend.replies = {"TOOL_CALL: filesystem.list", "TOOL_CALL: filesystem.read note.txt", "It says hello."};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("inspect the folder");
+    check(starts_with(text, "It says hello.") && contains(text, "filesystem.list") && contains(text, "filesystem.read note.txt") &&
+              contains(text, "not verified"),
+          "v1 chain: list then read then answer carries a CIPHER trace", "text was: " + text);
+    check(h.confirmations == 2, "v1 chain: every call asked the owner", "confirmations were " + std::to_string(h.confirmations));
+    check(contains(h.backend.prompts[1], "note.txt") && !contains(h.backend.prompts[1], "cipher.conf"),
+          "v1 list: names shown, private file hidden", "listing was wrong");
+}
+
+void test_v1_recovery_after_refused_path() {
+    FsHarness h;
+    h.backend.replies = {"TOOL_CALL: filesystem.read ../x", "TOOL_CALL: filesystem.read note.txt", "Recovered."};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("q");
+    check(starts_with(text, "Recovered.") && h.confirmations == 1 && contains(h.backend.prompts[1], "was not run"),
+          "v1 recovery: a refused call is reported and the model may correct itself", "text was: " + text);
+}
+
+void test_v1_repeat_failures_stop() {
+    FsHarness h;
+    h.backend.replies = {"TOOL_CALL: filesystem.read missing.txt"};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("q");
+    check(starts_with(text, "Denied: ") && h.confirmations == 0, "v1 recovery: failures are bounded", "text was: " + text);
+}
+
+void test_v1_list_refuses_escape() {
+    FsHarness h;
+    h.backend.replies = {"TOOL_CALL: filesystem.list ../"};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("q");
+    check(starts_with(text, "Denied: ") && h.confirmations == 0, "v1 list: parent directory refused", "text was: " + text);
+}
+
+void test_v1_memory_search_governed() {
+    const fs::path memory_file = fs::temp_directory_path() / "cipher_v1_memory.json";
+    {
+        cipher::MemoryStore store;
+        store.set("alpha", "the launch code is zebra", "general");
+        store.save(memory_file.string());
+    }
+    for (int denied = 0; denied < 2; ++denied) {
+        Harness h;
+        cipher::PermissionPolicy policy;
+        if (denied) policy.add_blacklist_pattern("memory");
+        cipher::register_memory_tools(h.registry, memory_file.string(), policy);
+        h.backend.replies = {"TOOL_CALL: memory.search zebra", "done"};
+        cipher::ModelToolLoop loop = h.make_loop(cipher::model_offered_tool_ids());
+        const std::string text = loop.run("q");
+        const bool leaked = contains(h.backend.prompts.size() > 1 ? h.backend.prompts[1] : "", "launch code");
+        check(h.confirmations == 1 && leaked == (denied == 0),
+              denied ? "v1 memory: deny policy hides entries from the model" : "v1 memory: search returns matches after yes",
+              "text was: " + text);
+    }
+    std::error_code ignored;
+    fs::remove(memory_file, ignored);
+}
 
 int main() {
     test_plain_answer_passes_through_without_tools();
@@ -534,6 +601,11 @@ int main() {
     test_fs_unregistered_tool_is_not_offered();
     test_fs_read_through_ollama_backend();
     test_fs_read_through_llama_like_backend();
+    test_v1_multi_step_list_then_read_with_trace();
+    test_v1_recovery_after_refused_path();
+    test_v1_repeat_failures_stop();
+    test_v1_list_refuses_escape();
+    test_v1_memory_search_governed();
 
     std::cout << "\n" << g_passes << " passed, " << g_failures << " failed\n";
     return g_failures == 0 ? 0 : 1;

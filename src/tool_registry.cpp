@@ -3,6 +3,8 @@
 #include "cipher/cipher_core.hpp"
 #include "cipher/memory.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <ctime>
 #include <exception>
 #include <random>
@@ -203,7 +205,63 @@ void register_builtin_tools(ToolRegistry& registry) {
         }});
 }
 
-void register_memory_tools(ToolRegistry& registry, const std::string& memory_file_path) {
+namespace {
+
+constexpr std::size_t kMemorySearchMaxHits = 5;
+constexpr std::size_t kMemorySearchSnippetBytes = 200;
+constexpr std::size_t kMemorySearchMaxKeywordBytes = 64;
+
+std::string lowered(std::string text) {
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return text;
+}
+
+// Entry text stays one line and printable so it cannot imitate a TOOL_CALL line to the model.
+std::string one_line_snippet(const std::string& content) {
+    std::string out = content.substr(0, kMemorySearchSnippetBytes);
+    for (char& c : out) {
+        if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) c = ' ';
+    }
+    return out;
+}
+
+} // namespace
+
+void register_memory_tools(ToolRegistry& registry, const std::string& memory_file_path,
+                           PermissionPolicy memory_policy) {
+    registry.register_tool(ToolDefinition{
+        "memory.search",
+        "Searches the owner's memory entries for a keyword. Argument is one keyword; returns at most 5 short matches.",
+        "memory",
+        RiskTier::Monitor,
+        SideEffect::ReadLocal,
+        [memory_file_path, memory_policy](const std::string& arguments) {
+            const std::string keyword = lowered(arguments);
+            if (keyword.empty() || keyword.size() > kMemorySearchMaxKeywordBytes) {
+                throw std::runtime_error("memory.search needs a keyword of 1 to 64 bytes.");
+            }
+            MemoryStore store;
+            if (!store.load(memory_file_path).is_ok()) {
+                throw std::runtime_error("memory file could not be read.");
+            }
+            std::string hits;
+            std::size_t count = 0;
+            for (const MemoryEntry& entry : store.all()) {
+                const std::string haystack = lowered(entry.id + "\n" + entry.category + "\n" + entry.content);
+                if (haystack.find(keyword) == std::string::npos) continue;
+                ActionDescriptor descriptor;
+                descriptor.name = "recall";
+                descriptor.target = entry.id;
+                descriptor.category = "memory";
+                descriptor.default_tier = RiskTier::Monitor;
+                const RiskTier tier = memory_policy.evaluate(descriptor);
+                if (tier != RiskTier::Safe && tier != RiskTier::Monitor) continue;
+                if (++count > kMemorySearchMaxHits) break;
+                hits += entry.id + " [" + entry.category + "]: " + one_line_snippet(entry.content) + "\n";
+            }
+            return hits.empty() ? std::string("No matching memory entries.") : hits;
+        }});
+
     registry.register_tool(ToolDefinition{
         "memory.list",
         "Lists memory entry IDs only. Contents are never returned.",

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <set>
 #include <utility>
 
 namespace cipher {
@@ -18,9 +19,21 @@ std::string trim(const std::string& text) {
     return text.substr(first, last - first + 1);
 }
 
+enum class ArgumentMode { None, Required, Optional };
+
 // Only these tools take a model-supplied argument; every other offered tool must be requested bare.
-bool accepts_argument(const std::string& tool_id) {
-    return tool_id == "filesystem.read";
+ArgumentMode argument_mode(const std::string& tool_id) {
+    if (tool_id == "filesystem.read" || tool_id == "memory.search") return ArgumentMode::Required;
+    if (tool_id == "filesystem.list") return ArgumentMode::Optional;
+    return ArgumentMode::None;
+}
+
+// A tool that ran is not a verified answer: the trace tells the owner what CIPHER actually executed.
+std::string with_trace(const std::string& answer, const std::vector<std::string>& ran) {
+    if (ran.empty()) return answer;
+    std::string trace = "\n\n[CIPHER ran:";
+    for (const std::string& call : ran) trace += " " + call + ";";
+    return answer + trace + " the answer above is the model's, not verified by CIPHER.]";
 }
 
 bool has_control_char(const std::string& text) {
@@ -43,7 +56,7 @@ bool parse_tool_request(const std::string& trimmed, std::string& tool_id, std::s
 } // namespace
 
 std::vector<std::string> model_offered_tool_ids() {
-    return {"time.now", "system.info", "filesystem.read"};
+    return {"time.now", "system.info", "filesystem.read", "filesystem.list", "memory.search"};
 }
 
 ModelToolLoop::ModelToolLoop(IAssistantBackend& backend,
@@ -64,6 +77,7 @@ std::string ModelToolLoop::build_prompt(const std::string& question, const std::
     std::string prompt =
         "You may request one tool by replying with exactly one line: TOOL_CALL: <tool id>\n"
         "A tool that takes an argument is requested as: TOOL_CALL: <tool id> <argument>\n"
+        "You may use several tools one after another, one per reply. Once you have enough, answer in plain text.\n"
         "Available tools:\n";
     for (const std::string& id : offered_) {
         prompt += "- " + id + ": " + registry_.find(id)->description + "\n";
@@ -83,6 +97,9 @@ std::string ModelToolLoop::run(const std::string& question) {
     }
 
     std::vector<std::string> results;
+    std::set<std::string> seen_calls;
+    std::vector<std::string> ran;
+    int failures = 0;
     for (int round = 1; round <= kMaxModelRounds; ++round) {
         AssistantRequest request;
         request.prompt = build_prompt(question, results);
@@ -97,7 +114,7 @@ std::string ModelToolLoop::run(const std::string& question) {
 
         const std::string reply = trim(response.text);
         if (reply.find(kToolRequestMarker) == std::string::npos) {
-            return response.text;
+            return with_trace(response.text, ran);
         }
 
         std::string tool_id;
@@ -108,12 +125,19 @@ std::string ModelToolLoop::run(const std::string& question) {
         if (std::find(offered_.begin(), offered_.end(), tool_id) == offered_.end()) {
             return "The model asked for tool '" + tool_id + "', which is not offered. Nothing was run.";
         }
-        // A bare tool never takes an argument, and filesystem.read always needs one.
-        if (accepts_argument(tool_id) == argument.empty()) {
+        const ArgumentMode mode = argument_mode(tool_id);
+        if ((mode == ArgumentMode::None && !argument.empty()) || (mode == ArgumentMode::Required && argument.empty())) {
             return "The model's tool request was malformed. Nothing was run.";
         }
         if (round == kMaxModelRounds) {
             return "Tool call limit reached. Nothing was run.";
+        }
+
+        // The same call twice adds nothing: no second confirmation, no second run.
+        const std::string call_key = tool_id + " " + argument;
+        if (seen_calls.count(call_key) != 0) {
+            results.push_back("Note: '" + call_key + "' was already run and its result is above. Use it or answer.");
+            continue;
         }
 
         // Policy first, so a Block-tier tool is refused without asking the owner.
@@ -124,7 +148,11 @@ std::string ModelToolLoop::run(const std::string& question) {
             try {
                 target = definition->resolve_target(argument);
             } catch (const std::exception& error) {
-                return std::string("Denied: ") + error.what() + " Nothing was run.";
+                // Nothing ran, so the model may see the reason and correct itself, a bounded number of times.
+                const std::string refusal = std::string("Denied: ") + error.what() + " Nothing was run.";
+                if (++failures >= kMaxToolFailures) return refusal;
+                results.push_back("Tool " + tool_id + " was not run. " + refusal);
+                continue;
             }
         }
         const ActionDescriptor action{tool_id, target, definition->category, definition->default_tier};
@@ -140,13 +168,21 @@ std::string ModelToolLoop::run(const std::string& question) {
         // invoke() resolves and checks the argument again, so a file swapped after the prompt is still caught.
         const ToolResult result = registry_.invoke(tool_id, "", argument, CallOrigin::Model);
         if (!result.executed) {
-            return result.output;
+            // Offered tools are read-only, so reporting the failure and letting the model try another call is safe.
+            if (++failures >= kMaxToolFailures) return result.output;
+            results.push_back("Tool " + tool_id + " failed: " + result.output);
+            continue;
         }
         if (result.output.size() > kMaxToolOutputBytes) {
             return "Output of '" + tool_id + "' is larger than " + std::to_string(kMaxToolOutputBytes) +
                    " bytes and was not sent to the model.";
         }
-        results.push_back("Tool result for " + tool_id + ":\n" + result.output);
+        seen_calls.insert(call_key);
+        ran.push_back(argument.empty() ? tool_id : tool_id + " " + argument);
+        // An empty result is a successful run but not evidence of anything; say so.
+        results.push_back(result.output.empty()
+                              ? "Tool result for " + tool_id + ": (empty output; this confirms nothing)"
+                              : "Tool result for " + tool_id + ":\n" + result.output);
     }
     return "Tool call limit reached. Nothing was run.";
 }

@@ -39,7 +39,9 @@ std::vector<std::string> model_offered_tool_ids();
 class ModelToolLoop {
 public:
     /// shortcut: the loop is capped at kMaxModelRounds submits (prompt budget and latency); raise only with a measured need.
-    static constexpr int kMaxModelRounds = 3;
+    static constexpr int kMaxModelRounds = 6;
+    /// Refused or failed tool calls tolerated before the loop stops and shows the owner the last reason.
+    static constexpr int kMaxToolFailures = 2;
     /// shortcut: tool output above this size is withheld instead of truncated, so the model never sees a partial result.
     static constexpr std::size_t kMaxToolOutputBytes = 4096;
     /// A longer model-supplied argument is malformed; it keeps the confirmation prompt readable.
