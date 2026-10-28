@@ -145,10 +145,58 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# cipher_llama  —  optional in-process llama.cpp backend (v0.6)
+#
+# Off by default so the core build stays dependency-free. When ON, CMake fetches the
+# pinned llama.cpp source release below and checks its SHA-256. For an offline build,
+# pass -DFETCHCONTENT_SOURCE_DIR_LLAMA_CPP=<path to an unpacked llama.cpp v0.7.0>.
+# No model is downloaded; the owner sets llama_model_path in cipher.conf.
+# ---------------------------------------------------------------------------
+option(CIPHER_WITH_LLAMA "Build the in-process llama.cpp backend" OFF)
+
+if(CIPHER_WITH_LLAMA)
+    if(CMAKE_VERSION VERSION_LESS 3.24)
+        message(FATAL_ERROR "CIPHER_WITH_LLAMA needs CMake 3.24 or newer (found ${CMAKE_VERSION}).")
+    endif()
+    include(FetchContent)
+    # Static, CPU-only libllama with no tools, server, network (RPC/HTTPS) or shared common code.
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
+    set(LLAMA_BUILD_UI OFF CACHE BOOL "" FORCE)
+    set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
+    set(GGML_RPC OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(llama_cpp
+        URL https://github.com/ggml-org/llama.cpp/archive/refs/tags/v0.7.0.tar.gz
+        URL_HASH SHA256=55d67acf3ad2ad747a9bbeb75f9f0e173dbcc0d1753a471038a90c819421c5e1
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(llama_cpp)
+
+    add_library(cipher_llama src/llama_backend.cpp)
+    target_include_directories(cipher_llama PUBLIC include)
+    target_link_libraries(cipher_llama PUBLIC cipher_assistant PRIVATE llama)
+    target_compile_definitions(cipher_llama PUBLIC CIPHER_WITH_LLAMA)
+
+    if(MSVC)
+        target_compile_options(cipher_llama PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(cipher_llama PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # cipher  —  main executable
 # ---------------------------------------------------------------------------
 add_executable(cipher src/main.cpp)
 target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands cipher_tools cipher_ollama)
+if(CIPHER_WITH_LLAMA)
+    target_link_libraries(cipher PRIVATE cipher_llama)
+endif()
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -215,4 +263,11 @@ if(BUILD_TESTING)
     add_executable(cipher_model_tool_loop_tests tests/test_model_tool_loop.cpp)
     target_link_libraries(cipher_model_tool_loop_tests PRIVATE cipher_ollama)
     add_test(NAME cipher_model_tool_loop_tests COMMAND cipher_model_tool_loop_tests)
+
+    # v0.6: in-process llama.cpp backend. Real inference runs only when CIPHER_TEST_GGUF names a model file.
+    if(CIPHER_WITH_LLAMA)
+        add_executable(cipher_llama_tests tests/test_llama_backend.cpp)
+        target_link_libraries(cipher_llama_tests PRIVATE cipher_llama cipher_ollama)
+        add_test(NAME cipher_llama_tests COMMAND cipher_llama_tests)
+    endif()
 endif()

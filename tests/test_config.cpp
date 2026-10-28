@@ -222,6 +222,31 @@ static void test_ollama_port_rejects_invalid_values() {
     }
 }
 
+static void test_llama_model_path_parses_and_excludes_ollama_port() {
+    check(cipher::ConfigParser::defaults().llama_model_path.empty(),
+          "llama_model_path default: llama.cpp backend off",
+          "Expected an empty llama_model_path in defaults");
+
+    const cipher::ConfigResult r =
+        cipher::ConfigParser::load_from_string("llama_model_path = models/tiny.gguf\n");
+    check(r.ok() && r.config.llama_model_path == "models/tiny.gguf",
+          "llama_model_path: path is stored",
+          "Expected llama_model_path 'models/tiny.gguf'");
+
+    const cipher::ConfigResult empty = cipher::ConfigParser::load_from_string("llama_model_path =\n");
+    check(!empty.ok() && empty.errors[0].line == 1,
+          "llama_model_path: empty value is rejected",
+          "Expected an error on line 1 for an empty llama_model_path");
+
+    // Two backends at once would leave it unclear which one sees the owner's prompts.
+    const cipher::ConfigResult both = cipher::ConfigParser::load_from_string(
+        "ollama_port = 11434\nllama_model_path = models/tiny.gguf\n");
+    check(!both.ok() && both.errors[0].line == 0 && both.config.ollama_port == 0 &&
+              both.config.llama_model_path.empty(),
+          "llama_model_path: rejected together with ollama_port",
+          "Expected a file-level error and defaults when both backends are set");
+}
+
 static void test_model_tool_calls_defaults_off_and_parses_bool() {
     check(!cipher::ConfigParser::defaults().model_tool_calls,
           "model_tool_calls default: off",
@@ -446,6 +471,7 @@ int main() {
     test_filesystem_read_root_defaults_to_unavailable();
     test_ollama_port_defaults_to_disabled_and_parses_valid_ports();
     test_ollama_port_rejects_invalid_values();
+    test_llama_model_path_parses_and_excludes_ollama_port();
     test_model_tool_calls_defaults_off_and_parses_bool();
     test_load_from_string_unknown_key();
     test_load_from_string_invalid_log_level();

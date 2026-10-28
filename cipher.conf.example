@@ -96,19 +96,35 @@ log_level = info
 #
 # Optional port of a local Ollama server on 127.0.0.1. Enables the owner-typed
 # `ask <question>` command. CIPHER only sends to 127.0.0.1 and refuses to send
-# if the route is not verified local. Ask sends the typed text only: no memory,
-# no tools.
+# if the route is not verified local. Ask sends the typed text, plus a saved
+# note only when you name it with `ask --memory <id>`.
+# Set either ollama_port or llama_model_path, not both.
 #
 # Default: 0 (disabled)
 # ---------------------------------------------------------------------------
 # ollama_port = 11434
 
 # ---------------------------------------------------------------------------
+# llama_model_path
+#
+# Optional path of a local GGUF model file. `ask` then runs the model inside
+# CIPHER through llama.cpp: no server, no network. CIPHER never downloads a
+# model; you supply the file. Needs a build with -DCIPHER_WITH_LLAMA=ON.
+# CIPHER refuses to start if the file is missing or not a valid GGUF model.
+# Text only: the model is never offered tools (model_tool_calls is Ollama-only).
+# Set either ollama_port or llama_model_path, not both.
+#
+# Default: (none, disabled)
+# ---------------------------------------------------------------------------
+# llama_model_path = C:/Users/you/models/qwen2.5-3b-instruct-q4_k_m.gguf
+
+# ---------------------------------------------------------------------------
 # model_tool_calls
 #
 # true lets a model reply with `TOOL_CALL: time.now` or `TOOL_CALL: system.info`
 # during `ask`. Each proposed call needs you to type exactly `yes`. Memory and
-# file tools are never offered to the model. Effective only when ollama_port is set.
+# file tools are never offered to the model. Effective only when ollama_port is set;
+# ignored with llama_model_path.
 #
 # Default: false
 # ---------------------------------------------------------------------------

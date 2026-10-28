@@ -8,9 +8,10 @@
 #
 # A dedicated Python job tests the assistant integration adapters and developer pipeline.
 #
-# No AI providers, paid services, API keys, or model downloads are involved.
-# The entire build is self-contained: standard library only, no third-party
-# runtime dependencies.
+# The default build needs no AI providers, paid services, API keys, or models.
+# The llama-runtime job builds the optional in-process llama.cpp backend
+# (pinned source tarball, SHA-256 checked by CMake) and runs real inference on
+# a tiny pinned GGUF test model (also SHA-256 checked). No API keys are used.
 
 name: CI
 
@@ -54,6 +55,40 @@ jobs:
       #    --output-on-failure prints the test program's stdout/stderr only
       #    when a test fails, keeping successful logs clean.
       - name: Test (CTest)
+        run: ctest --test-dir build -C Release --output-on-failure
+
+  llama-runtime:
+    name: llama.cpp Runtime (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+
+    env:
+      # ggml-org/models at a fixed commit; 1.2 MB story model, enough to prove real inference.
+      TEST_GGUF_URL: https://huggingface.co/ggml-org/models/resolve/499bc8821c6b12b4e53c5bffcb21ec206f212d81/tinyllamas/stories260K.gguf
+      TEST_GGUF_SHA256: 270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Download pinned test model
+        shell: bash
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/stories260K.gguf" "$TEST_GGUF_URL"
+          echo "$TEST_GGUF_SHA256  $RUNNER_TEMP/stories260K.gguf" | sha256sum -c -
+          echo "CIPHER_TEST_GGUF=$RUNNER_TEMP/stories260K.gguf" >> "$GITHUB_ENV"
+
+      - name: Configure (CMake, llama.cpp on)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCIPHER_WITH_LLAMA=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test (CTest, includes real inference)
         run: ctest --test-dir build -C Release --output-on-failure
 
   python-tests:

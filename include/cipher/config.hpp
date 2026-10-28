@@ -26,6 +26,8 @@
 //   ollama_port — 127.0.0.1 port of a local Ollama server for the `ask` command (default: 0 = disabled)
 //   model_tool_calls — true lets `ask` answers request time.now/system.info, each needing owner "yes" (default: false)
 //   memory_deny — repeatable; a pattern that refuses memory actions, e.g. `share *` (default: none)
+//   llama_model_path — local .gguf file for the in-process llama.cpp backend; needs a
+//                      -DCIPHER_WITH_LLAMA=ON build and excludes ollama_port (default: empty = off)
 //
 // What is NOT stored here:
 //   Passwords, API keys, tokens, or any other secrets.  The example file
@@ -69,6 +71,7 @@ struct Config {
     int         ollama_port = 0;             // 0 = `ask` disabled; otherwise 1-65535
     bool        model_tool_calls = false;    // Effective only when ollama_port is set
     std::vector<std::string> memory_deny;    // Blacklist patterns for memory actions ("<action> <id>")
+    std::string llama_model_path;            // Empty = llama.cpp backend off
 };
 
 // ---------------------------------------------------------------------------
