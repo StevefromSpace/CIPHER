@@ -1,6 +1,7 @@
 #include "cipher/model_tool_loop.hpp"
 
 #include <algorithm>
+#include <exception>
 #include <utility>
 
 namespace cipher {
@@ -17,18 +18,32 @@ std::string trim(const std::string& text) {
     return text.substr(first, last - first + 1);
 }
 
-// The trimmed reply must be exactly "TOOL_CALL: <id>". Extra words or lines make it malformed.
-bool parse_tool_request(const std::string& trimmed, std::string& tool_id) {
+// Only these tools take a model-supplied argument; every other offered tool must be requested bare.
+bool accepts_argument(const std::string& tool_id) {
+    return tool_id == "filesystem.read";
+}
+
+bool has_control_char(const std::string& text) {
+    return std::any_of(text.begin(), text.end(), [](unsigned char c) { return c < 0x20 || c == 0x7f; });
+}
+
+// The trimmed reply must be one line: "TOOL_CALL: <id>" or "TOOL_CALL: <id> <argument>". The argument is
+// everything after the first space and stays untrusted text; the tool's own validation judges it.
+bool parse_tool_request(const std::string& trimmed, std::string& tool_id, std::string& argument) {
     const std::string prefix = kToolRequestPrefix;
     if (trimmed.rfind(prefix, 0) != 0) return false;
-    tool_id = trimmed.substr(prefix.size());
-    return !tool_id.empty() && tool_id.find_first_of(" \t\r\n") == std::string::npos;
+    const std::string rest = trimmed.substr(prefix.size());
+    if (has_control_char(rest)) return false;
+    const std::size_t space = rest.find(' ');
+    tool_id = rest.substr(0, space);
+    argument = space == std::string::npos ? "" : trim(rest.substr(space + 1));
+    return !tool_id.empty() && argument.size() <= ModelToolLoop::kMaxArgumentBytes;
 }
 
 } // namespace
 
 std::vector<std::string> model_offered_tool_ids() {
-    return {"time.now", "system.info"};
+    return {"time.now", "system.info", "filesystem.read"};
 }
 
 ModelToolLoop::ModelToolLoop(IAssistantBackend& backend,
@@ -48,6 +63,7 @@ ModelToolLoop::ModelToolLoop(IAssistantBackend& backend,
 std::string ModelToolLoop::build_prompt(const std::string& question, const std::vector<std::string>& results) const {
     std::string prompt =
         "You may request one tool by replying with exactly one line: TOOL_CALL: <tool id>\n"
+        "A tool that takes an argument is requested as: TOOL_CALL: <tool id> <argument>\n"
         "Available tools:\n";
     for (const std::string& id : offered_) {
         prompt += "- " + id + ": " + registry_.find(id)->description + "\n";
@@ -85,11 +101,16 @@ std::string ModelToolLoop::run(const std::string& question) {
         }
 
         std::string tool_id;
-        if (!parse_tool_request(reply, tool_id)) {
+        std::string argument;
+        if (!parse_tool_request(reply, tool_id, argument)) {
             return "The model's tool request was malformed. Nothing was run.";
         }
         if (std::find(offered_.begin(), offered_.end(), tool_id) == offered_.end()) {
             return "The model asked for tool '" + tool_id + "', which is not offered. Nothing was run.";
+        }
+        // A bare tool never takes an argument, and filesystem.read always needs one.
+        if (accepts_argument(tool_id) == argument.empty()) {
+            return "The model's tool request was malformed. Nothing was run.";
         }
         if (round == kMaxModelRounds) {
             return "Tool call limit reached. Nothing was run.";
@@ -97,17 +118,27 @@ std::string ModelToolLoop::run(const std::string& question) {
 
         // Policy first, so a Block-tier tool is refused without asking the owner.
         const ToolDefinition* definition = registry_.find(tool_id);
-        const ActionDescriptor action{tool_id, "", definition->category, definition->default_tier};
+        // The tool resolves the untrusted argument first, so the owner confirms the real target, not the model's text.
+        std::string target;
+        if (definition->resolve_target) {
+            try {
+                target = definition->resolve_target(argument);
+            } catch (const std::exception& error) {
+                return std::string("Denied: ") + error.what() + " Nothing was run.";
+            }
+        }
+        const ActionDescriptor action{tool_id, target, definition->category, definition->default_tier};
         if (registry_.policy().evaluate(action) == RiskTier::Block) {
             return "Denied by permission policy (block): " + tool_id + ". Nothing was run.";
         }
 
         // Every model-originated call needs an owner "yes", even for Safe-tier tools.
-        if (!confirm_ || !confirm_(tool_id, definition->description)) {
+        if (!confirm_ || !confirm_(tool_id, definition->description, target)) {
             return "Owner confirmation was not given: " + tool_id + ". Nothing was run.";
         }
 
-        const ToolResult result = registry_.invoke(tool_id, "", "", CallOrigin::Model);
+        // invoke() resolves and checks the argument again, so a file swapped after the prompt is still caught.
+        const ToolResult result = registry_.invoke(tool_id, "", argument, CallOrigin::Model);
         if (!result.executed) {
             return result.output;
         }
