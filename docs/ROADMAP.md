@@ -184,6 +184,15 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
 - Configurable generation settings: `llama_context_tokens`, `llama_max_output_tokens` and `llama_temperature` in `cipher.conf` (defaults 4096 / 512 / 0.8, unchanged when omitted). Validated at parse time; real-inference tests check each value changes llama.cpp's behavior. See DECISIONS §21.
 - Known limits: no GPU build, no streaming, no model tool calls through llama.cpp.
 
+### v1 assistant loop (MERGED: PRs #34–#36)
+
+- Model tool loop: up to 6 model rounds per `ask`. Each round is one text `TOOL_CALL` line. CIPHER validates the call, checks policy, requires an exact `yes` per call, runs the tool, and returns the result to the model as an observation.
+- Offered tools: `time.now`, `system.info`, `filesystem.read`, `filesystem.list` (folder listing, private files hidden, 100-entry cap), `memory.search` (keyword search over memory entries, `memory_deny` honored, the keyword shown at confirmation). `memory.list` and writes are not offered to the model.
+- Bounded failures: a refused, failed, or malformed call is sent back once more as an observation. Two such failures end the turn with the reason. A repeated identical call runs no second time. Final answers carry a footer naming the tools that ran, and say the answer is not verified by CIPHER.
+- Real-model check (this machine, not CI): Ollama `qwen2.5:3b` through `ask` proposed `filesystem.read status.txt`, CIPHER showed the target and the owner typed `yes`, and the model answered from the result.
+- Known limits: a 3B model sometimes sends two bad requests in a row (for example a wrong folder argument), which uses the failure budget and ends the turn. The llama.cpp path is covered by scripted tests only. No memory writes to the model, no verification step beyond the trace footer, no streaming.
+- Research decisions (`CIPHER-upstream-research/ARCHITECTURE_DECISION.md`, provenance in `THIRD_PARTY_NOTICES.md`): permission tiers and bounded context reimplemented clean-room, Leon tool progressive loading and OpenClaw dreaming reference-only, desktop control and messenger channels rejected. Python adapter loopback and timeout hardening already present in `integrations/contract.py` and tested.
+
 ### Later: voice, interfaces, planning, learning, and self-improvement
 
 Each capability should be introduced behind tests, narrow permissions, observable behavior, and recovery paths. Model training and self-upgrading are advanced milestones, not prerequisites for a useful first version.
