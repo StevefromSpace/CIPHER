@@ -51,9 +51,10 @@ Credentials, tokens, keys, passwords and private memory contents must never be p
 
 1. Agents must not approve their own implementation.
 2. The implementation agent and the reviewer for the same PR must be different agent instances.
-3. A PR that touches a security-sensitive path (section 7) requires an independent security reviewer. That reviewer must not be the same agent or the same model family as the implementation agent.
+3. A PR that touches a security-sensitive path (section 7) requires an independent security reviewer. The target independent model family is **Gemini**. A reviewer from the same family as the implementation agent does not satisfy this rule. A second Claude agent, in any role or configuration, does not satisfy it either.
+4. Until a Gemini security reviewer is actually wired into the pipeline, security-sensitive work escalates to `NEEDS_HUMAN`. Nothing in this contract claims that the Gemini reviewer is implemented.
 
-Current limitation: the existing pipeline uses Claude for both implementation (Agent A) and review (Agent B) (`orchestrator.py:106`, `:150`). Until a second model family is wired in, security-sensitive PRs cannot satisfy rule 3 and must be `NEEDS_HUMAN` (section 12).
+Current limitation: the existing pipeline uses Claude for both implementation (Agent A) and review (Agent B) (`orchestrator.py:106`, `:150`). Security-sensitive PRs therefore cannot satisfy rule 3 today and must be `NEEDS_HUMAN` (section 12.2).
 
 ### 1.6 Owner approval is not required for routine PRs
 
@@ -76,8 +77,9 @@ Rules for verdicts:
 2. `APPROVE` is not allowed while any `BLOCKER` or `HIGH` finding is open.
 3. `CHANGES_REQUESTED` is not allowed with zero `BLOCKER` or `HIGH` findings. Use `APPROVE` with `MEDIUM` or `LOW` notes instead.
 4. `BLOCKED` means the reviewer did not evaluate the code. A reviewer that evaluated the code and found a problem uses `CHANGES_REQUESTED`.
-5. A verdict of `BLOCKED` does not count toward the review-round limit (section 5), but it is reported and must not be repeated silently. Two consecutive `BLOCKED` results on the same PR escalate to `NEEDS_HUMAN`.
-6. Disagreement between two reviewers is resolved by escalation, not by vote (section 5.3).
+5. The first `BLOCKED` result for a PR is a diagnostic or environmental stop. It is reported with its cause and does not by itself end the job.
+6. A repeated `BLOCKED` result counts against the bounded loop budget in section 5.5. It never permits an unbounded retry. When the limit is reached, the job escalates to `NEEDS_HUMAN`.
+7. Disagreement between two reviewers is resolved by escalation, not by vote (section 5.3).
 
 Mapping to the existing code (`tools/pipeline/adapters/base.py`): `APPROVE` = `passed=True` and `model_reviewed=True`; `CHANGES_REQUESTED` = `passed=False` and `model_reviewed=True`; `BLOCKED` = `model_reviewed=False`. `NEEDS_HUMAN` has no code representation yet (section 12).
 
@@ -214,9 +216,9 @@ GitHub permission column in each role is the ceiling. Protected operations (sect
 - **Authority:** determines whether a PR touches a security-sensitive path; reviews it for security issues; may raise `BLOCKER` findings.
 - **Prohibited:** reviewing a change it implemented; writing or publishing exploit code or step-by-step attack paths; reading or printing secret values; approving on the basis of CI results alone.
 - **Outputs:** a `CIPHER-REVIEW v1` block with `role: security`, classifying each finding by CWE or OWASP category where applicable.
-- **GitHub:** may comment and review; may add `changes-requested`; may open a security issue with a description that contains no exploit detail.
-- **Escalation:** to `NEEDS_HUMAN` for any `HIGH` or `BLOCKER` finding in a protected area, a suspected credential exposure, or a suspected vulnerability in a released version. Opus under section 3.3 for serious concerns.
-- **Failure:** if the security reviewer model family equals the implementation family, the review is void and the PR is `NEEDS_HUMAN` (section 1.5, 12).
+- **GitHub:** may comment and review on the PR; may add `changes-requested`. It must not automatically create public issues, public comments or public advisories that disclose a security finding. Public disclosure is owner-gated (section 6). Sensitive findings stay private and are reported to the owner through the escalation path.
+- **Escalation:** to `NEEDS_HUMAN` for any `HIGH` or `BLOCKER` finding in a protected area, a suspected credential exposure, or a suspected vulnerability in a released version. Opus under section 3.3 for serious concerns. Any question of public disclosure goes to `NEEDS_HUMAN`.
+- **Failure:** if the security reviewer model family is the same as the implementation family, the review is void. This includes any Claude reviewer. The PR escalates to `NEEDS_HUMAN` (sections 1.5 and 12.2).
 - **Completion:** every changed line in a security-sensitive path is classified; the reviewed head SHA is recorded.
 - **Model:** Haiku for triage; Sonnet for difficult decisions; Opus only for serious concerns.
 
@@ -250,7 +252,7 @@ GitHub permission column in each role is the ceiling. Protected operations (sect
 - **Authority:** prepares release notes and a release checklist; verifies the release gate conditions. Tagging and publishing a GitHub release are owner-gated.
 - **Prohibited:** creating a tag, a GitHub release, a license file, or a version bump without owner authorization; deleting branches, worktrees or tags; any change to `docs/RELEASE.md` owner WIP.
 - **Outputs:** a release gate report: `RELEASE READY: YES` or `RELEASE READY: NO`, with the blocking items only, plus the exact commands the owner would run.
-- **GitHub:** may comment on a release tracking issue; may draft release notes in a temporary file, not in the repository, unless the owner asks.
+- **GitHub:** may comment on a release tracking issue. Release notes content is prepared in a temporary artifact only. It must not automatically modify owner-controlled release documentation in the repository. Release, tag and publication are owner-gated.
 - **Escalation:** every release action is `NEEDS_HUMAN` with the exact command and SHA.
 - **Failure:** missing CI on the target SHA means `RELEASE READY: NO`.
 - **Completion:** the gate report lists the SHA, CI results, version, and owner-only decisions.
@@ -262,16 +264,13 @@ These limits are policy. They must be enforced by the orchestrator through count
 
 ### 5.1 Implementation attempts
 
-1. The first implementation attempt is attempt 1.
-2. A repair attempt triggered by a `CHANGES_REQUESTED`, failed test or failed CI is attempt 2 (at most one repair).
-3. The count is per job, not per agent.
+1. The limit is **2 implementation executions total per issue**: one initial implementation (attempt 1) and one retry (attempt 2).
+2. The retry is triggered by a `CHANGES_REQUESTED`, failed test or failed CI. It receives the failure history.
+3. The count is per job, not per agent, and is stored in the job record.
+4. The orchestrator may assign attempt 2 to a higher model tier (section 3.3). That is a model change within the same execution, not a third execution.
+5. If attempt 2 fails, the job becomes `NEEDS_HUMAN`. No further implementation execution is started. Escalation is a human handoff, not another implementation run.
 
-Current code: `MAX_REPAIR_ROUNDS = 2` (`config.py:31`) allows two repair rounds, which is up to three implementation runs. This contract allows two implementation attempts in total. The two counts differ. The contract value is the target; the code change is section 12, item 1.
-
-After attempt 2 fails:
-
-1. The orchestrator performs exactly one escalation attempt: the same task is run by the next model tier (section 3.2) with the failure history.
-2. If that escalation attempt fails, the job becomes `NEEDS_HUMAN`.
+Current code: `MAX_REPAIR_ROUNDS = 2` (`config.py:31`) allows two repair rounds, which is up to three implementation runs. The contract limit is 2 total. The code must be reconciled to the contract (section 12.2, item 1). The contract is the target.
 
 ### 5.2 Review rounds
 
@@ -279,7 +278,7 @@ After attempt 2 fails:
 2. At most 3 review rounds per PR.
 3. A new head SHA starts a new review round only if it results from a repair; a re-run on the same SHA does not count and is not allowed.
 4. After round 3 without `APPROVE`, the PR is `NEEDS_HUMAN`.
-5. `BLOCKED` results do not count toward the 3 rounds (section 2, rule 5).
+5. `BLOCKED` results do not count toward the 3 rounds. They count against the separate BLOCKED budget in section 5.5.
 
 ### 5.3 Disagreement
 
@@ -291,11 +290,21 @@ After attempt 2 fails:
 
 If a repair round produces the same findings (same file, line and category) as the previous round, the orchestrator stops the loop and sets `NEEDS_HUMAN`. It does not count as a new attempt.
 
+### 5.5 Repeated BLOCKED
+
+1. The first `BLOCKED` result on a PR is a diagnostic or environmental stop (section 2, rule 5).
+2. A repeated `BLOCKED` result is any `BLOCKED` after the first one on the same job. Each repeat uses one unit of the BLOCKED budget.
+3. The BLOCKED budget is 1 unit per job. The first repeat (the second `BLOCKED` on the job) escalates to `NEEDS_HUMAN` immediately, whether or not the cause changed. This bounds BLOCKED-driven waiting to a single human handoff.
+4. A `BLOCKED` result never starts an implementation execution. It only stops, reports, or escalates.
+5. A `BLOCKED` result does not reset the implementation or review counters.
+
 ## 6. Owner-gated operations
 
 These operations require `NEEDS_HUMAN` and explicit owner authorization in the current task. Approval given for one operation does not extend to others.
 
 - release, tag, or GitHub release creation;
+- modification of owner-controlled release documentation in the repository (release notes are drafted in a temporary artifact only, section 4.9);
+- public security disclosure: public issues, comments, or advisories that reveal a security finding (sensitive findings stay private and escalate, section 4.6);
 - licensing or legal decisions, including adding a `LICENSE` file;
 - force pushes, history rewriting, and destructive repository operations;
 - branch or worktree deletion, unless explicitly delegated;
@@ -338,10 +347,9 @@ Issue (ready)
   -> Next Issue
 
 Review or QA or CI failure:
-  -> Implementation (attempt 2, with findings)
+  -> Implementation (attempt 2, with findings; may use a higher model tier)
   -> QA -> CI -> Review
-  -> if attempt 2 fails: one escalation attempt at the next model tier
-  -> if that fails: NEEDS_HUMAN
+  -> if attempt 2 fails: NEEDS_HUMAN (no further implementation execution)
 ```
 
 Review rounds are counted separately (section 5.2).
@@ -353,7 +361,7 @@ A PR may be merged only when all of these are true for its head SHA:
 1. Every required CI check passes (the five checks in the `main-governance` ruleset).
 2. QA verdict is `APPROVE`, or QA is not applicable with a stated reason.
 3. Reviewer verdict is `APPROVE`.
-4. Security reviewer verdict is `APPROVE` when section 7 applies, from an independent family (section 1.5).
+4. Security reviewer verdict is `APPROVE` when section 7 applies, from an independent family (section 1.5). The target family is Gemini. Until a Gemini reviewer is wired into the pipeline, this gate cannot be satisfied, and the PR is `NEEDS_HUMAN`.
 5. No open `BLOCKER` or `HIGH` finding.
 6. The diff contains only files in the accepted scope.
 7. The PR has no protected-operation content (section 6).
@@ -407,6 +415,7 @@ The orchestrator stops automation for the job and sets the state to `NEEDS_HUMAN
 | GitHub object | Meaning | Who may write |
 |---|---|---|
 | Issue | unit of work and its accepted scope | owner creates; orchestrator labels |
+| Routine workflow-state labels | state of an automated job | orchestrator, after triage (below) |
 | Issue comment | communication and verdicts' human-readable summary | any role, own comments only |
 | Branch | one implementation attempt series for one issue | Implementation Agent |
 | Commit | one logical change | Implementation Agent, Documentation Agent |
@@ -414,6 +423,8 @@ The orchestrator stops automation for the job and sets the state to `NEEDS_HUMAN
 | PR review | quality gate verdict | Reviewer, QA, Security Agent |
 | Label | current state | orchestrator; Implementation/Review may set their own state labels |
 | Milestone | release grouping | owner only |
+
+Label ownership: after triage, the orchestrator creates and updates the routine workflow-state labels below. Human intervention is reserved for governance changes and protected operations (section 6). Agents may set only the state labels named in their own role entry.
 
 State labels (orchestrator-managed, mutually exclusive where noted):
 
@@ -447,30 +458,32 @@ This section records checks made against this contract and the current code. Gap
 
 - Authority: section 1.1 gives a single order; section 6 lists owner-gated operations; section 9 repeats them. Consistent.
 - Verdicts: the four verdicts in section 2 are the only values; section 2 rule 3 and rule 4 prevent ambiguous use of `CHANGES_REQUESTED` and `BLOCKED`. Consistent.
-- Escalation: section 5.1 (one escalation after two attempts, then `NEEDS_HUMAN`) and section 3.2 (no de-escalation) agree. The escalation tier in section 3.3 is Sonnet for Haiku failures and Opus only under section 3.3 conditions. Consistent.
+- Escalation: section 5.1 (2 implementation executions total; a failed attempt 2 goes to `NEEDS_HUMAN`; the higher-tier model change in attempt 2 is not an extra run) and section 3.2 (no de-escalation) agree. The escalation tier in section 3.3 is Sonnet for Haiku failures and Opus only under section 3.3 conditions. Consistent.
 - Model allocation: section 3.1 targets sum to within the stated bands (Haiku 80–90 + Sonnet 10–18 + Opus 1–2 covers the full range with overlap at the edges). Targets are stated as policy, not as measured.
 - Retry limits: section 5.1 (2 implementation attempts) conflicts with `config.py:31` (`MAX_REPAIR_ROUNDS = 2`, meaning 3 runs). Recorded in 12.2.
 - GitHub permissions: no role may merge except the orchestrator; no role may change rulesets, branches it does not own, or milestones. Implementation agent may not approve its own PR. Consistent with 1.5.
 
 ### 12.2 Gaps with the current code
 
-1. **Repair limit mismatch.** `MAX_REPAIR_ROUNDS = 2` allows 3 implementation runs. The contract allows 2. Fix: change the orchestrator to count total attempts, or document the code value as the contract value. Owner decision: confirm which.
+1. **Repair limit mismatch.** `MAX_REPAIR_ROUNDS = 2` allows 3 implementation runs. The contract allows 2 total (section 5.1, Decided). Fix: change the orchestrator to count total attempts. The code change is a future engineering task, not part of this document.
 2. **No `NEEDS_HUMAN` verdict in code.** Current results expose `passed` and `model_reviewed` only. Fix: add a result field or job state for `NEEDS_HUMAN`.
-3. **No single-family separation.** Agent A (implementation) and Agent B (reviewer) both use Claude (`orchestrator.py:106`, `:150`). Section 1.5 cannot be met for security PRs until a second model family is configured. Until then, section 7 PRs are `NEEDS_HUMAN`.
+3. **No independent Gemini reviewer.** Agent A (implementation) and Agent B (reviewer) both use Claude (`orchestrator.py:106`, `:150`). No Gemini adapter exists. Section 1.5 cannot be met for security PRs until a Gemini reviewer is wired in. Until then, section 7 PRs are `NEEDS_HUMAN`.
 4. **No model tier selection or escalation counters.** Section 3 is a target only.
 5. **No GitHub integration.** `tools/pipeline/` runs local jobs. Labels, reviews and merges are not wired to GitHub.
 6. **Existing role document is stale.** `.agents/skills/cipher-subagents/SKILL.md` names roles and test counts that do not match the repository and conflicts with the roles here. It should be replaced by a pointer to this contract in a separate, owner-approved change.
 7. **Review verdict wording.** Section 2 maps verdicts to `passed`/`model_reviewed` for the existing adapters. Verify the mapping in code before relying on it.
 
-### 12.3 Open design questions for the owner
+### 12.3 Decided owner policy
 
-1. Confirm the attempt limit: 2 total implementation attempts (this contract) versus 3 runs (current code, `MAX_REPAIR_ROUNDS = 2`).
-2. Which second model family should serve as the independent security reviewer?
-3. Should `BLOCKED` results count toward review limits after the first occurrence? (This draft says no, with escalation after two consecutive.)
-4. Who creates `ready` labels: the owner only, or the orchestrator after triage?
-5. Should the Release Agent be allowed to draft release notes into the repository, or only into a temporary file (current draft: temporary file only)?
-6. Is the Security Agent allowed to open security issues publicly, or only privately to the owner?
+These decisions were made by the owner and are reflected in the sections above. They are not open questions.
+
+1. **Implementation limit:** 2 implementation executions total per issue (one initial implementation and one retry). Escalation is not an implementation run (section 5.1). The code value `MAX_REPAIR_ROUNDS = 2` must be reconciled to this (section 12.2, item 1).
+2. **Independent security reviewer:** the target family is Gemini. A second Claude agent does not satisfy independence. Until Gemini is wired in, security-sensitive work escalates to `NEEDS_HUMAN` (sections 1.5, 12.2 item 3).
+3. **BLOCKED handling:** the first `BLOCKED` is a diagnostic or environmental stop. Repeated `BLOCKED` results count against the bounded budget in section 5.5 and escalate at its limit.
+4. **Ready-state labels:** the orchestrator creates and updates routine workflow-state labels after triage. Human intervention is reserved for governance changes and protected operations (section 10).
+5. **Release notes:** the Release Agent may prepare content in a temporary artifact only. It must not automatically modify owner-controlled release documentation in the repository. Release, tag and publication remain owner-gated (sections 4.9, 6).
+6. **Security disclosure:** the Security Agent must not automatically create public security issues. Public disclosure is owner-gated. Sensitive findings stay private and escalate (sections 4.6, 6).
 
 ## 13. Version
 
-Contract version: 1 (proposed). Changes require an owner-approved PR that updates this file and, where relevant, `docs/DECISIONS.md`.
+Contract version: 1 (proposed; decided policy in section 12.3 applied by correction commit to PR #47). Changes require an owner-approved PR that updates this file and, where relevant, `docs/DECISIONS.md`.
