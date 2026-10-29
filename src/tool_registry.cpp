@@ -225,6 +225,17 @@ std::string one_line_snippet(const std::string& content) {
     return out;
 }
 
+// True unless the owner's memory policy denies the action on this entry (Block or Ask both count as not allowed).
+bool memory_action_allowed(const PermissionPolicy& memory_policy, const std::string& action, const std::string& id) {
+    ActionDescriptor descriptor;
+    descriptor.name = action;
+    descriptor.target = id;
+    descriptor.category = "memory";
+    descriptor.default_tier = RiskTier::Monitor;
+    const RiskTier tier = memory_policy.evaluate(descriptor);
+    return tier == RiskTier::Safe || tier == RiskTier::Monitor;
+}
+
 } // namespace
 
 void register_memory_tools(ToolRegistry& registry, const std::string& memory_file_path,
@@ -249,13 +260,11 @@ void register_memory_tools(ToolRegistry& registry, const std::string& memory_fil
             for (const MemoryEntry& entry : store.all()) {
                 const std::string haystack = lowered(entry.id + "\n" + entry.category + "\n" + entry.content);
                 if (haystack.find(keyword) == std::string::npos) continue;
-                ActionDescriptor descriptor;
-                descriptor.name = "recall";
-                descriptor.target = entry.id;
-                descriptor.category = "memory";
-                descriptor.default_tier = RiskTier::Monitor;
-                const RiskTier tier = memory_policy.evaluate(descriptor);
-                if (tier != RiskTier::Safe && tier != RiskTier::Monitor) continue;
+                // Sending a snippet to the model is a share, so memory_deny = share * must also hide it.
+                if (!memory_action_allowed(memory_policy, "recall", entry.id) ||
+                    !memory_action_allowed(memory_policy, "share", entry.id)) {
+                    continue;
+                }
                 if (++count > kMemorySearchMaxHits) break;
                 hits += one_line_snippet(entry.id) + " [" + one_line_snippet(entry.category) + "]: " +
                         one_line_snippet(entry.content) + "\n";

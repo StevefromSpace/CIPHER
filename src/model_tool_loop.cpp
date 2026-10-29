@@ -41,49 +41,69 @@ bool argument_fits(const std::string& tool_id, const std::string& argument) {
     return true;
 }
 
-// A tool that ran is not a verified answer: the trace tells the owner what CIPHER actually executed.
+// Every model answer is the model's, not verified by CIPHER; the trace says which tools actually ran.
 std::string with_trace(const std::string& answer, const std::vector<std::string>& ran) {
-    if (ran.empty()) return answer;
+    if (ran.empty()) return answer + "\n\n[CIPHER ran no tools; the answer above is the model's, not verified by CIPHER.]";
     std::string trace = "\n\n[CIPHER ran:";
     for (const std::string& call : ran) trace += " " + call + ";";
     return answer + trace + " the answer above is the model's, not verified by CIPHER.]";
+}
+
+// Hitting the round cap after tools ran must not claim that nothing ran.
+std::string round_limit_answer(const std::vector<std::string>& ran) {
+    if (ran.empty()) return "Tool call limit reached. Nothing was run.";
+    std::string calls;
+    for (const std::string& call : ran) calls += (calls.empty() ? "" : "; ") + call;
+    return "Tool call limit reached. Nothing more was run. Calls that ran: " + calls + ".";
 }
 
 bool has_control_char(const std::string& text) {
     return std::any_of(text.begin(), text.end(), [](unsigned char c) { return c < 0x20 || c == 0x7f; });
 }
 
-// Adds the file names in a filesystem.list result. Folder names end with '/' and are skipped.
-void add_listed_files(const std::string& listing, std::vector<std::string>& files) {
+std::string lowered(const std::string& text) {
+    std::string result = text;
+    for (char& c : result) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return result;
+}
+
+// Adds the paths of the files in a filesystem.list result, relative to the listed folder. Folder names end with '/'.
+void add_listed_files(std::string folder, const std::string& listing, std::vector<std::string>& paths) {
+    while (!folder.empty() && folder.back() == '/') folder.pop_back();
+    if (folder == ".") folder.clear();
     std::size_t start = 0;
     while (start < listing.size()) {
         std::size_t end = listing.find('\n', start);
         if (end == std::string::npos) end = listing.size();
         const std::string name = listing.substr(start, end - start);
         if (!name.empty() && name.back() != '/' && name.front() != '(' && name.rfind("...", 0) != 0) {
-            files.push_back(name);
+            paths.push_back(folder.empty() ? name : folder + "/" + name);
         }
         start = end + 1;
     }
 }
 
-// True when name appears in text as a whole word, so "status.txt" does not match "old-status.txt".
+// Case-insensitive, and the name must sit at letter/digit boundaries, so "status.txt" does not match "status.txt2".
 bool mentions_word(const std::string& text, const std::string& name) {
+    const std::string haystack = lowered(text);
+    const std::string needle = lowered(name);
     const auto is_word_char = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0; };
-    for (std::size_t at = text.find(name); at != std::string::npos; at = text.find(name, at + 1)) {
-        const bool starts_word = at == 0 || !is_word_char(text[at - 1]);
-        const std::size_t after = at + name.size();
-        const bool ends_word = after >= text.size() || !is_word_char(text[after]);
+    for (std::size_t at = haystack.find(needle); at != std::string::npos; at = haystack.find(needle, at + 1)) {
+        const bool starts_word = at == 0 || !is_word_char(haystack[at - 1]);
+        const std::size_t after = at + needle.size();
+        const bool ends_word = after >= haystack.size() || !is_word_char(haystack[after]);
         if (starts_word && ends_word) return true;
     }
     return false;
 }
 
-// Verification: a file the question names and the listing showed must be read before the model may answer.
-std::string first_unread_named_file(const std::string& question, const std::vector<std::string>& listed,
-                                    const std::set<std::string>& read) {
-    for (const std::string& name : listed) {
-        if (read.count(name) == 0 && mentions_word(question, name)) return name;
+// Verification: a file the question names and the listing showed must be read at that exact path before the model may answer.
+std::string first_unread_named_file(const std::string& question, const std::vector<std::string>& listed_paths,
+                                    const std::set<std::string>& read_paths) {
+    for (const std::string& path : listed_paths) {
+        const std::size_t slash = path.rfind('/');
+        const std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+        if (read_paths.count(path) == 0 && mentions_word(question, name)) return path;
     }
     return "";
 }
@@ -176,7 +196,11 @@ std::string ModelToolLoop::run(const std::string& question) {
             const std::string unread = first_unread_named_file(question, listed_files, read_files);
             if (unread.empty()) return with_trace(response.text, ran);
             // The answer would be about a file CIPHER has not shown the model, so it is not accepted.
-            if (++unverified_answers >= kMaxUnverifiedAnswers) return "Not verified: the question asks about " + unread + ", which was never read.";
+            // A correction needs a later round in which a tool may still run; the last round never runs one.
+            const bool correction_fits = round + 1 < kMaxModelRounds;
+            if (!correction_fits || ++unverified_answers >= kMaxUnverifiedAnswers) {
+                return "Not verified: the question asks about " + unread + ", which was never read.";
+            }
             results.push_back("Observation: the question asks about " + unread + ", which you have not read yet. " +
                               "Reply with exactly this line and nothing else: TOOL_CALL: filesystem.read " + unread);
             continue;
@@ -194,9 +218,7 @@ std::string ModelToolLoop::run(const std::string& question) {
             results.push_back(kMalformedObservation);
             continue;
         }
-        if (round == kMaxModelRounds) {
-            return "Tool call limit reached. Nothing was run.";
-        }
+        if (round == kMaxModelRounds) return round_limit_answer(ran);
 
         // The same call twice adds nothing: no second confirmation, no second run.
         const std::string call_key = tool_id + " " + argument;
@@ -243,7 +265,7 @@ std::string ModelToolLoop::run(const std::string& question) {
                    " bytes and was not sent to the model.";
         }
         seen_calls.insert(call_key);
-        if (tool_id == "filesystem.list") add_listed_files(result.output, listed_files);
+        if (tool_id == "filesystem.list") add_listed_files(argument, result.output, listed_files);
         if (tool_id == "filesystem.read") read_files.insert(argument);
         ran.push_back(argument.empty() ? tool_id : tool_id + " " + argument);
         // An empty result is a successful run but not evidence of anything; say so.
@@ -251,7 +273,7 @@ std::string ModelToolLoop::run(const std::string& question) {
                               ? "Tool result for " + tool_id + ": (empty output; this confirms nothing)"
                               : "Tool result for " + tool_id + ":\n" + result.output);
     }
-    return "Tool call limit reached. Nothing was run.";
+    return round_limit_answer(ran);
 }
 
 } // namespace cipher
