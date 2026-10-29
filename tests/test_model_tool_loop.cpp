@@ -528,6 +528,25 @@ void test_v1_multi_step_list_then_read_with_trace() {
           "v1 list: names shown, private file hidden", "listing was wrong");
 }
 
+void test_v1_named_unread_file_is_read_before_answer() {
+    FsHarness h;
+    h.backend.replies = {"TOOL_CALL: filesystem.list", "It says hello.", "TOOL_CALL: filesystem.read note.txt", "It says hello."};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("What is in the folder? Then tell me what note.txt says.");
+    check(starts_with(text, "It says hello.") && contains(text, "filesystem.read note.txt") && h.confirmations == 2 &&
+              h.backend.prompts.size() == 4 && contains(h.backend.prompts[2], "TOOL_CALL: filesystem.read note.txt"),
+          "v1 verify: an answer about a listed file waits until that file is read", "text was: " + text);
+}
+
+void test_v1_named_unread_file_stops_after_budget() {
+    FsHarness h;
+    h.backend.replies = {"TOOL_CALL: filesystem.list", "It says hello.", "It says bye."};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("What is in the folder? Then tell me what note.txt says.");
+    check(starts_with(text, "Not verified: the question asks about note.txt") && h.confirmations == 1,
+          "v1 verify: ungrounded answers stop within the failure budget", "text was: " + text);
+}
+
 void test_v1_recovery_after_refused_path() {
     FsHarness h;
     h.backend.replies = {"TOOL_CALL: filesystem.read ../x", "TOOL_CALL: filesystem.read note.txt", "Recovered."};
@@ -613,6 +632,8 @@ int main() {
     test_fs_read_through_ollama_backend();
     test_fs_read_through_llama_like_backend();
     test_v1_multi_step_list_then_read_with_trace();
+    test_v1_named_unread_file_is_read_before_answer();
+    test_v1_named_unread_file_stops_after_budget();
     test_v1_recovery_after_refused_path();
     test_v1_malformed_reply_gets_correction();
     test_v1_repeat_failures_stop();
