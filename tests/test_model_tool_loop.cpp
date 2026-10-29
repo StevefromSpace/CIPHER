@@ -96,8 +96,9 @@ void test_plain_answer_passes_through_without_tools() {
     cipher::register_builtin_tools(h.registry);
     cipher::ModelToolLoop loop = h.make_loop(cipher::model_offered_tool_ids());
 
-    check(loop.run("say pong") == "pong", "plain answer: text is returned",
-          "text was not returned");
+    const std::string text = loop.run("say pong");
+    check(contains(text, "pong") && contains(text, "CIPHER ran no tools"), "plain answer: text is returned with footer",
+          "text was: " + text);
     check(h.confirmations == 0, "plain answer: owner is not asked",
           "confirmations were " + std::to_string(h.confirmations));
     check(h.backend.prompts.size() == 1, "plain answer: one round",
@@ -198,8 +199,8 @@ void test_round_cap_stops_repeated_requests() {
     cipher::ModelToolLoop loop = h.make_loop(cipher::model_offered_tool_ids());
 
     const std::string text = loop.run("loop forever");
-    check(text == "Tool call limit reached. Nothing was run.", "round cap: limit message is returned",
-          "text was: " + text);
+    check(text == "Tool call limit reached. Nothing more was run. Calls that ran: time.now.",
+          "round cap: limit message names the calls that ran", "text was: " + text);
     check(static_cast<int>(h.backend.prompts.size()) == cipher::ModelToolLoop::kMaxModelRounds,
           "round cap: submits are bounded",
           "submits were " + std::to_string(h.backend.prompts.size()));
@@ -607,7 +608,63 @@ void test_v1_memory_search_governed() {
     fs::remove(memory_file, ignored);
 }
 
+void test_v1_memory_share_deny_hides_entries() {
+    const fs::path memory_file = fs::temp_directory_path() / "cipher_v1_share_memory.json";
+    {
+        cipher::MemoryStore store;
+        store.set("alpha", "the launch code is zebra", "general");
+        store.save(memory_file.string());
+    }
+    Harness h;
+    cipher::PermissionPolicy policy;
+    policy.add_blacklist_pattern("share *");
+    cipher::register_memory_tools(h.registry, memory_file.string(), policy);
+    h.backend.replies = {"TOOL_CALL: memory.search zebra", "done"};
+    cipher::ModelToolLoop loop = h.make_loop(cipher::model_offered_tool_ids());
+    loop.run("q");
+    check(h.backend.prompts.size() > 1 && !contains(h.backend.prompts[1], "launch code"),
+          "v1 memory: memory_deny share * keeps snippets from the model",
+          "prompt leaked the entry");
+    std::error_code ignored;
+    fs::remove(memory_file, ignored);
+}
+
+void test_v1_read_in_subfolder_verifies_listed_file() {
+    FsHarness h;
+    fs::create_directories(h.root / "sub");
+    h.write("sub/note.txt", "hello from the subfolder");
+    h.backend.replies = {"TOOL_CALL: filesystem.list sub", "It says hello.", "TOOL_CALL: filesystem.read sub/note.txt", "It says hello."};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("What is in sub? Then tell me what note.txt says.");
+    check(starts_with(text, "It says hello.") && h.confirmations == 2 && h.backend.prompts.size() == 4,
+          "v1 verify: a read of the listed subfolder path satisfies the check", "text was: " + text);
+}
+
+void test_v1_question_name_match_ignores_case() {
+    FsHarness h;
+    h.backend.replies = {"TOOL_CALL: filesystem.list", "It says hello.", "TOOL_CALL: filesystem.read note.txt", "It says hello."};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("What is in the folder? Then tell me what NOTE.TXT says.");
+    check(starts_with(text, "It says hello.") && h.confirmations == 2 && h.backend.prompts.size() == 4,
+          "v1 verify: a named file in different case still waits for a read", "text was: " + text);
+}
+
+void test_v1_last_round_answer_is_not_sent_back_for_correction() {
+    FsHarness h;
+    h.backend.replies = {"TOOL_CALL: filesystem.list", "TOOL_CALL: filesystem.list", "TOOL_CALL: filesystem.list",
+                         "TOOL_CALL: filesystem.list", "It says hello."};
+    cipher::ModelToolLoop loop = h.loop();
+    const std::string text = loop.run("What is in the folder? Then tell me what note.txt says.");
+    check(starts_with(text, "Not verified: the question asks about note.txt") && h.confirmations == 1 &&
+              h.backend.prompts.size() == 5,
+          "v1 verify: an unverified answer in the last round stops at once", "text was: " + text);
+}
+
 int main() {
+    test_v1_memory_share_deny_hides_entries();
+    test_v1_read_in_subfolder_verifies_listed_file();
+    test_v1_question_name_match_ignores_case();
+    test_v1_last_round_answer_is_not_sent_back_for_correction();
     test_plain_answer_passes_through_without_tools();
     test_yes_runs_tool_and_feeds_result_back();
     test_no_runs_nothing();

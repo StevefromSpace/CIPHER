@@ -157,7 +157,9 @@ fs::path canonical_root_or_throw(const std::string& root) {
 void register_filesystem_tools(ToolRegistry& registry, const std::string& root,
                                std::vector<std::string> private_files) {
     // Naming the folder keeps a small model from prefixing paths with it (notes/notes/...).
-    const std::string folder = fs::path(root).lexically_normal().filename().string();
+    fs::path folder_path = fs::path(root).lexically_normal();
+    if (!folder_path.has_filename()) folder_path = folder_path.parent_path();
+    const std::string folder = folder_path.filename().string();
     registry.register_tool(ToolDefinition{
         "filesystem.read",
         "Reads one text file in the allowed folder \"" + folder + "\". Arguments are a path relative to that folder, without the folder name.",
