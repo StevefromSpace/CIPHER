@@ -126,6 +126,8 @@ endif()
 # ---------------------------------------------------------------------------
 add_library(cipher_orchestration
     src/orchestration/state_machine.cpp
+    src/orchestration/github_facts.cpp
+    src/orchestration/orchestrator.cpp
 )
 target_include_directories(cipher_orchestration PUBLIC include)
 
@@ -281,6 +283,10 @@ if(BUILD_TESTING)
     add_executable(cipher_orchestration_tests tests/test_orchestration.cpp)
     target_link_libraries(cipher_orchestration_tests PRIVATE cipher_orchestration)
     add_test(NAME cipher_orchestration_tests COMMAND cipher_orchestration_tests)
+
+    add_executable(cipher_orchestration_flow_tests tests/test_orchestration_flow.cpp)
+    target_link_libraries(cipher_orchestration_flow_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_flow_tests COMMAND cipher_orchestration_flow_tests)
 
     # v0.6: in-process llama.cpp backend. Real inference runs only when CIPHER_TEST_GGUF names a model file.
     if(CIPHER_WITH_LLAMA)
