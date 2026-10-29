@@ -122,6 +122,20 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# cipher_orchestration  —  v1.x Stage 1 pure workflow state machine (no GitHub, model or network)
+# ---------------------------------------------------------------------------
+add_library(cipher_orchestration
+    src/orchestration/state_machine.cpp
+)
+target_include_directories(cipher_orchestration PUBLIC include)
+
+if(MSVC)
+    target_compile_options(cipher_orchestration PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(cipher_orchestration PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# ---------------------------------------------------------------------------
 # cipher_ollama  —  loopback HTTP client, Ollama assistant backend, and `ask` command
 # ---------------------------------------------------------------------------
 add_library(cipher_ollama
@@ -263,6 +277,10 @@ if(BUILD_TESTING)
     add_executable(cipher_model_tool_loop_tests tests/test_model_tool_loop.cpp)
     target_link_libraries(cipher_model_tool_loop_tests PRIVATE cipher_ollama)
     add_test(NAME cipher_model_tool_loop_tests COMMAND cipher_model_tool_loop_tests)
+
+    add_executable(cipher_orchestration_tests tests/test_orchestration.cpp)
+    target_link_libraries(cipher_orchestration_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_tests COMMAND cipher_orchestration_tests)
 
     # v0.6: in-process llama.cpp backend. Real inference runs only when CIPHER_TEST_GGUF names a model file.
     if(CIPHER_WITH_LLAMA)
