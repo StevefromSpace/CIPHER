@@ -6,9 +6,18 @@ This document does not describe the CIPHER product runtime, which is governed by
 
 ## 0. Foundation and current implementation
 
-The contract builds on `tools/pipeline/`. It adds no new orchestration framework.
+This contract defines the CIPHER multi-agent governance and orchestration workflow. It does not describe `tools/pipeline/`.
 
-Existing pieces this contract maps onto:
+`tools/pipeline/` is an existing Antigravity/local development execution mechanism for bulk implementation work. It is not the CIPHER multi-agent workflow.
+
+Boundary:
+
+- Development agents may use `tools/pipeline/` as an implementation or execution backend.
+- This contract does not require `tools/pipeline/` to implement the role state machine, GitHub issue/PR orchestration, model-family independence, agent governance, GitHub label or review management, or the verdict system.
+- Future orchestration may invoke or delegate to existing development tooling. It must not replace that tooling merely to make it structurally identical to this contract.
+- The gaps in section 12.2 belong to the future orchestration layer. They are not reasons to rewrite `tools/pipeline/`.
+
+Pipeline facts that a future orchestration layer may read or call (these are descriptions of the existing code, not requirements placed on it):
 
 - `tools/pipeline/orchestrator.py` `PipelineOrchestrator`: implementation, review, repair and verification loop.
 - `tools/pipeline/job_store.py` `JobStatus`: job states, including `PREPARING_WORKTREE`, `IMPLEMENTING`, `REVIEWING`, `REPAIRING`, `VERIFYING`, `READY_FOR_APPROVAL`, `COMMITTED`, `COMPLETED`, `CANCELLED`, `FAILED_ERROR`, `FAILED_REVIEW`, `FAILED_VERIFICATION`.
@@ -16,7 +25,7 @@ Existing pieces this contract maps onto:
 - `tools/pipeline/adapters/base.py`: `FindingSeverity`, `ReviewFinding`, `ReviewResult` (`passed`, `model_reviewed`), `ImplementationResult`, `BaseImplementationAgent`, `BaseReviewerAgent`.
 - `tools/pipeline/confirm_commit.py:33`: commit requires `READY_FOR_APPROVAL`.
 
-Current gaps between code and this contract are listed in section 12. The contract is the target; the code is the present state.
+Gaps between this contract and the future orchestration layer are listed in section 12. They are gaps in that layer, not defects in the existing pipeline.
 
 ## 1. Global rules (apply to every role)
 
@@ -52,9 +61,9 @@ Credentials, tokens, keys, passwords and private memory contents must never be p
 1. Agents must not approve their own implementation.
 2. The implementation agent and the reviewer for the same PR must be different agent instances.
 3. A PR that touches a security-sensitive path (section 7) requires an independent security reviewer. The target independent model family is **Gemini**. A reviewer from the same family as the implementation agent does not satisfy this rule. A second Claude agent, in any role or configuration, does not satisfy it either.
-4. Until a Gemini security reviewer is actually wired into the pipeline, security-sensitive work escalates to `NEEDS_HUMAN`. Nothing in this contract claims that the Gemini reviewer is implemented.
+4. Until a Gemini security reviewer is actually available to the orchestration layer, security-sensitive work escalates to `NEEDS_HUMAN`. Nothing in this contract claims that the Gemini reviewer is implemented.
 
-Current limitation: the existing pipeline uses Claude for both implementation (Agent A) and review (Agent B) (`orchestrator.py:106`, `:150`). Security-sensitive PRs therefore cannot satisfy rule 3 today and must be `NEEDS_HUMAN` (section 12.2).
+Current limitation: no Gemini reviewer is wired into the orchestration path yet. The existing pipeline's implementation and review adapters both use Claude (`orchestrator.py:106`, `:150`). That is a fact about the pipeline, not a requirement this contract places on it. Security-sensitive PRs therefore cannot satisfy rule 3 today and must be `NEEDS_HUMAN` (section 12.2).
 
 ### 1.6 Owner approval is not required for routine PRs
 
@@ -81,7 +90,7 @@ Rules for verdicts:
 6. A repeated `BLOCKED` result counts against the bounded loop budget in section 5.5. It never permits an unbounded retry. When the limit is reached, the job escalates to `NEEDS_HUMAN`.
 7. Disagreement between two reviewers is resolved by escalation, not by vote (section 5.3).
 
-Mapping to the existing code (`tools/pipeline/adapters/base.py`): `APPROVE` = `passed=True` and `model_reviewed=True`; `CHANGES_REQUESTED` = `passed=False` and `model_reviewed=True`; `BLOCKED` = `model_reviewed=False`. `NEEDS_HUMAN` has no code representation yet (section 12).
+Informative mapping to existing adapter results (`tools/pipeline/adapters/base.py`; the pipeline is not required to adopt these verdicts): `APPROVE` = `passed=True` and `model_reviewed=True`; `CHANGES_REQUESTED` = `passed=False` and `model_reviewed=True`; `BLOCKED` = `model_reviewed=False`. `NEEDS_HUMAN` has no code representation yet (section 12).
 
 ### 2.1 Machine-readable review output
 
@@ -142,7 +151,7 @@ Escalate Sonnet to Opus only when:
 
 ### 3.4 Current limitation
 
-The pipeline does not select models per role or track escalation counters today. The percentages above are a target for the orchestrator to measure against, not a measured result.
+The orchestration layer does not exist yet, so no role-level model selection or escalation counting is implemented. The percentages above are a target for the orchestrator to measure against, not a measured result.
 
 ## 4. Roles
 
@@ -270,7 +279,7 @@ These limits are policy. They must be enforced by the orchestrator through count
 4. The orchestrator may assign attempt 2 to a higher model tier (section 3.3). That is a model change within the same execution, not a third execution.
 5. If attempt 2 fails, the job becomes `NEEDS_HUMAN`. No further implementation execution is started. Escalation is a human handoff, not another implementation run.
 
-Current code: `MAX_REPAIR_ROUNDS = 2` (`config.py:31`) allows two repair rounds, which is up to three implementation runs. The contract limit is 2 total. The code must be reconciled to the contract (section 12.2, item 1). The contract is the target.
+Existing pipeline: `MAX_REPAIR_ROUNDS = 2` (`config.py:31`) allows two repair rounds, which is up to three implementation runs inside one pipeline job. The 2-total limit applies to the orchestration layer, which must count executions across calls. How that layer counts against the pipeline's internal repair loop is an open design question (section 12.3). The pipeline does not need to be rewritten to meet this contract.
 
 ### 5.2 Review rounds
 
@@ -361,7 +370,7 @@ A PR may be merged only when all of these are true for its head SHA:
 1. Every required CI check passes (the five checks in the `main-governance` ruleset).
 2. QA verdict is `APPROVE`, or QA is not applicable with a stated reason.
 3. Reviewer verdict is `APPROVE`.
-4. Security reviewer verdict is `APPROVE` when section 7 applies, from an independent family (section 1.5). The target family is Gemini. Until a Gemini reviewer is wired into the pipeline, this gate cannot be satisfied, and the PR is `NEEDS_HUMAN`.
+4. Security reviewer verdict is `APPROVE` when section 7 applies, from an independent family (section 1.5). The target family is Gemini. Until a Gemini reviewer is available to the orchestration layer, this gate cannot be satisfied, and the PR is `NEEDS_HUMAN`.
 5. No open `BLOCKER` or `HIGH` finding.
 6. The diff contains only files in the accepted scope.
 7. The PR has no protected-operation content (section 6).
@@ -460,16 +469,18 @@ This section records checks made against this contract and the current code. Gap
 - Verdicts: the four verdicts in section 2 are the only values; section 2 rule 3 and rule 4 prevent ambiguous use of `CHANGES_REQUESTED` and `BLOCKED`. Consistent.
 - Escalation: section 5.1 (2 implementation executions total; a failed attempt 2 goes to `NEEDS_HUMAN`; the higher-tier model change in attempt 2 is not an extra run) and section 3.2 (no de-escalation) agree. The escalation tier in section 3.3 is Sonnet for Haiku failures and Opus only under section 3.3 conditions. Consistent.
 - Model allocation: section 3.1 targets sum to within the stated bands (Haiku 80–90 + Sonnet 10–18 + Opus 1–2 covers the full range with overlap at the edges). Targets are stated as policy, not as measured.
-- Retry limits: section 5.1 (2 implementation attempts) conflicts with `config.py:31` (`MAX_REPAIR_ROUNDS = 2`, meaning 3 runs). Recorded in 12.2.
+- Retry limits: section 5.1 (2 implementation executions total) is a requirement on the orchestration layer. The pipeline's internal `MAX_REPAIR_ROUNDS = 2` (`config.py:31`) is a separate setting. Their interaction is recorded in 12.2 and 12.3.
 - GitHub permissions: no role may merge except the orchestrator; no role may change rulesets, branches it does not own, or milestones. Implementation agent may not approve its own PR. Consistent with 1.5.
 
-### 12.2 Gaps with the current code
+### 12.2 Gaps for the future orchestration layer
 
-1. **Repair limit mismatch.** `MAX_REPAIR_ROUNDS = 2` allows 3 implementation runs. The contract allows 2 total (section 5.1, Decided). Fix: change the orchestrator to count total attempts. The code change is a future engineering task, not part of this document.
-2. **No `NEEDS_HUMAN` verdict in code.** Current results expose `passed` and `model_reviewed` only. Fix: add a result field or job state for `NEEDS_HUMAN`.
-3. **No independent Gemini reviewer.** Agent A (implementation) and Agent B (reviewer) both use Claude (`orchestrator.py:106`, `:150`). No Gemini adapter exists. Section 1.5 cannot be met for security PRs until a Gemini reviewer is wired in. Until then, section 7 PRs are `NEEDS_HUMAN`.
-4. **No model tier selection or escalation counters.** Section 3 is a target only.
-5. **No GitHub integration.** `tools/pipeline/` runs local jobs. Labels, reviews and merges are not wired to GitHub.
+These are gaps in the future multi-agent orchestration layer. None is a defect in `tools/pipeline/`, and none requires rewriting it.
+
+1. **Attempt limit across calls.** The pipeline's `MAX_REPAIR_ROUNDS = 2` (`config.py:31`) allows 3 implementation runs within one pipeline job. The contract limit of 2 total executions (section 5.1, Decided) must be enforced by the orchestration layer across calls. The design is open (section 12.3).
+2. **No `NEEDS_HUMAN` verdict in the pipeline's result types.** The pipeline exposes `passed` and `model_reviewed` only. The orchestration layer must add its own `NEEDS_HUMAN` state; the pipeline need not.
+3. **No independent Gemini reviewer in the orchestration path.** The pipeline's implementation and review adapters both use Claude (`orchestrator.py:106`, `:150`). No Gemini reviewer is available to the orchestration layer. Section 1.5 cannot be met for security PRs until one is. Until then, section 7 PRs are `NEEDS_HUMAN`.
+4. **No model tier selection or escalation counters in the orchestration layer.** Section 3 is a target only.
+5. **No GitHub integration in the orchestration layer.** `tools/pipeline/` runs local jobs by design. Labels, reviews and merges belong to the orchestration layer, which does not exist yet.
 6. **Existing role document is stale.** `.agents/skills/cipher-subagents/SKILL.md` names roles and test counts that do not match the repository and conflicts with the roles here. It should be replaced by a pointer to this contract in a separate, owner-approved change.
 7. **Review verdict wording.** Section 2 maps verdicts to `passed`/`model_reviewed` for the existing adapters. Verify the mapping in code before relying on it.
 
@@ -477,7 +488,7 @@ This section records checks made against this contract and the current code. Gap
 
 These decisions were made by the owner and are reflected in the sections above. They are not open questions.
 
-1. **Implementation limit:** 2 implementation executions total per issue (one initial implementation and one retry). Escalation is not an implementation run (section 5.1). The code value `MAX_REPAIR_ROUNDS = 2` must be reconciled to this (section 12.2, item 1).
+1. **Implementation limit:** 2 implementation executions total per issue (one initial implementation and one retry). Escalation is not an implementation run (section 5.1). How the orchestration layer enforces this against the pipeline's internal `MAX_REPAIR_ROUNDS` is an open design question (section 12.2, item 1).
 2. **Independent security reviewer:** the target family is Gemini. A second Claude agent does not satisfy independence. Until Gemini is wired in, security-sensitive work escalates to `NEEDS_HUMAN` (sections 1.5, 12.2 item 3).
 3. **BLOCKED handling:** the first `BLOCKED` is a diagnostic or environmental stop. Repeated `BLOCKED` results count against the bounded budget in section 5.5 and escalate at its limit.
 4. **Ready-state labels:** the orchestrator creates and updates routine workflow-state labels after triage. Human intervention is reserved for governance changes and protected operations (section 10).
