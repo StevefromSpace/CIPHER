@@ -26,10 +26,14 @@ Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → 
 - PR #1 (merged 2026-10-25, base `main`, head `research/assistant-source-intelligence`): memory load fix and hardening.
 - PR #2 (merged 2026-10-26, base PR #1 branch, head `feat/repl-memory-commands`): v0.3 REPL memory commands; contains the v0.3 and v0.4 feature history.
 - PR #3 (closed without merge 2026-10-27, base `feat/repl-memory-commands`, head `feat/assistant-cli-providers`): Claude and Hermes CLI provider adapters, Windows handle inheritance fix (issue #5). Not on `main`; its code exists only on the closed branch.
-- PR #9 (draft): autonomous operating policy. Owner review pending.
-- PR #11 (draft): memory inspection regression test seam (issue #4, closed).
-- PR #12 (draft, parked, base PR #3 branch): tool registry slice for v0.5. Not part of current milestone execution.
-- Issue #4 and #5: closed. Issue #6 (POSIX process-tree termination misses `setsid` descendants): open, design decision WAITING_FOR_OWNER. Issue #7 (verify `claude --safe-mode` suppresses user-level instructions): open, inconclusive; no further billed calls without approval. Issue #8 (Hermes adapter): open, deferred; Hermes is not installed.
+- PR #9 (merged 2026-10-28, commit d182971, base `main`): autonomous operation policy in `AGENTS.md`. Accepted as docs-only governance.
+- PR #11 (closed without merge 2026-10-28): memory inspection test seam. Rejected: a mutable global test hook in the public header of a fail-closed memory path, unnecessary because the fix and the POSIX test are on `main`. The Windows ACL-denial path stays unexercised.
+- PR #12 (closed without merge 2026-10-28): old tool registry. Superseded by the v0.5 rewrite on `main` (PRs #19-#22). Branch `feat/readonly-tool-registry` kept as history.
+- Issue #4 and #5: closed.
+- Issue #6 (POSIX `setsid` descendants escape termination): DEFERRED. The fix belongs to any future subprocess provider, and main starts no child processes. Must be fixed and tested before such a provider merges.
+- Issue #7 (verify `claude --safe-mode` suppression): DEFERRED. Needs one billed probe, which requires explicit owner approval. The Claude CLI adapter exists only on the closed PR #3 branch.
+- Issue #8 (Hermes adapter): DEFERRED, fail-closed as recommended. Hermes is not installed.
+- Future milestone gate: if the owner approves a hosted or subprocess CLI provider, start a new milestone from `main`. Issues #6, #7 and #8 then apply. Do not revive the PR #3 branch.
 
 ### Known limitations and deferred work
 
