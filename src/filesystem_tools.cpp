@@ -156,9 +156,11 @@ fs::path canonical_root_or_throw(const std::string& root) {
 
 void register_filesystem_tools(ToolRegistry& registry, const std::string& root,
                                std::vector<std::string> private_files) {
+    // Naming the folder keeps a small model from prefixing paths with it (notes/notes/...).
+    const std::string folder = fs::path(root).lexically_normal().filename().string();
     registry.register_tool(ToolDefinition{
         "filesystem.read",
-        "Reads one text file under the allowed folder. Arguments are a relative path.",
+        "Reads one text file in the allowed folder \"" + folder + "\". Arguments are a path relative to that folder, without the folder name.",
         "filesystem",
         RiskTier::Monitor,
         SideEffect::ReadLocal,
@@ -178,7 +180,7 @@ void register_filesystem_tools(ToolRegistry& registry, const std::string& root,
         }});
     registry.register_tool(ToolDefinition{
         "filesystem.list",
-        "Lists file and folder names in one folder under the allowed folder. Optional argument is a relative folder path; omit it for the allowed folder itself.",
+        "Lists file and folder names in the allowed folder \"" + folder + "\". Optional argument is a folder path relative to that folder, without the folder name; omit it to list the allowed folder itself.",
         "filesystem",
         RiskTier::Monitor,
         SideEffect::ReadLocal,

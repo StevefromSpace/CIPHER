@@ -1,6 +1,7 @@
 #include "cipher/model_tool_loop.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <exception>
 #include <set>
 #include <utility>
@@ -52,6 +53,41 @@ bool has_control_char(const std::string& text) {
     return std::any_of(text.begin(), text.end(), [](unsigned char c) { return c < 0x20 || c == 0x7f; });
 }
 
+// Adds the file names in a filesystem.list result. Folder names end with '/' and are skipped.
+void add_listed_files(const std::string& listing, std::vector<std::string>& files) {
+    std::size_t start = 0;
+    while (start < listing.size()) {
+        std::size_t end = listing.find('\n', start);
+        if (end == std::string::npos) end = listing.size();
+        const std::string name = listing.substr(start, end - start);
+        if (!name.empty() && name.back() != '/' && name.front() != '(' && name.rfind("...", 0) != 0) {
+            files.push_back(name);
+        }
+        start = end + 1;
+    }
+}
+
+// True when name appears in text as a whole word, so "status.txt" does not match "old-status.txt".
+bool mentions_word(const std::string& text, const std::string& name) {
+    const auto is_word_char = [](char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0; };
+    for (std::size_t at = text.find(name); at != std::string::npos; at = text.find(name, at + 1)) {
+        const bool starts_word = at == 0 || !is_word_char(text[at - 1]);
+        const std::size_t after = at + name.size();
+        const bool ends_word = after >= text.size() || !is_word_char(text[after]);
+        if (starts_word && ends_word) return true;
+    }
+    return false;
+}
+
+// Verification: a file the question names and the listing showed must be read before the model may answer.
+std::string first_unread_named_file(const std::string& question, const std::vector<std::string>& listed,
+                                    const std::set<std::string>& read) {
+    for (const std::string& name : listed) {
+        if (read.count(name) == 0 && mentions_word(question, name)) return name;
+    }
+    return "";
+}
+
 // The trimmed reply must be one line: "TOOL_CALL: <id>" or "TOOL_CALL: <id> <argument>". The argument is
 // everything after the first space and stays untrusted text; the tool's own validation judges it.
 bool parse_tool_request(const std::string& trimmed, std::string& tool_id, std::string& argument) {
@@ -92,7 +128,7 @@ std::string ModelToolLoop::build_prompt(const std::string& question, const std::
         "A tool that takes an argument is requested as: TOOL_CALL: <tool id> <argument>\n";
     // Only offered tool names may appear in the prompt, so the example depends on the offered list.
     if (std::find(offered_.begin(), offered_.end(), "filesystem.read") != offered_.end()) {
-        prompt += "Example for a file: TOOL_CALL: filesystem.read notes/todo.txt\n";
+        prompt += "Example for a file: TOOL_CALL: filesystem.read todo.txt\n";
     }
     prompt += "You may use several tools one after another, one per reply.\n"
         "Available tools:\n";
@@ -119,7 +155,10 @@ std::string ModelToolLoop::run(const std::string& question) {
     std::vector<std::string> results;
     std::set<std::string> seen_calls;
     std::vector<std::string> ran;
+    std::vector<std::string> listed_files;
+    std::set<std::string> read_files;
     int failures = 0;
+    int unverified_answers = 0;
     for (int round = 1; round <= kMaxModelRounds; ++round) {
         AssistantRequest request;
         request.prompt = build_prompt(question, results);
@@ -134,7 +173,13 @@ std::string ModelToolLoop::run(const std::string& question) {
 
         const std::string reply = trim(response.text);
         if (reply.find(kToolRequestMarker) == std::string::npos) {
-            return with_trace(response.text, ran);
+            const std::string unread = first_unread_named_file(question, listed_files, read_files);
+            if (unread.empty()) return with_trace(response.text, ran);
+            // The answer would be about a file CIPHER has not shown the model, so it is not accepted.
+            if (++unverified_answers >= kMaxUnverifiedAnswers) return "Not verified: the question asks about " + unread + ", which was never read.";
+            results.push_back("Observation: the question asks about " + unread + ", which you have not read yet. " +
+                              "Reply with exactly this line and nothing else: TOOL_CALL: filesystem.read " + unread);
+            continue;
         }
 
         std::string tool_id;
@@ -198,6 +243,8 @@ std::string ModelToolLoop::run(const std::string& question) {
                    " bytes and was not sent to the model.";
         }
         seen_calls.insert(call_key);
+        if (tool_id == "filesystem.list") add_listed_files(result.output, listed_files);
+        if (tool_id == "filesystem.read") read_files.insert(argument);
         ran.push_back(argument.empty() ? tool_id : tool_id + " " + argument);
         // An empty result is a successful run but not evidence of anything; say so.
         results.push_back(result.output.empty()

@@ -87,6 +87,17 @@ void test_reads_file_under_root(const Sandbox& sandbox) {
           "Expected Completed with nested file contents");
 }
 
+void test_descriptions_name_the_allowed_folder(const Sandbox& sandbox) {
+    cipher::ToolRegistry registry;
+    cipher::register_filesystem_tools(registry, sandbox.root.string());
+
+    const std::string read = registry.find("filesystem.read")->description;
+    const std::string list = registry.find("filesystem.list")->description;
+    check(read.find("\"allowed\"") != std::string::npos && list.find("\"allowed\"") != std::string::npos,
+          "filesystem tools: descriptions name the allowed folder",
+          "Expected the folder name in both descriptions so the model does not prefix paths with it");
+}
+
 void test_denies_traversal_without_running_handler(const Sandbox& sandbox) {
     cipher::ToolRegistry registry;
     cipher::register_filesystem_tools(registry, sandbox.root.string());
@@ -244,6 +255,7 @@ int main() {
 
     const Sandbox sandbox;
     test_reads_file_under_root(sandbox);
+    test_descriptions_name_the_allowed_folder(sandbox);
     test_denies_traversal_without_running_handler(sandbox);
     test_denies_absolute_paths(sandbox);
     test_missing_file_and_empty_argument_are_denied(sandbox);
