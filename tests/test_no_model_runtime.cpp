@@ -92,7 +92,7 @@ void test_core_runs_without_any_provider() {
     const cipher::CipherCore core;
 
     const auto status = core.execute("status");
-    check(contains(status.text, "AI runtime: not connected") &&
+    check(contains(status.text, "AI runtime: not attached to the core") &&
           contains(status.text, "External AI-provider dependency: none"),
           "no-model: status reports no provider and no AI runtime",
           "status text: " + status.text);

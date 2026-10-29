@@ -50,7 +50,7 @@ int main() {
 
         {"about command",
          "about",
-         "CIPHER v0.2.0",
+         "CIPHER v1.0.0",
          false, false},
 
         {"status command",
@@ -155,23 +155,23 @@ int main() {
         // --- Version consistency tests --------------------------------------
         {"help command reports current version",
          "help",
-         "v0.2.0",
+         "v1.0.0",
          false, false},
 
         {"status command reports current version",
          "status",
-         "Version: 0.2.0",
+         "Version: 1.0.0",
          false, false},
     };
 
     int failures = 0;
 
     // 1. Direct verification of generated version constants and version() API.
-    const bool version_const_ok = (std::string(cipher::CIPHER_VERSION) == "0.2.0") &&
-                                  (cipher::CIPHER_VERSION_MAJOR == 0) &&
-                                  (cipher::CIPHER_VERSION_MINOR == 2) &&
+    const bool version_const_ok = (std::string(cipher::CIPHER_VERSION) == "1.0.0") &&
+                                  (cipher::CIPHER_VERSION_MAJOR == 1) &&
+                                  (cipher::CIPHER_VERSION_MINOR == 0) &&
                                   (cipher::CIPHER_VERSION_PATCH == 0);
-    const bool version_fn_ok = (std::string(cipher::CipherCore::version()) == "0.2.0") &&
+    const bool version_fn_ok = (std::string(cipher::CipherCore::version()) == "1.0.0") &&
                                (std::string(cipher::CipherCore::version()) == cipher::CIPHER_VERSION);
 
     if (!version_const_ok || !version_fn_ok) {
@@ -187,7 +187,7 @@ int main() {
             std::cerr << "  CipherCore::version(): \"" << cipher::CipherCore::version() << "\"\n";
         }
     } else {
-        std::cout << "PASS: version constants and CipherCore::version() match 0.2.0\n";
+        std::cout << "PASS: version constants and CipherCore::version() match 1.0.0\n";
     }
 
     // 2. Command test cases.

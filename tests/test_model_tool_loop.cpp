@@ -660,6 +660,63 @@ void test_v1_last_round_answer_is_not_sent_back_for_correction() {
           "v1 verify: an unverified answer in the last round stops at once", "text was: " + text);
 }
 
+void test_unoffered_after_success_names_the_ran_call() {
+    Harness h;
+    h.backend.replies = {"TOOL_CALL: time.now", "TOOL_CALL: filesystem.read note.txt"};
+    cipher::register_builtin_tools(h.registry);
+    cipher::ModelToolLoop loop = h.make_loop({"time.now"});
+
+    const std::string text = loop.run("q");
+    check(text == "The model asked for tool 'filesystem.read', which is not offered. "
+                  "Calls that ran earlier in this turn: time.now.",
+          "early exit: an unoffered request after a run names the call that ran", "text was: " + text);
+    check(!contains(text, "Nothing was run."), "early exit: no false 'Nothing was run.' after a run",
+          "text was: " + text);
+}
+
+void test_malformed_after_success_names_the_ran_call() {
+    Harness h;
+    h.backend.replies = {"TOOL_CALL: time.now", "TOOL_CALL: time.now please"};
+    cipher::register_builtin_tools(h.registry);
+    cipher::ModelToolLoop loop = h.make_loop(cipher::model_offered_tool_ids());
+
+    const std::string text = loop.run("q");
+    check(text == "The model's tool request was malformed. Calls that ran earlier in this turn: time.now.",
+          "early exit: a malformed request after a run names the call that ran", "text was: " + text);
+}
+
+void test_policy_block_after_success_names_the_ran_call() {
+    Harness h;
+    h.backend.replies = {"TOOL_CALL: time.now", "TOOL_CALL: test.blocked"};
+    cipher::register_builtin_tools(h.registry);
+    cipher::ToolDefinition blocked;
+    blocked.id = "test.blocked";
+    blocked.description = "test-only blocked tool";
+    blocked.category = "test";
+    blocked.default_tier = cipher::RiskTier::Block;
+    blocked.handler = [](const std::string&) { return std::string("ran"); };
+    h.registry.register_tool(blocked);
+    cipher::ModelToolLoop loop = h.make_loop({"time.now", "test.blocked"});
+
+    const std::string text = loop.run("q");
+    check(text == "Denied by permission policy (block): test.blocked. Calls that ran earlier in this turn: time.now.",
+          "early exit: a policy block after a run names the call that ran", "text was: " + text);
+}
+
+void test_owner_refusal_after_success_names_the_ran_call() {
+    Harness h;
+    h.backend.replies = {"TOOL_CALL: time.now", "TOOL_CALL: system.info"};
+    cipher::register_builtin_tools(h.registry);
+    int asked = 0;
+    cipher::ModelToolLoop loop(h.backend, h.registry,
+        [&asked](const std::string&, const std::string&, const std::string&) { return asked++ == 0; },
+        30.0, {"time.now", "system.info"});
+
+    const std::string text = loop.run("q");
+    check(text == "Owner confirmation was not given: system.info. Calls that ran earlier in this turn: time.now.",
+          "early exit: an owner refusal after a run names the call that ran", "text was: " + text);
+}
+
 int main() {
     test_v1_memory_share_deny_hides_entries();
     test_v1_read_in_subfolder_verifies_listed_file();
@@ -696,6 +753,10 @@ int main() {
     test_v1_repeat_failures_stop();
     test_v1_list_refuses_escape();
     test_v1_memory_search_governed();
+    test_unoffered_after_success_names_the_ran_call();
+    test_malformed_after_success_names_the_ran_call();
+    test_policy_block_after_success_names_the_ran_call();
+    test_owner_refusal_after_success_names_the_ran_call();
 
     std::cout << "\n" << g_passes << " passed, " << g_failures << " failed\n";
     return g_failures == 0 ? 0 : 1;

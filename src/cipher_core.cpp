@@ -86,7 +86,7 @@ CommandResponse CipherCore::execute(const std::string& input) const {
             "  time              Show the local system time\n"
             "  echo <text>       Print text back to the console\n"
             "  exit / quit       Close CIPHER\n\n"
-            "File writes are limited to the optional log_file and memory_file. No network, shell, or AI-provider access is enabled in v" + std::string(version()) + ".",
+            "File writes are limited to the optional log_file and memory_file. The core has no network, shell or AI-provider access; ask uses only a verified local backend when configured. v" + std::string(version()) + ".",
             false};
     }
 
@@ -103,9 +103,9 @@ CommandResponse CipherCore::execute(const std::string& input) const {
             "CIPHER status\n"
             "  Core: online\n"
             "  Version: " + std::string(version()) + "\n"
-            "  AI runtime: not connected\n"
+            "  AI runtime: not attached to the core (ask needs ollama_port or llama_model_path in cipher.conf)\n"
             "  Persistent memory: optional (memory_file in cipher.conf)\n"
-            "  Network access: disabled\n"
+            "  Network access: none in the core (ask may use a loopback-only local Ollama when configured)\n"
             "  Computer-control tools: disabled\n"
             "  External AI-provider dependency: none",
             false};
