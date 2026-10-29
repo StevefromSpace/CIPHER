@@ -266,6 +266,7 @@ To prevent confusion or hallucination by future AI agents, the following capabil
 3. **Log Rotation:** The logger appends continuously to `log_file` without size limits or rotation.
 4. **Config File Path:** `cipher.conf` is loaded exclusively from the current working directory.
 5. **External Integration Evidence:** OpenClaw effective policy enforcement, local-route provenance beyond the operator assertion, downstream tool isolation for Dodaios and Leon, and live OVOS bus behavior have not been independently runtime-verified. The adapters therefore remain fail-closed by default.
+6. **v1 Assistant Loop Limits:** the model-tool loop's limits (verification gate scope, output and listing caps, unverified final answers, llama.cpp tool path covered by scripted tests only) are listed in `docs/V1_ASSISTANT_LOOP.md` under "Limits".
 
 ---
 

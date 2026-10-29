@@ -372,3 +372,17 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
 - **Revisit:** Licensing is to be revisited around the v3.x–v5.x milestones. Until then, do not treat the missing license as an accidental release blocker, and do not add a `LICENSE` file or name a license without a new owner decision.
 - **Rationale:** The owner has not yet decided the terms and wants the choice made later, not guessed now. Recording the deferral keeps the repository honest about its status.
 - **Scope:** `THIRD_PARTY_NOTICES.md` and the clean-room provenance rules in ADR 13 are unchanged by this decision.
+
+### 24. Model Tool Loop: Governed, Bounded, Verified Assistant Turn (v1.0.0)
+
+- **Status:** Accepted (v1.0.0 release record). Implemented in PRs #34–#43; the loop limits are in `docs/V1_ASSISTANT_LOOP.md`.
+- **Decision:** An owner-typed `ask` may run a bounded loop in which the model only proposes tool calls. The model replies with one `TOOL_CALL: <tool> <argument>` line per round. `ModelToolLoop` (`include/cipher/model_tool_loop.hpp`, `src/model_tool_loop.cpp`) parses the reply and decides everything else:
+  - **Offered list:** only `time.now`, `system.info`, `filesystem.read`, `filesystem.list`, `memory.search` (`model_offered_tool_ids()`). Any other tool id ends the turn.
+  - **Governance first:** the call goes through the shared `ToolRegistry`. A Block-tier call is refused without asking the owner. An Ask-tier call needs its own exact `yes` (no plan-wide approval). The confirmation shows the canonical target.
+  - **Bounds:** at most `kMaxModelRounds` = 6 submits, one tool request per round, and no tool call in the last round. Refused or failed calls count toward `kMaxToolFailures` = 2; an identical call that already ran is not re-confirmed or re-run; tool argument size is capped at `kMaxArgumentBytes` = 1024; tool output above 4096 bytes is withheld, not truncated.
+  - **Verification gate:** when the question names a file that the listing showed, a final answer is refused until that file was read (`kMaxUnverifiedAnswers` = 2). The gate checks that the file was read; it does not check the answer's content.
+  - **Authority:** the model's answer is shown as the model's. Every answer after tool use carries a footer listing the calls CIPHER ran and stating the answer is not verified by CIPHER. CIPHER does not semantically verify final natural-language output.
+  - **Memory:** `memory.search` skips any entry the `memory_deny` policy blocks for the model; `memory.list` is not offered.
+- **Rejected:** a plan-wide approval step (it would replace per-action governance); letting the model call a tool the offered list does not name; unbounded loops or retries; automatic retry of an action with side effects (no such tool is offered); letting a backend parse or run tools (the backend returns text only).
+- **Tests:** `tests/test_model_tool_loop.cpp` covers scripted backends, the Ollama path end to end with a fake HTTP transport, round and failure limits, the verification gate, the repeat guard and the memory policy. The loop suite is run by CI on Ubuntu and Windows.
+- **Limits:** see `docs/V1_ASSISTANT_LOOP.md`. The llama.cpp tool path is covered by scripted tests only; the Ollama path was also run against a real local model during development.
