@@ -275,7 +275,7 @@ These limits are policy. They must be enforced by the orchestrator through count
 
 1. The limit is **2 implementation executions total per issue**: one initial implementation (attempt 1) and one retry (attempt 2).
 2. The retry is triggered by a `CHANGES_REQUESTED`, failed test or failed CI. It receives the failure history.
-3. The count is per job, not per agent, and is stored in the job record.
+3. The count is per issue, not per agent or per job. A new job for the same issue continues the count. It is stored in the job record.
 4. The orchestrator may assign attempt 2 to a higher model tier (section 3.3). That is a model change within the same execution, not a third execution.
 5. If attempt 2 fails, the job becomes `NEEDS_HUMAN`. No further implementation execution is started. Escalation is a human handoff, not another implementation run.
 
