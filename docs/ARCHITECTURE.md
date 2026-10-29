@@ -103,8 +103,10 @@ AssistantManager::submit   -- validation, prompt budget, local_only => VerifiedL
   THIRD_PARTY_NOTICES.md §6). The default build has no llama.cpp code.
 - llama.cpp provides inference only. It sees just the prompt CIPHER passes it;
   it has no access to memory, tools, permissions or config. Its answers are
-  returned as text and are never parsed for tool requests (model tool calls are
-  Ollama-only in v0.6).
+  returned as text. Since v1.0.0, `ModelToolLoop` (CIPHER-side) parses those
+  texts for `TOOL_CALL:` lines through the same protocol as Ollama. The backend
+  itself never calls a tool. (Before v1.0.0, in v0.6, model tool calls were
+  Ollama-only.)
 - The model loads once at startup. A missing or invalid model stops startup
   with a clear error; there is no fallback to another backend. Setting both
   `ollama_port` and `llama_model_path` is a configuration error.
@@ -194,10 +196,9 @@ is reachable only through the owner-typed `ask` command when `ollama_port` or
 adapters do not change that: their live routes remain disabled or fail closed unless
 their explicit gates and evidence requirements are met.
 
+Model-facing tools (v1.0.0, opt-in via `model_tool_calls`): `time.now`, `system.info`, `filesystem.read`, `filesystem.list`, and `memory.search`, each under its own policy and exact-`yes` confirmation. The v1 loop is described in `docs/V1_ASSISTANT_LOOP.md`, including its limits.
+
 Not implemented yet (planned for future milestones):
-- Model-facing tool calls beyond `time.now` and `system.info` (memory and file tools are not offered to the model)
 - Automatic memory retrieval into prompts (memory reaches a model only via owner-typed `ask --memory <id>`, local route only; see DECISIONS §20)
 - GPU acceleration and streaming output for the in-process llama.cpp backend (CPU, whole answer at once)
-- Model tool calls through the llama.cpp backend (text only in v0.6)
-- Persistent-memory permission gating (REPL commands and `memory_file` configuration are implemented)
 - Voice and alternative interfaces (later)

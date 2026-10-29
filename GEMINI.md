@@ -14,7 +14,7 @@ Do NOT re-explore the entire codebase or guess project state. Consult these auth
 - [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md): Current verified baseline, test suites, verified commit hashes, and capabilities.
 - [docs/DECISIONS.md](docs/DECISIONS.md): Foundational engineering and architectural decisions.
 - [docs/ROADMAP.md](docs/ROADMAP.md): Milestone progress and forward roadmap (Current: v1.0.0, the v1 assistant loop; merged milestones are listed in the status section).
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): Subsystem layout (`cipher_core`, `cipher_config`, `cipher_logger`, `cipher_memory`) and decoupling rules.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): Subsystem layout (`cipher_core`, `cipher_config`, `cipher_logger`, `cipher_memory`, `cipher_assistant`, `cipher_tools`, `cipher_ollama`, optional `cipher_llama`) and decoupling rules.
 - [docs/VISION.md](docs/VISION.md): Founding principles and independence charter.
 
 ## Knowledge & Navigation Infrastructure
