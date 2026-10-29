@@ -6,11 +6,11 @@ CIPHER is a long-term, local-first assistant platform intended to grow through s
 
 > Build it so that no single company, model, or generation of technology can determine its future.
 
-## Current milestone: v0.2.0
+## Current milestone: v1.0.0
 
-This release adds configuration and diagnostics to the v0.1 foundation. CIPHER can now be configured with a simple text file and logs meaningful startup and shutdown events. It is still not an AI assistant — that comes in a later milestone.
+CIPHER v1.0.0 is a local-first assistant loop: a configured local model can ask for governed tools, CIPHER checks and confirms each call, and the result goes back to the model. Configuration and diagnostics from v0.2 remain. See `docs/V1_ASSISTANT_LOOP.md` for the loop and its limits.
 
-New in v0.2:
+Earlier milestones added configuration and diagnostics (v0.2). Config and logging:
 
 - An optional `cipher.conf` configuration file (key = value format).
 - A structured logger with four levels: `debug`, `info`, `warn`, `error`.

@@ -271,10 +271,9 @@ To prevent confusion or hallucination by future AI agents, the following capabil
 
 ## 10. Next Recommended Tasks
 
-Milestone order is v0.2 → v0.3 → v0.4 → v0.5. See the Milestone Status table in `docs/ROADMAP.md`.
+Historical milestone order was v0.2 → v0.3 → v0.4 → v0.5 → v1. All of these are now merged; the list below replaces the old "next" items. See the Milestone Status table in `docs/ROADMAP.md`.
 
-1. **Owner Review (WAITING_FOR_OWNER, v0.2 and v0.3 gates):** The owner must review the v0.2 source files (configuration, logger, version) and the v0.3 foundation (`include/cipher/memory.hpp`, `src/memory.cpp`, `tests/test_memory.cpp`, `tools/pipeline/`). The agent cannot mark these complete.
-2. **v0.3 memory permission gate (next, after v0.2 is formally cleared):** REPL `remember` and `forget` (`cipher_memory_commands`, on the PR #2 stack) must pass `PermissionPolicy` before mutating the memory file. Decided default tier: `Monitor` for both; blacklist and override rules stay authoritative. Denied operations must leave the memory file unchanged. Use the existing `RiskTier`/`PermissionPolicy`; do not depend on the v0.5 tool registry (PR #12).
-   * Keep the strict decoupling: the memory layer depends only on `cipher_memory`, and `cipher_core` does not depend on memory.
-3. **v0.4 no-model verification:** Verify the core is useful with no assistant or model attached. The llama.cpp prototype is a separate scope decision.
-4. **v0.5 (design APPROVED, implementation next):** The design is in `docs/V05_TOOL_ARCHITECTURE.md`; ADR 18 is Accepted. All seven owner decisions are approved. Implement in the phases of section 8 (primitives, permission integration, safe tools, filesystem.read, Ask confirmation), each as its own PR with CI on the exact SHA. PR #12 is not merged.
+1. **Owner release actions for v1.0.0:** choose a software license (owner or legal decision; none is in the repository). Create the tag and GitHub release only after the release-docs PR is reviewed and merged. The agent does not tag or release.
+2. **Historical gates (superseded):** the v0.2 and v0.3 owner review gates, the v0.3 memory permission gate (`remember`/`forget` through `PermissionPolicy`), and the v0.4 no-model check are merged. Their record is in `docs/ROADMAP.md`.
+3. **v0.5 tool architecture (merged):** shipped in PRs #19–#22 per `docs/V05_TOOL_ARCHITECTURE.md`. PR #12 was closed unmerged and superseded by that rewrite.
+4. **Future milestones (deferred):** issues #6, #7 and #8 stay open (see `docs/RESET_RECOVERY.md`). PR #3 is closed and must not be revived. Any new subprocess or hosted-provider work starts a new milestone from `main`.
