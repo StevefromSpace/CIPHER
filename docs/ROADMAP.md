@@ -186,9 +186,9 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
   - Merged: in-process llama.cpp backend (below).
 - In-process llama.cpp runtime: `LlamaCppBackend` behind `IAssistantBackend`, opt-in build `-DCIPHER_WITH_LLAMA=ON`, pinned llama.cpp v0.7.0 (SHA-256 checked), `llama_model_path` in `cipher.conf`. Text only, CPU, one model loaded at startup, empty context per request, no fallback between backends. Verified by real inference on a pinned tiny GGUF in the `llama-runtime` CI job (Ubuntu and Windows). See DECISIONS §21.
 - Configurable generation settings: `llama_context_tokens`, `llama_max_output_tokens` and `llama_temperature` in `cipher.conf` (defaults 4096 / 512 / 0.8, unchanged when omitted). Validated at parse time; real-inference tests check each value changes llama.cpp's behavior. See DECISIONS §21.
-- Known limits: no GPU build, no streaming, no model tool calls through llama.cpp.
+- Known limits (at v0.6): no GPU build, no streaming, no model tool calls through llama.cpp. The v1 loop later added a text-protocol tool path on llama.cpp, covered by scripted tests only.
 
-### v1 assistant loop (MERGED: PRs #34–#36)
+### v1 assistant loop (MERGED: PRs #34–#43)
 
 - Model tool loop: up to 6 model rounds per `ask`. Each round is one text `TOOL_CALL` line. CIPHER validates the call, checks policy, requires an exact `yes` per call, runs the tool, and returns the result to the model as an observation.
 - Offered tools: `time.now`, `system.info`, `filesystem.read`, `filesystem.list` (folder listing, private files hidden, 100-entry cap), `memory.search` (keyword search over memory entries; an entry is skipped when `memory_deny` denies `recall` or `share` on it, so `share *` keeps snippets from the model; the keyword shown at confirmation). `memory.list` and writes are not offered to the model.

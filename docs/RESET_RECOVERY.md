@@ -18,7 +18,7 @@ Verified state at the time of writing: `origin/main` = `5b2b583` (includes PR #1
 | Python | 3.11 (CI). Local: 3.14 also used. | Needed only for the Python test suites and the developer pipeline. |
 | Python package | `mcp>=1.0.0` (from `requirements-dev.txt`) | Only dependency. The C++ core has no third-party libraries. |
 | Node.js / npm | Not required by CIPHER | Only if you use Claude Code (it is installed via npm). |
-| Claude Code CLI | Optional, for `ask claude` (PR #3 only) | Version verified: 2.1.310. Authenticate interactively with `claude` login; never paste tokens into files. |
+| Claude Code CLI | Not used by v1.0.0. The `ask claude` path was in closed, unmerged PR #3 | Version verified: 2.1.310. Authenticate interactively with `claude` login; never paste tokens into files. |
 | Hermes | Not installed. Deferred (Issue #8). | Not needed for any merged code. |
 
 ## 2. Clone
@@ -69,7 +69,7 @@ Known limits: `cmake` and `ctest` are not on `PATH` on this machine by default. 
 
 ## 5. Optional AI/provider setup (not required for CIPHER to build or run)
 
-- `ask claude` (PR #3 only, not on `main` yet): requires the Claude Code CLI on `PATH` and an interactive login. Run the login with the `!` prefix in the Claude Code prompt so output stays in the session. Environment variable names involved: `ANTHROPIC_BASE_URL` (set on the current machine; value not recorded here, investigate before reuse). Do not put keys in any file.
+- `ask claude` (closed, unmerged PR #3; not on `main`): if revived in a future milestone it would require the Claude Code CLI on `PATH` and an interactive login. Run the login with the `!` prefix in the Claude Code prompt so output stays in the session. Environment variable names involved: `ANTHROPIC_BASE_URL` (set on the current machine; value not recorded here, investigate before reuse). Do not put keys in any file.
 - Each `ask claude` call is billed. Automated tests never make live calls.
 - `ask hermes` is unavailable (Hermes not installed; fails closed).
 
@@ -86,14 +86,14 @@ Repository instructions that must remain in Git: `AGENTS.md`, `GEMINI.md`, `docs
 
 Merged to `main`: PR #1, #2, #13, #14, #15, #16, #17 (v0.2, v0.3, v0.4 and the v0.5 design).
 
-Open PRs (all Draft; none merged):
+Historical PR states (verified with `gh` on 2026-10-29; these are no longer open):
 
-| PR | Head branch | Base | Head SHA | Purpose | Dependency |
-|----|-------------|------|----------|---------|-----------|
-| #3 | `feat/assistant-cli-providers` | `feat/repl-memory-commands` (merged) | `5b72fcf` | `ask claude`, `ai list`, process runner. | Needs retarget to `main` before merge. Resolve the Windows `bInheritHandles` change (Issue #5 fix already in head). |
-| #9 | `docs/autonomous-operating-policy` | `research/assistant-source-intelligence` (merged) | `b65a918` | AGENTS.md autonomous operation policy. | Owner review pending (m00828). Retarget to `main` first. |
-| #11 | `fix/memory-inspection-regression` | `research/assistant-source-intelligence` (merged) | `f9b44f9` | Issue #4 test seam for memory inspection failure. | Retarget to `main`; CI green on `f9b44f9`. |
-| #12 | `feat/readonly-tool-registry` | `feat/assistant-cli-providers` (PR #3) | `ee498ea` | Parked prototype. | Do not merge. Superseded by the v0.5 design (rewrite on `main`). |
+| PR | Head branch | Head SHA | Purpose | State |
+|----|-------------|----------|---------|-------|
+| #3 | `feat/assistant-cli-providers` | `5b72fcf` | `ask claude`, `ai list`, process runner. | Closed, not merged. Do not revive; new subprocess or hosted-provider work starts a new milestone from `main`. |
+| #9 | `docs/autonomous-operating-policy` | `b65a918` | AGENTS.md autonomous operation policy. | Merged as `d182971`. |
+| #11 | `fix/memory-inspection-regression` | `f9b44f9` | Issue #4 test seam for memory inspection failure. | Closed, not merged. Rejected: mutable test hook on the fail-closed path. Fix `ea4c4c9` is on `main`. Do not reopen. |
+| #12 | `feat/readonly-tool-registry` | `ee498ea` | Parked prototype. | Closed, not merged. Superseded by the v0.5 rewrite (PRs #19–#22). |
 
 Open issues: #6 (POSIX setsid descendants, document only), #7 (verify `claude --safe-mode` suppression; no billed calls), #8 (Hermes, deferred). Closed: #4, #5.
 
