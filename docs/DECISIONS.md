@@ -362,3 +362,13 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
 - **Decision:** `ModelToolLoop` says "Nothing was run." only when no tool call ran earlier in the same turn. Every early exit after a run (not offered, malformed, policy block, owner refusal, refusal budget) names the calls that ran in the message instead: "Calls that ran earlier in this turn: X." The model-facing observation for a refused call no longer carries "Nothing was run." The version is 1.0.0 (`CMakeLists.txt`). Core status and help text say what is configured: the core has no network, shell or AI-provider access, `ask` uses only a verified local backend, and the REPL `status` line reports "not attached to the core".
 - **Rejected:** appending a ran-calls footer to every early exit (a larger behaviour change; the message itself now carries the list); making REPL `status` backend-aware in this release (needs `main.cpp` to route `status` when a backend is configured; deferred); changing the version bump to a tag or release (owner action).
 - **Tests:** four regression tests in `tests/test_model_tool_loop.cpp` run one call first, then trigger each early exit and assert the exact message: unoffered, malformed, policy block, owner refusal. Existing exact-text tests with an empty ran list keep the "Nothing was run." wording. Version pins in `tests/test_cipher_core.cpp` and the status pin in `tests/test_no_model_runtime.cpp` changed with the code.
+
+---
+
+### 23. Software License Deferred at v1.0.0 (Owner Decision)
+
+- **Status:** Accepted (owner decision, 2026-10-29). Owner/legal decision; this record does not choose a license.
+- **Decision:** CIPHER has no selected software license at v1.0.0. No `LICENSE` file is part of the repository. The absence of a license is intentional, not an oversight, and it does not mean CIPHER is released under any open-source license.
+- **Revisit:** Licensing is to be revisited around the v3.x–v5.x milestones. Until then, do not treat the missing license as an accidental release blocker, and do not add a `LICENSE` file or name a license without a new owner decision.
+- **Rationale:** The owner has not yet decided the terms and wants the choice made later, not guessed now. Recording the deferral keeps the repository honest about its status.
+- **Scope:** `THIRD_PARTY_NOTICES.md` and the clean-room provenance rules in ADR 13 are unchanged by this decision.
