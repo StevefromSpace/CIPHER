@@ -23,9 +23,9 @@ Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → 
 
 ### PR and issue mapping (as of this reconciliation)
 
-- PR #1 (open, not draft, base `main`, head `research/assistant-source-intelligence`): memory load fix and hardening. Not merged.
-- PR #2 (draft, base PR #1 branch, head `feat/repl-memory-commands`): v0.3 REPL memory commands; contains the v0.3 and v0.4 feature history.
-- PR #3 (draft, base `feat/repl-memory-commands`): Claude and Hermes CLI provider adapters, Windows handle inheritance fix (issue #5). Not tied to a numbered milestone.
+- PR #1 (merged 2026-10-25, base `main`, head `research/assistant-source-intelligence`): memory load fix and hardening.
+- PR #2 (merged 2026-10-26, base PR #1 branch, head `feat/repl-memory-commands`): v0.3 REPL memory commands; contains the v0.3 and v0.4 feature history.
+- PR #3 (closed without merge 2026-10-27, base `feat/repl-memory-commands`, head `feat/assistant-cli-providers`): Claude and Hermes CLI provider adapters, Windows handle inheritance fix (issue #5). Not on `main`; its code exists only on the closed branch.
 - PR #9 (draft): autonomous operating policy. Owner review pending.
 - PR #11 (draft): memory inspection regression test seam (issue #4, closed).
 - PR #12 (draft, parked, base PR #3 branch): tool registry slice for v0.5. Not part of current milestone execution.
