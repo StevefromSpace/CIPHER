@@ -9,7 +9,7 @@ Builds on PR #34 (`filesystem.read`). CIPHER stays the authority: the model only
 - `memory.search <keyword>`: max 5 hits, 200-byte snippets, entries denied by the `memory_deny` policy are skipped. `memory.list` is still not offered.
 - Every call still needs its own exact `yes`. There is no plan-wide approval.
 - Repeat guard: an identical call that already ran is not re-confirmed or re-run.
-- Recovery: a refused or failed read-only call is shown to the model as an observation, at most `kMaxToolFailures` (2) times, then the loop stops with `Denied: ...`. Policy block, owner "no", malformed, unoffered and non-local route stay terminal.
+- Recovery: a refused or failed read-only call is shown to the model as an observation, at most `kMaxToolFailures` (2) times, then the loop stops with `Denied: ...`. Policy block, owner "no", malformed, unoffered and non-local route stay terminal. After an earlier call in the same turn, these messages name the calls that ran; "Nothing was run." appears only when none ran.
 - Observation vs verification: empty output is reported as "confirms nothing"; any answer after tool use gets a footer listing the calls CIPHER ran and stating the answer is the model's, not verified.
 
 ## Not done (honest)

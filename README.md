@@ -18,7 +18,7 @@ New in v0.2:
 - Clear error messages when the configuration file contains mistakes.
 - Sensible defaults when no configuration file is present.
 
-Persistent memory is available as opt-in REPL commands (set `memory_file` in `cipher.conf`). What is still not implemented: AI runtime, voice, computer control, autonomous planning, network access.
+Persistent memory is available as opt-in REPL commands (set `memory_file` in `cipher.conf`). What is still not implemented: voice, computer control, autonomous planning, general network access. Local inference runs only through a configured loopback Ollama or an in-process llama.cpp model.
 
 ## Configuration
 
@@ -157,4 +157,4 @@ To maintain continuity across different models, sessions, and tools, every AI co
 
 ## Development status
 
-This project is experimental and under active development. Do not use it to control important systems or handle secrets. The current build has no system-control, network, or AI-inference capabilities.
+This project is experimental and under active development. Do not use it to control important systems or handle secrets. The core has no system-control or general network access. The only network use is a loopback Ollama endpoint when `ollama_port` is set.

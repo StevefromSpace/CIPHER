@@ -20,7 +20,6 @@ std::string trim(const std::string& text) {
     return text.substr(first, last - first + 1);
 }
 
-constexpr char kMalformedText[] = "The model's tool request was malformed. Nothing was run.";
 constexpr char kMalformedObservation[] =
     "Observation: your last reply was not one valid tool request, so nothing was run. "
     "Reply with exactly one line, TOOL_CALL: <tool id> <argument>, or answer in plain text.";
@@ -49,12 +48,22 @@ std::string with_trace(const std::string& answer, const std::vector<std::string>
     return answer + trace + " the answer above is the model's, not verified by CIPHER.]";
 }
 
+std::string join_calls(const std::vector<std::string>& ran) {
+    std::string calls;
+    for (const std::string& call : ran) calls += (calls.empty() ? "" : "; ") + call;
+    return calls;
+}
+
 // Hitting the round cap after tools ran must not claim that nothing ran.
 std::string round_limit_answer(const std::vector<std::string>& ran) {
     if (ran.empty()) return "Tool call limit reached. Nothing was run.";
-    std::string calls;
-    for (const std::string& call : ran) calls += (calls.empty() ? "" : "; ") + call;
-    return "Tool call limit reached. Nothing more was run. Calls that ran: " + calls + ".";
+    return "Tool call limit reached. Nothing more was run. Calls that ran: " + join_calls(ran) + ".";
+}
+
+// "Nothing was run." is true only when no call ran earlier in this turn.
+std::string stop_with_ran(const std::string& reason, const std::vector<std::string>& ran) {
+    if (ran.empty()) return reason + " Nothing was run.";
+    return reason + " Calls that ran earlier in this turn: " + join_calls(ran) + ".";
 }
 
 bool has_control_char(const std::string& text) {
@@ -210,11 +219,11 @@ std::string ModelToolLoop::run(const std::string& question) {
         std::string argument;
         const bool parsed = parse_tool_request(reply, tool_id, argument);
         if (parsed && std::find(offered_.begin(), offered_.end(), tool_id) == offered_.end()) {
-            return "The model asked for tool '" + tool_id + "', which is not offered. Nothing was run.";
+            return stop_with_ran("The model asked for tool '" + tool_id + "', which is not offered.", ran);
         }
         // A malformed request ran nothing, so the model gets a correction, within the same failure budget as refusals.
         if (!parsed || !argument_fits(tool_id, argument)) {
-            if (++failures >= kMaxToolFailures) return kMalformedText;
+            if (++failures >= kMaxToolFailures) return stop_with_ran("The model's tool request was malformed.", ran);
             results.push_back(kMalformedObservation);
             continue;
         }
@@ -236,20 +245,20 @@ std::string ModelToolLoop::run(const std::string& question) {
                 target = definition->resolve_target(argument);
             } catch (const std::exception& error) {
                 // Nothing ran, so the model may see the reason and correct itself, a bounded number of times.
-                const std::string refusal = std::string("Denied: ") + error.what() + " Nothing was run.";
-                if (++failures >= kMaxToolFailures) return refusal;
+                const std::string refusal = std::string("Denied: ") + error.what();
+                if (++failures >= kMaxToolFailures) return stop_with_ran(refusal, ran);
                 results.push_back("Tool " + tool_id + " was not run. " + refusal);
                 continue;
             }
         }
         const ActionDescriptor action{tool_id, target, definition->category, definition->default_tier};
         if (registry_.policy().evaluate(action) == RiskTier::Block) {
-            return "Denied by permission policy (block): " + tool_id + ". Nothing was run.";
+            return stop_with_ran("Denied by permission policy (block): " + tool_id + ".", ran);
         }
 
         // Every model-originated call needs an owner "yes", even for Safe-tier tools.
         if (!confirm_ || !confirm_(tool_id, definition->description, target)) {
-            return "Owner confirmation was not given: " + tool_id + ". Nothing was run.";
+            return stop_with_ran("Owner confirmation was not given: " + tool_id + ".", ran);
         }
 
         // invoke() resolves and checks the argument again, so a file swapped after the prompt is still caught.
