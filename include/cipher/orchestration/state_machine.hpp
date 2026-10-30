@@ -107,6 +107,8 @@ struct JobRecord {
     bool review_approved = false;
     std::string head_sha;                    // current PR head
     std::string reviewed_head_sha;           // head of the last counted review
+    std::string implementation_family;       // reviewer must come from a different family (section 8.2)
+    bool execution_in_flight = false;        // an implementation execution started and has not reported
 };
 
 struct TransitionResult {

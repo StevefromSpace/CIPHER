@@ -72,6 +72,10 @@ public:
     // role (waiting on GitHub, paused, or terminal) or the event was rejected.
     bool advance();
 
+    // After a restart: an implementation execution that was in flight is reported as ImplementationFailed
+    // (a counted attempt). The role is never run again here. Returns false when nothing was in flight.
+    bool recover();
+
     const JobRecord& job() const;
     const std::vector<ExecutionRecord>& records() const;
 
@@ -84,7 +88,6 @@ private:
     JobStore& store_;
     Policy policy_;
     JobRecord job_;
-    std::string implementation_family_;
     std::vector<ExecutionRecord> records_;
 };
 
