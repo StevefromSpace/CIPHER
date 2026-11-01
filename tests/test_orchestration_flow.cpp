@@ -2,9 +2,11 @@
 // driving the Stage 1 state machine through a scripted role executor. No network, model or filesystem
 // dependency. Plain pass/fail bookkeeping, like the other CIPHER suites.
 
+#include "cipher/orchestration/event_log.hpp"
 #include "cipher/orchestration/github_facts.hpp"
 #include "cipher/orchestration/orchestrator.hpp"
 
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <stdexcept>
@@ -14,6 +16,7 @@
 namespace {
 
 using namespace cipher::orchestration;
+namespace fs = std::filesystem;
 
 int g_failures = 0;
 int g_passes = 0;
@@ -169,6 +172,28 @@ void test_happy_path_reaches_next_issue() {
     check(orch.apply(merge_request(kHeadA, true, true, true)) && orch.job().state == State::NextIssue,
           "happy: merge with all gates reaches NextIssue", "merge rejected");
     check(orch.job().implementation_executions == 1, "happy: one implementation execution", "count is not 1");
+}
+
+void test_transitions_are_logged_one_line_each() {
+    ScriptedExecutor executor;
+    InMemoryJobStore store;
+    const fs::path dir = fs::temp_directory_path() / "cipher-orch-flow-log-test";
+    fs::remove_all(dir);
+    EventLog log(dir / "events.log");
+    queue_standard_path(executor, kHeadA);
+    executor.queue(Role::Reviewer, review_result(Verdict::Approve, kHeadA, kGemini));
+
+    Orchestrator orch(20, IssueFacts{}, executor, store, Policy{});
+    orch.attach_event_log(log);
+    orch.start();
+    orch.advance();
+    const auto lines = log.read_all();
+    check(lines.size() == 2, "log: Start and implementation each append one line", "line count is wrong");
+    check(!lines.empty() && lines[0].find("issue=20\tevent=transition\tdetail=from=ISSUE to=IMPLEMENTATION accepted=1 attempt=0") == 0,
+          "log: first line records Start from ISSUE to IMPLEMENTATION", "first line is wrong");
+    check(lines.size() == 2 && lines[1].find("from=IMPLEMENTATION to=PR accepted=1 attempt=1 reason=") != std::string::npos,
+          "log: implementation line records PR transition with attempt and reason", "second line is wrong");
+    fs::remove_all(dir);
 }
 
 void test_stale_ci_head_is_rejected() {
@@ -412,6 +437,7 @@ int main() {
     test_ci_conversion();
     test_review_and_stale_head_detection();
     test_happy_path_reaches_next_issue();
+    test_transitions_are_logged_one_line_each();
     test_stale_ci_head_is_rejected();
     test_retry_is_bounded_to_two_executions();
     test_blocked_pause_does_not_consume_budget();

@@ -49,7 +49,28 @@ bool Orchestrator::apply(const Event& event, const std::string& model_family) {
     record.to = job_.state;
     record.escalation = job_.escalation;
     records_.push_back(record);
+    log_record(record);
     return result.accepted;
+}
+
+void Orchestrator::attach_event_log(EventLog& log) {
+    event_log_ = &log;
+}
+
+void Orchestrator::log_record(const ExecutionRecord& record) const {
+    if (event_log_ == nullptr) return;
+    // Reason text is produced by transition(), but a log line must stay one line with three fields.
+    std::string reason = record.reason;
+    for (char& ch : reason) {
+        if (ch == '\t' || ch == '\r' || ch == '\n') ch = ' ';
+    }
+    std::string detail = std::string("from=") + to_string(record.from) + " to=" + to_string(record.to) +
+                         " accepted=" + (record.accepted ? "1" : "0") + " attempt=" +
+                         std::to_string(record.attempt) + " reason=" + reason;
+    if (record.escalation != EscalationReason::None) {
+        detail += std::string(" escalation=") + to_string(record.escalation);
+    }
+    event_log_->append(issue_number_, "transition", detail);
 }
 
 bool Orchestrator::advance() {
