@@ -15,10 +15,10 @@ It does not change the contract.
 | Worktree allocator (`worktree_allocator`) | Real directory and record logic | Concurrency tests | The git worktree backend is a fake interface. There is no real `git worktree add` backend yet. |
 | Merge gates (`governed_merge`) | Pure function | Concurrency tests | 7 contract gates plus 3 adapter preconditions. |
 | Merge lock (`MergeLock`) | Real file lock (`wx` create) | Concurrency tests | A stale `merge.lock` after a crash blocks all merges. It is never auto-deleted. |
-| Event log (`event_log`) | Real append-only file | Store tests | One line per transition. |
+| Event log (`event_log`) | Real append-only file | Flow tests (`test_transitions_are_logged_one_line_each`) | One line per transition. |
 | Process runner (`process_runner`) | Real on Windows only | Child-process tests | CreateProcessW, Job Object kill-on-close, output cap. Non-Windows throws. |
 | GitHub adapter (`github_adapter`) | Typed argv builder | Adapter tests | Closed operation enum. No `gh api` passthrough. |
-| GitHub process runner (`gh_process_runner`) | Real `gh` path resolution over the process runner | Fake process runner | No live `gh` call has been made by tests. |
+| GitHub process runner (`gh_process_runner`) | Maps `gh` argv onto the process runner. The caller passes an absolute path. | Fake process runner | Requires argv[0] to be the literal `gh`. Nothing resolves `gh` from PATH. No live `gh` call has been made by tests. |
 | Claude executor (`claude_executor`) | Real argv and parse | Fake process runner | Tool-less. One earlier live probe succeeded. |
 | Claude role executor (`claude_role_executor`) | Research and Architecture only | Fake process runner | Security, Implementation, QA and Reviewer escalate without any process call. |
 
@@ -26,6 +26,8 @@ It does not change the contract.
 
 - **No tool-enabled implementation executor.** The Claude call is tool-less, so it cannot edit files, push, or produce a head SHA. A live pilot cannot run end to end without one.
 - **No live GitHub interaction.** The tests use fakes. Nothing has read or mutated the repository through the adapter.
+- **No merge controller.** `evaluate_merge_gates` and `MergeLock` are tested in isolation. Nothing re-reads job B's PR after job A merges. Re-reading state after each merge is the caller's job, and that is untested.
+- **No `gh` or `claude` path resolver.** The caller must pass absolute paths.
 - **No real git worktree backend.** The allocator is tested with a fake backend.
 - **No independent security executor.** Gemini and Antigravity are unavailable. Security-sensitive jobs stay in `NEEDS_HUMAN`.
 - **Not wired into the `cipher` executable.** The orchestration library is standalone.

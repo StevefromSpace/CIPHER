@@ -10,6 +10,7 @@
 #include "cipher/orchestration/worktree_allocator.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <string>
@@ -59,7 +60,8 @@ public:
 // One tick: rebuild every job's scheduler input from the store (never from memory), plan, then start admitted jobs.
 // deps maps each issue to its structured dependencies. Escalations are applied by the test, not by the tick.
 std::vector<Decision> tick(const fs::path& dir, const std::map<int, std::vector<int>>& deps,
-                           RoleExecutor& executor, GlobalStop stop = GlobalStop::None) {
+                           const std::function<RoleExecutor&(int)>& executor_for,
+                           GlobalStop stop = GlobalStop::None) {
     FileJobStore store(dir);
     std::vector<SchedulerJob> jobs;
     for (const auto& [issue, depends_on] : deps) {
@@ -73,11 +75,16 @@ std::vector<Decision> tick(const fs::path& dir, const std::map<int, std::vector<
     const std::vector<Decision> decisions = plan_schedule(jobs, kDefaultMaxParallelJobs, stop);
     for (const Decision& decision : decisions) {
         if (decision.action != Action::Admit) continue;
-        Orchestrator orch(decision.issue_number, IssueFacts{}, executor, store, Policy{});
+        Orchestrator orch(decision.issue_number, IssueFacts{}, executor_for(decision.issue_number), store, Policy{});
         orch.start();
         orch.advance();  // implementation completes; the job now holds a slot in PullRequest
     }
     return decisions;
+}
+
+std::vector<Decision> tick(const fs::path& dir, const std::map<int, std::vector<int>>& deps, RoleExecutor& executor,
+                           GlobalStop stop = GlobalStop::None) {
+    return tick(dir, deps, [&executor](int) -> RoleExecutor& { return executor; }, stop);
 }
 
 const Decision* find(const std::vector<Decision>& decisions, int issue) {
@@ -239,6 +246,98 @@ void test_stale_merge_lock_blocks_until_a_human_clears_it() {
     fs::remove_all(dir);
 }
 
+// One job's replies, in order per role. Each job gets its own instance, because JobRecord does not carry the issue number.
+class ScriptedExecutor final : public RoleExecutor {
+public:
+    void queue(Role role, const RoleResult& result) { scripts_[role].push_back(result); }
+    RoleResult run(Role role, const JobRecord&) override {
+        auto& queue = scripts_[role];
+        if (queue.empty()) return RoleResult{};
+        RoleResult next = queue.front();
+        queue.erase(queue.begin());
+        return next;
+    }
+
+private:
+    std::map<Role, std::vector<RoleResult>> scripts_;
+};
+
+RoleResult result_for(EventKind kind, const std::string& head) {
+    RoleResult result;
+    result.event.kind = kind;
+    result.event.head_sha = head;
+    result.model_family = kClaude;
+    return result;
+}
+
+void test_store_backed_flow_releases_dependency_and_exhausts_budget() {
+    const fs::path dir = fresh_dir("cipher-concurrency-flow");
+    ScriptedExecutor job10_script;
+    ScriptedExecutor job11_script;
+    ScriptedExecutor job12_script;
+
+    // Job 10 runs the standard path to NextIssue.
+    job10_script.queue(Role::Implementation, result_for(EventKind::ImplementationComplete, kHeadA));
+    job10_script.queue(Role::Implementation, result_for(EventKind::PullRequestOpened, kHeadA));
+    RoleResult qa = result_for(EventKind::QaResult, kHeadA);
+    qa.event.verdict = Verdict::Approve;
+    job10_script.queue(Role::Qa, qa);
+    RoleResult review = result_for(EventKind::ReviewVerdict, kHeadA);
+    review.event.verdict = Verdict::Approve;
+    job10_script.queue(Role::Reviewer, review);
+
+    // Job 12 fails implementation on every attempt.
+    job12_script.queue(Role::Implementation, result_for(EventKind::ImplementationFailed, ""));
+    job12_script.queue(Role::Implementation, result_for(EventKind::ImplementationFailed, ""));
+
+    FileJobStore store(dir);
+    {
+        Orchestrator job10(10, IssueFacts{}, job10_script, store, Policy{});
+        check(job10.start() && job10.advance() && job10.advance() && job10.advance(),
+              "flow: job 10 reaches Ci");
+        Event ci;
+        ci.kind = EventKind::CiResult;
+        ci.ci_passed = true;
+        ci.head_sha = kHeadA;
+        check(job10.apply(ci) && job10.advance() && job10.job().state == State::Merge,
+              "flow: job 10 passes CI and review to Merge");
+
+        MergeLock lock(dir);
+        check(lock.try_acquire(10), "flow: job 10 takes the merge lock");
+        Event merge;
+        merge.kind = EventKind::MergeRequest;
+        merge.head_sha = kHeadA;
+        merge.evidence.no_open_blocker_or_high = true;
+        merge.evidence.scope_within_accepted = true;
+        merge.evidence.protected_content_absent = true;
+        check(job10.apply(merge) && job10.job().state == State::NextIssue, "flow: job 10 reaches NextIssue");
+        lock.release(10);
+    }
+
+    // A fresh tick reads job 10 from disk. Job 11 depends on 10, so the dependency is released. Job 12 is admitted.
+    const std::map<int, std::vector<int>> deps = {{10, {}}, {11, {10}}, {12, {}}};
+    const auto decisions = tick(dir, deps, [&](int issue) -> RoleExecutor& {
+        return issue == 11 ? static_cast<RoleExecutor&>(job11_script) : static_cast<RoleExecutor&>(job12_script);
+    });
+    check(find(decisions, 11) && find(decisions, 11)->action == Action::Admit,
+          "flow: dependent job 11 is admitted once job 10 reaches NextIssue");
+    check(find(decisions, 12) && find(decisions, 12)->action == Action::Admit, "flow: job 12 is admitted in the same tick");
+
+    // Job 12 burns its two implementation executions and is escalated. Job 10 stays where it was.
+    // The tick already ran job 12's first implementation attempt. One more advance runs the second and last one.
+    FileJobStore reread(dir);
+    Orchestrator job12(12, IssueFacts{}, job12_script, reread, Policy{});
+    check(job12.advance() && job12.job().state == State::NeedsHuman &&
+              job12.job().escalation == EscalationReason::RetryBudgetExhausted,
+          "flow: job 12 ends in NeedsHuman with RetryBudgetExhausted");
+    check(job12.job().implementation_executions == 2, "flow: job 12 used exactly two implementation executions");
+
+    const auto job10 = FileJobStore(dir).load(10);
+    check(job10 && job10->state == State::NextIssue && job10->implementation_executions == 1,
+          "flow: job 10 is unchanged by job 12's escalation");
+    fs::remove_all(dir);
+}
+
 }  // namespace
 
 int main() {
@@ -248,6 +347,7 @@ int main() {
     test_unrecorded_worktree_conflict_stops_all_admission();
     test_merge_lock_serializes_and_gates_are_reevaluated();
     test_stale_merge_lock_blocks_until_a_human_clears_it();
+    test_store_backed_flow_releases_dependency_and_exhausts_budget();
     std::cout << (g_failures == 0 ? "ALL PASSED" : "FAILURES") << "\n";
     return g_failures == 0 ? 0 : 1;
 }
