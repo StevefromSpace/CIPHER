@@ -1,5 +1,4 @@
-// Windows process runner tests. The test binary re-launches itself in child modes, so no shell is involved.
-// Registered only on Windows (see CMakeLists.txt); other platforms have no runner and no test.
+// Process runner tests for Windows and POSIX. The test binary re-launches itself in child modes, so no shell is involved.
 
 #include "cipher/orchestration/process_runner.hpp"
 
@@ -97,6 +96,18 @@ void test_relative_argv0_is_rejected() {
     check(rejected, "runner: relative argv[0] rejected before any launch");
 }
 
+// An absolute path that does not exist must surface as an error, not a silent non-zero exit.
+void test_missing_executable_throws() {
+    SystemProcessRunner runner;
+    bool threw = false;
+    try {
+        runner.run({std::filesystem::absolute("no-such-cipher-binary-xyz").string()}, 5000);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    check(threw, "runner: a missing absolute executable throws runtime_error");
+}
+
 void test_timeout_kills_child(const std::string& self) {
     SystemProcessRunner runner;
     const auto started = std::chrono::steady_clock::now();
@@ -126,15 +137,14 @@ void test_output_cap_is_a_failure(const std::string& self) {
 int main(int argc, char** argv) {
     if (argc > 1 && std::string(argv[1]).rfind("--child-", 0) == 0) return run_child(argc, argv);
 
-#ifdef _WIN32
     const std::string self = self_path(argv[0]);
     test_exit_code_round_trip(self);
     test_argv_round_trip(self);
     test_relative_argv0_is_rejected();
+    test_missing_executable_throws();
     test_timeout_kills_child(self);
     test_large_output_on_both_streams(self);
     test_output_cap_is_a_failure(self);
-#endif
     std::cout << (failures == 0 ? "ALL PASSED" : "FAILURES") << "\n";
     return failures == 0 ? 0 : 1;
 }

@@ -26,7 +26,7 @@ public:
 
 // Launches argv[0] directly. argv[0] must be an absolute path, so the OS never resolves an executable from the
 // working directory (job worktrees hold agent-written files). stdin is NUL. A timeout or output overflow kills the
-// whole process tree through a Job Object. Implemented for Windows; other platforms throw std::runtime_error.
+// whole process tree: a Job Object on Windows, a process group on POSIX. Output past the cap is discarded and flagged.
 class SystemProcessRunner final : public ProcessRunner {
 public:
     explicit SystemProcessRunner(std::size_t max_output_bytes = kDefaultMaxProcessOutputBytes);
