@@ -37,7 +37,12 @@ public:
     }
 };
 
+// The runner requires an absolute path, which means a drive path on Windows and a root path elsewhere.
+#ifdef _WIN32
 const std::string kGhPath = R"J(C:\Program Files\GitHub CLI\gh.exe)J";
+#else
+const std::string kGhPath = "/usr/bin/gh";
+#endif
 
 void test_argv_zero_is_replaced_with_resolved_path() {
     FakeProcessRunner process;
