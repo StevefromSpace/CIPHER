@@ -135,6 +135,7 @@ add_library(cipher_orchestration
     src/orchestration/governed_merge.cpp
     src/orchestration/event_log.cpp
     src/orchestration/claude_executor.cpp
+    src/orchestration/process_runner.cpp
 )
 target_include_directories(cipher_orchestration PUBLIC include)
 target_include_directories(cipher_orchestration SYSTEM PRIVATE third_party)
@@ -310,6 +311,11 @@ if(BUILD_TESTING)
     add_executable(cipher_orchestration_claude_tests tests/test_orchestration_claude.cpp)
     target_link_libraries(cipher_orchestration_claude_tests PRIVATE cipher_orchestration)
     add_test(NAME cipher_orchestration_claude_tests COMMAND cipher_orchestration_claude_tests)
+    if(WIN32)
+        add_executable(cipher_orchestration_process_tests tests/test_orchestration_process.cpp)
+        target_link_libraries(cipher_orchestration_process_tests PRIVATE cipher_orchestration)
+        add_test(NAME cipher_orchestration_process_tests COMMAND cipher_orchestration_process_tests)
+    endif()
 
     # v0.6: in-process llama.cpp backend. Real inference runs only when CIPHER_TEST_GGUF names a model file.
     if(CIPHER_WITH_LLAMA)

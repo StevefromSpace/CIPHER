@@ -1,24 +1,11 @@
 #pragma once
 
+#include "cipher/orchestration/process_runner.hpp"
+
 #include <string>
 #include <vector>
 
 namespace cipher::orchestration {
-
-// Process seam for the Claude CLI. Implementations launch argv directly (never through a shell) and enforce the
-// timeout. No production implementation is wired in this build; tests inject a fake.
-struct ProcessResult {
-    int exit_code = 0;
-    bool timed_out = false;
-    std::string stdout_text;   // may contain model output; never log it
-    std::string stderr_text;   // may contain account details; never log it
-};
-
-class ProcessRunner {
-public:
-    virtual ~ProcessRunner() = default;
-    virtual ProcessResult run(const std::vector<std::string>& argv, int timeout_ms) = 0;
-};
 
 // Observed protocol (claude 2.1.316, one live call on claude-sonnet-5-5 with --max-budget-usd 0.50):
 // stdout is one JSON object: {"type":"result","subtype":"success","is_error":false,"result":"OK",

@@ -52,6 +52,10 @@ ClaudeResult parse_claude_output(const ProcessResult& process) {
         result.status = ClaudeStatus::Timeout;
         return result;
     }
+    if (process.output_overflow) {
+        result.status = ClaudeStatus::MalformedOutput;   // truncated JSON is never a usable answer
+        return result;
+    }
     // Parse even on non-zero exit: the budget overrun exits 1 but still prints a diagnostic JSON object.
     const nlohmann::json body = nlohmann::json::parse(process.stdout_text, nullptr, false);
     if (body.is_discarded() || !body.is_object()) {
