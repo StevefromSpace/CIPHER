@@ -144,7 +144,7 @@ JobRecord parse_job(const std::string& text) {
     JobRecord job;
     job.state = parse_enum(values.at("state"), "state", State::NeedsHuman);
     job.resume_state = parse_enum(values.at("resume_state"), "resume_state", State::NeedsHuman);
-    job.escalation = parse_enum(values.at("escalation"), "escalation", EscalationReason::ExplicitRequest);
+    job.escalation = parse_enum(values.at("escalation"), "escalation", EscalationReason::RoleNotSupported);
     job.implementation_executions = parse_int(values.at("implementation_executions"), "implementation_executions");
     job.review_rounds = parse_int(values.at("review_rounds"), "review_rounds");
     job.blocked_count = parse_int(values.at("blocked_count"), "blocked_count");

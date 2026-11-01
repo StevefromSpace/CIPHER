@@ -39,7 +39,8 @@ enum class EscalationReason {
     DisagreementUnresolved,      // second disagreement after the one re-evaluation (section 5.3)
     BlockedRepeated,             // second BLOCKED on the job (section 5.5)
     NoProgress,                  // repair produced the same findings (section 5.4)
-    ExplicitRequest              // a role emitted NEEDS_HUMAN
+    ExplicitRequest,             // a role emitted NEEDS_HUMAN
+    RoleNotSupported             // the executor has no safe implementation for this role (tool-less or security)
 };
 
 enum class EventKind {
