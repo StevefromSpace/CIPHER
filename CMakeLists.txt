@@ -129,6 +129,8 @@ add_library(cipher_orchestration
     src/orchestration/github_facts.cpp
     src/orchestration/orchestrator.cpp
     src/orchestration/job_store_file.cpp
+    src/orchestration/scheduler.cpp
+    src/orchestration/worktree_allocator.cpp
 )
 target_include_directories(cipher_orchestration PUBLIC include)
 
@@ -292,6 +294,10 @@ if(BUILD_TESTING)
     add_executable(cipher_orchestration_store_tests tests/test_orchestration_store.cpp)
     target_link_libraries(cipher_orchestration_store_tests PRIVATE cipher_orchestration)
     add_test(NAME cipher_orchestration_store_tests COMMAND cipher_orchestration_store_tests)
+
+    add_executable(cipher_orchestration_scheduler_tests tests/test_orchestration_scheduler.cpp)
+    target_link_libraries(cipher_orchestration_scheduler_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_scheduler_tests COMMAND cipher_orchestration_scheduler_tests)
 
     # v0.6: in-process llama.cpp backend. Real inference runs only when CIPHER_TEST_GGUF names a model file.
     if(CIPHER_WITH_LLAMA)
