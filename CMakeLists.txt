@@ -132,6 +132,7 @@ add_library(cipher_orchestration
     src/orchestration/scheduler.cpp
     src/orchestration/worktree_allocator.cpp
     src/orchestration/github_adapter.cpp
+    src/orchestration/gh_process_runner.cpp
     src/orchestration/governed_merge.cpp
     src/orchestration/event_log.cpp
     src/orchestration/claude_executor.cpp
@@ -308,6 +309,9 @@ if(BUILD_TESTING)
     add_executable(cipher_orchestration_github_tests tests/test_orchestration_github.cpp)
     target_link_libraries(cipher_orchestration_github_tests PRIVATE cipher_orchestration)
     add_test(NAME cipher_orchestration_github_tests COMMAND cipher_orchestration_github_tests)
+    add_executable(cipher_orchestration_gh_process_tests tests/test_orchestration_gh_process.cpp)
+    target_link_libraries(cipher_orchestration_gh_process_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_gh_process_tests COMMAND cipher_orchestration_gh_process_tests)
     add_executable(cipher_orchestration_claude_tests tests/test_orchestration_claude.cpp)
     target_link_libraries(cipher_orchestration_claude_tests PRIVATE cipher_orchestration)
     add_test(NAME cipher_orchestration_claude_tests COMMAND cipher_orchestration_claude_tests)
