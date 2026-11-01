@@ -20,6 +20,7 @@ struct PullRequestFacts {
     int number = 0;
     bool open = false;
     bool merged = false;
+    bool mergeable = false;          // GitHub reports MERGEABLE: no conflicts with base
     std::string head_sha;
     std::string base_sha;
     std::vector<std::string> labels;

@@ -49,25 +49,67 @@ bool Orchestrator::apply(const Event& event, const std::string& model_family) {
     record.to = job_.state;
     record.escalation = job_.escalation;
     records_.push_back(record);
+    log_record(record);
     return result.accepted;
+}
+
+void Orchestrator::attach_event_log(EventLog& log) {
+    event_log_ = &log;
+}
+
+void Orchestrator::log_record(const ExecutionRecord& record) const {
+    if (event_log_ == nullptr) return;
+    // Reason text is produced by transition(), but a log line must stay one line with three fields.
+    std::string reason = record.reason;
+    for (char& ch : reason) {
+        if (ch == '\t' || ch == '\r' || ch == '\n') ch = ' ';
+    }
+    std::string detail = std::string("from=") + to_string(record.from) + " to=" + to_string(record.to) +
+                         " accepted=" + (record.accepted ? "1" : "0") + " attempt=" +
+                         std::to_string(record.attempt) + " reason=" + reason;
+    if (record.escalation != EscalationReason::None) {
+        detail += std::string(" escalation=") + to_string(record.escalation);
+    }
+    event_log_->append(issue_number_, "transition", detail);
 }
 
 bool Orchestrator::advance() {
     const std::optional<Role> role = role_for(job_.state);
     if (!role) return false;
 
+    // Only an implementation execution counts against the budget. Mark it before the role runs, so a crash
+    // during the run is visible on restart (see recover()).
+    const bool counted = *role == Role::Implementation && job_.state == State::Implementation;
+    if (counted) {
+        job_.execution_in_flight = true;
+        store_.save(issue_number_, job_);
+    }
     const RoleResult result = executor_.run(*role, job_);
-    if (*role == Role::Implementation) implementation_family_ = result.model_family;
+    if (counted) {
+        job_.execution_in_flight = false;
+        job_.implementation_family = result.model_family;
+        store_.save(issue_number_, job_);
+    }
 
     // A security-sensitive review must come from a model family other than the implementation family
     // (contract sections 1.5, 8.2). An empty or equal family is treated as no independent review.
     if (*role == Role::Reviewer && job_.facts.security_sensitive) {
-        const bool independent = !result.model_family.empty() && result.model_family != implementation_family_;
+        const bool independent = !result.model_family.empty() && result.model_family != job_.implementation_family;
         if (!independent) {
             return apply(escalation_event(EscalationReason::SecurityReviewUnavailable), result.model_family);
         }
     }
     return apply(result.event, result.model_family);
+}
+
+bool Orchestrator::recover() {
+    if (!job_.execution_in_flight) return false;
+
+    job_.execution_in_flight = false;
+    store_.save(issue_number_, job_);
+    Event event;
+    event.kind = EventKind::ImplementationFailed;
+    return apply(event);
 }
 
 const JobRecord& Orchestrator::job() const {

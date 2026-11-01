@@ -273,6 +273,7 @@ const char* to_string(EscalationReason reason) {
         case EscalationReason::BlockedRepeated: return "repeated BLOCKED";
         case EscalationReason::NoProgress: return "no progress";
         case EscalationReason::ExplicitRequest: return "explicit NEEDS_HUMAN";
+        case EscalationReason::RoleNotSupported: return "role not supported by the configured executor";
     }
     return "unknown";
 }

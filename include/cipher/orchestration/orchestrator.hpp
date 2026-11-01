@@ -1,6 +1,7 @@
 #ifndef CIPHER_ORCHESTRATION_ORCHESTRATOR_HPP
 #define CIPHER_ORCHESTRATION_ORCHESTRATOR_HPP
 
+#include "cipher/orchestration/event_log.hpp"
 #include "cipher/orchestration/state_machine.hpp"
 
 #include <map>
@@ -72,20 +73,28 @@ public:
     // role (waiting on GitHub, paused, or terminal) or the event was rejected.
     bool advance();
 
+    // After a restart: an implementation execution that was in flight is reported as ImplementationFailed
+    // (a counted attempt). The role is never run again here. Returns false when nothing was in flight.
+    bool recover();
+
     const JobRecord& job() const;
     const std::vector<ExecutionRecord>& records() const;
+
+    // Stage 8: every attempted transition is also appended to this log. Optional; the log is not read back.
+    void attach_event_log(EventLog& log);
 
 private:
     std::optional<Role> role_for(State state) const;
     Event escalation_event(EscalationReason reason) const;
+    void log_record(const ExecutionRecord& record) const;
 
     int issue_number_;
     RoleExecutor& executor_;
     JobStore& store_;
     Policy policy_;
     JobRecord job_;
-    std::string implementation_family_;
     std::vector<ExecutionRecord> records_;
+    EventLog* event_log_ = nullptr;
 };
 
 }  // namespace cipher::orchestration

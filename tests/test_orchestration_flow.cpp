@@ -2,17 +2,21 @@
 // driving the Stage 1 state machine through a scripted role executor. No network, model or filesystem
 // dependency. Plain pass/fail bookkeeping, like the other CIPHER suites.
 
+#include "cipher/orchestration/event_log.hpp"
 #include "cipher/orchestration/github_facts.hpp"
 #include "cipher/orchestration/orchestrator.hpp"
 
+#include <filesystem>
 #include <iostream>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace {
 
 using namespace cipher::orchestration;
+namespace fs = std::filesystem;
 
 int g_failures = 0;
 int g_passes = 0;
@@ -168,6 +172,28 @@ void test_happy_path_reaches_next_issue() {
     check(orch.apply(merge_request(kHeadA, true, true, true)) && orch.job().state == State::NextIssue,
           "happy: merge with all gates reaches NextIssue", "merge rejected");
     check(orch.job().implementation_executions == 1, "happy: one implementation execution", "count is not 1");
+}
+
+void test_transitions_are_logged_one_line_each() {
+    ScriptedExecutor executor;
+    InMemoryJobStore store;
+    const fs::path dir = fs::temp_directory_path() / "cipher-orch-flow-log-test";
+    fs::remove_all(dir);
+    EventLog log(dir / "events.log");
+    queue_standard_path(executor, kHeadA);
+    executor.queue(Role::Reviewer, review_result(Verdict::Approve, kHeadA, kGemini));
+
+    Orchestrator orch(20, IssueFacts{}, executor, store, Policy{});
+    orch.attach_event_log(log);
+    orch.start();
+    orch.advance();
+    const auto lines = log.read_all();
+    check(lines.size() == 2, "log: Start and implementation each append one line", "line count is wrong");
+    check(!lines.empty() && lines[0].find("issue=20\tevent=transition\tdetail=from=ISSUE to=IMPLEMENTATION accepted=1 attempt=0") == 0,
+          "log: first line records Start from ISSUE to IMPLEMENTATION", "first line is wrong");
+    check(lines.size() == 2 && lines[1].find("from=IMPLEMENTATION to=PR accepted=1 attempt=1 reason=") != std::string::npos,
+          "log: implementation line records PR transition with attempt and reason", "second line is wrong");
+    fs::remove_all(dir);
 }
 
 void test_stale_ci_head_is_rejected() {
@@ -338,11 +364,80 @@ void test_records_and_persistence() {
 
 }  // namespace
 
+// Throws from the implementation role while armed, to simulate a process that dies mid-execution.
+class CrashingExecutor final : public RoleExecutor {
+public:
+    RoleResult run(Role role, const JobRecord&) override {
+        if (role == Role::Implementation && armed) throw std::runtime_error("simulated crash");
+        ++implementation_runs;
+        return role_result(EventKind::ImplementationComplete, kHeadA, kClaude);
+    }
+
+    bool armed = true;
+    int implementation_runs = 0;
+};
+
+void test_restart_recovery() {
+    IssueFacts facts;
+
+    // Family is persisted in the job record, so a reloaded job still enforces reviewer independence.
+    ScriptedExecutor family_executor;
+    InMemoryJobStore family_store;
+    queue_standard_path(family_executor, kHeadA);
+    Orchestrator first(20, facts, family_executor, family_store, Policy{});
+    first.start();
+    first.advance();
+    Orchestrator reloaded(20, facts, family_executor, family_store, Policy{});
+    check(reloaded.job().implementation_family == kClaude, "restart: implementation family survives reload",
+          "family lost on reload");
+
+    // A crash during an implementation execution is a counted failure on restart, never a silent re-run.
+    CrashingExecutor crashing;
+    InMemoryJobStore crash_store;
+    Orchestrator crashed(21, facts, crashing, crash_store, Policy{});
+    crashed.start();
+    bool threw = false;
+    try {
+        crashed.advance();
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    check(threw, "restart: crash propagates out of the role", "no exception");
+    check(crash_store.load(21)->execution_in_flight, "restart: in-flight marker saved before the role runs",
+          "marker not saved");
+
+    Orchestrator restarted(21, facts, crashing, crash_store, Policy{});
+    const int runs_before_recover = crashing.implementation_runs;
+    check(restarted.recover(), "restart: in-flight execution is recovered", "nothing recovered");
+    check(restarted.job().implementation_executions == 2 && restarted.job().state == State::Implementation &&
+              !restarted.job().execution_in_flight,
+          "restart: recovered execution is counted once and the attempt is retried", "counter or state wrong");
+    check(crashing.implementation_runs == runs_before_recover, "restart: recovery never re-runs the role",
+          "role ran during recovery");
+    check(!restarted.recover(), "restart: recovery is a no-op when nothing is in flight", "recovered twice");
+
+    // Second crash on the last allowed attempt: recovery escalates instead of starting a third execution.
+    crashing.armed = true;
+    Orchestrator second_crash(21, facts, crashing, crash_store, Policy{});
+    try {
+        second_crash.advance();
+    } catch (const std::runtime_error&) {
+    }
+    Orchestrator final_restart(21, facts, crashing, crash_store, Policy{});
+    final_restart.recover();
+    check(final_restart.job().state == State::NeedsHuman &&
+              final_restart.job().escalation == EscalationReason::RetryBudgetExhausted &&
+              final_restart.job().implementation_executions == 2,
+          "restart: second crash on the last attempt escalates without a third execution",
+          "third execution or wrong escalation");
+}
+
 int main() {
     test_issue_labels_map_to_facts();
     test_ci_conversion();
     test_review_and_stale_head_detection();
     test_happy_path_reaches_next_issue();
+    test_transitions_are_logged_one_line_each();
     test_stale_ci_head_is_rejected();
     test_retry_is_bounded_to_two_executions();
     test_blocked_pause_does_not_consume_budget();
@@ -350,6 +445,7 @@ int main() {
     test_security_review_requires_independent_family();
     test_merge_gates_fail_closed();
     test_records_and_persistence();
+    test_restart_recovery();
 
     std::cout << g_passes << " passed, " << g_failures << " failed\n";
     return g_failures == 0 ? 0 : 1;

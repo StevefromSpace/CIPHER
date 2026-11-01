@@ -128,8 +128,19 @@ add_library(cipher_orchestration
     src/orchestration/state_machine.cpp
     src/orchestration/github_facts.cpp
     src/orchestration/orchestrator.cpp
+    src/orchestration/job_store_file.cpp
+    src/orchestration/scheduler.cpp
+    src/orchestration/worktree_allocator.cpp
+    src/orchestration/github_adapter.cpp
+    src/orchestration/gh_process_runner.cpp
+    src/orchestration/claude_role_executor.cpp
+    src/orchestration/governed_merge.cpp
+    src/orchestration/event_log.cpp
+    src/orchestration/claude_executor.cpp
+    src/orchestration/process_runner.cpp
 )
 target_include_directories(cipher_orchestration PUBLIC include)
+target_include_directories(cipher_orchestration SYSTEM PRIVATE third_party)
 
 if(MSVC)
     target_compile_options(cipher_orchestration PRIVATE /W4 /permissive-)
@@ -287,6 +298,38 @@ if(BUILD_TESTING)
     add_executable(cipher_orchestration_flow_tests tests/test_orchestration_flow.cpp)
     target_link_libraries(cipher_orchestration_flow_tests PRIVATE cipher_orchestration)
     add_test(NAME cipher_orchestration_flow_tests COMMAND cipher_orchestration_flow_tests)
+
+    add_executable(cipher_orchestration_store_tests tests/test_orchestration_store.cpp)
+    target_link_libraries(cipher_orchestration_store_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_store_tests COMMAND cipher_orchestration_store_tests)
+
+    add_executable(cipher_orchestration_scheduler_tests tests/test_orchestration_scheduler.cpp)
+    target_link_libraries(cipher_orchestration_scheduler_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_scheduler_tests COMMAND cipher_orchestration_scheduler_tests)
+
+    add_executable(cipher_orchestration_github_tests tests/test_orchestration_github.cpp)
+    target_link_libraries(cipher_orchestration_github_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_github_tests COMMAND cipher_orchestration_github_tests)
+    add_executable(cipher_orchestration_gh_process_tests tests/test_orchestration_gh_process.cpp)
+    target_link_libraries(cipher_orchestration_gh_process_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_gh_process_tests COMMAND cipher_orchestration_gh_process_tests)
+    add_executable(cipher_orchestration_claude_role_tests tests/test_orchestration_claude_role.cpp)
+    target_link_libraries(cipher_orchestration_claude_role_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_claude_role_tests COMMAND cipher_orchestration_claude_role_tests)
+    add_executable(cipher_orchestration_recovery_tests tests/test_orchestration_recovery.cpp)
+    target_link_libraries(cipher_orchestration_recovery_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_recovery_tests COMMAND cipher_orchestration_recovery_tests)
+    add_executable(cipher_orchestration_concurrency_tests tests/test_orchestration_concurrency.cpp)
+    target_link_libraries(cipher_orchestration_concurrency_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_concurrency_tests COMMAND cipher_orchestration_concurrency_tests)
+    add_executable(cipher_orchestration_claude_tests tests/test_orchestration_claude.cpp)
+    target_link_libraries(cipher_orchestration_claude_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_claude_tests COMMAND cipher_orchestration_claude_tests)
+    if(WIN32)
+        add_executable(cipher_orchestration_process_tests tests/test_orchestration_process.cpp)
+        target_link_libraries(cipher_orchestration_process_tests PRIVATE cipher_orchestration)
+        add_test(NAME cipher_orchestration_process_tests COMMAND cipher_orchestration_process_tests)
+    endif()
 
     # v0.6: in-process llama.cpp backend. Real inference runs only when CIPHER_TEST_GGUF names a model file.
     if(CIPHER_WITH_LLAMA)
