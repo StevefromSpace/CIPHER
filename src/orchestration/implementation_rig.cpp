@@ -1,6 +1,7 @@
 #include "cipher/orchestration/implementation_rig.hpp"
 
 #include "cipher/orchestration/executable_resolver.hpp"
+#include "cipher/orchestration/qa_profile.hpp"
 
 namespace cipher::orchestration {
 
@@ -42,9 +43,12 @@ ImplementationRig::ImplementationRig(const RigConfig& config, int issue, const s
     pipeline.base_sha = config.base_sha;
     pipeline.evidence_file = settings.evidence_file;
     pipeline.pr_body_file = config.worktree_root / ("pr-body-" + std::to_string(issue) + ".md");
-    // The only approved QA command; the owner adds real test commands deliberately, not the agent.
-    pipeline.test_commands["check"] = settings.commands["check"];
-    pipeline.qa_command_ids = {"check"};
+    // QA commands come only from the owner's qa_profiles config, never from the agent or issue text.
+    QaTools tools{git, resolve_executable_on_path("cmake"), resolve_executable_on_path("ctest"),
+                  resolve_executable_on_path("python")};
+    const QaPlan plan = build_qa_plan(config.qa_profiles, worktree, config.worktree_root / ("qa-build-" + std::to_string(issue)), tools);
+    pipeline.test_commands = plan.commands;
+    pipeline.qa_command_ids = plan.ids;
     pipeline_ = std::make_unique<PipelineExecutor>(pipeline, *allocator_, runner_, *gh_, escalator_);
     executor_ = std::make_unique<ImplementationExecutor>(settings, *allocator_, runner_, *agent_, *pipeline_);
 }
