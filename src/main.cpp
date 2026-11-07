@@ -7,7 +7,11 @@
 #endif
 #include "cipher/memory_commands.hpp"
 #include "cipher/model_tool_loop.hpp"
+#include "cipher/orchestration/executable_resolver.hpp"
+#include "cipher/orchestration/gh_process_runner.hpp"
 #include "cipher/orchestration/implementation_rig.hpp"
+#include "cipher/orchestration/pipeline_roles.hpp"
+#include "cipher/orchestration/process_runner.hpp"
 #include "cipher/orchestration/job_commands.hpp"
 #include "cipher/ollama_backend.hpp"
 #include "cipher/tool_commands.hpp"
@@ -169,7 +173,19 @@ int main() {
                     return std::make_unique<cipher::orchestration::ImplementationRig>(rig, issue, task);
                 };
             }
-            jobs = std::make_unique<cipher::JobCommands>(cfg.orchestration_dir, nullptr, factory);
+            // CI observation is read-only gh; without gh on PATH `job ci` reports itself unavailable.
+            cipher::JobCommands::CiObserver ci;
+            try {
+                const std::string gh = cipher::orchestration::resolve_executable_on_path("gh");
+                ci = [gh](const cipher::orchestration::JobRecord& job, int pr) {
+                    cipher::orchestration::SystemProcessRunner runner(1 << 20);
+                    cipher::orchestration::GhProcessRunner gh_runner(runner, gh, 60000);
+                    cipher::orchestration::GhAdapter adapter(gh_runner);
+                    return cipher::orchestration::observe_ci(job, adapter, pr);
+                };
+            } catch (const std::exception&) {
+            }
+            jobs = std::make_unique<cipher::JobCommands>(cfg.orchestration_dir, nullptr, factory, ci);
         } catch (const std::exception& error) {
             std::cerr << "CIPHER: could not open orchestration_dir '" << cfg.orchestration_dir
                       << "': " << error.what() << '\n';
