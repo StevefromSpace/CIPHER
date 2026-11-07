@@ -10,7 +10,6 @@ namespace cipher::orchestration {
 namespace {
 
 constexpr int kGitTimeoutMs = 60000;
-constexpr int kTestTimeoutMs = 600000;
 const char* const kMechanicalFamily = "cipher-mechanical";
 
 std::string trim(std::string text) {
@@ -155,7 +154,7 @@ RoleResult PipelineExecutor::run_qa(const JobRecord& job) {
         for (const auto& id : settings_.qa_command_ids) {
             const auto it = settings_.test_commands.find(id);
             if (it == settings_.test_commands.end()) return result(Verdict::Blocked, "unknown command id " + id);
-            const ProcessResult run = runner_.run(it->second, kTestTimeoutMs);
+            const ProcessResult run = runner_.run(it->second, settings_.qa_timeout_ms);
             note("QA " + id + " @" + job.head_sha + " exit=" + std::to_string(run.exit_code) +
                  (run.timed_out ? " timed_out" : "") + (run.output_overflow ? " output_overflow" : ""));
             if (run.timed_out || run.output_overflow) return result(Verdict::Blocked, id + " timed out or overflowed");
