@@ -6,6 +6,8 @@
 #include "cipher/orchestration/orchestrator.hpp"
 
 #include <filesystem>
+#include <functional>
+#include <memory>
 #include <string>
 
 namespace cipher {
@@ -19,7 +21,7 @@ struct JobCommandResult {
 /**
  * @brief Owner-typed REPL commands that drive the orchestration state machine:
  *        `job new <issue> [research] [design] [security]`, `job status <issue>`, `job list`,
- *        `job step <issue>`, `job recover <issue>`, `job log`.
+ *        `job task <issue> <text>`, `job step <issue>`, `job recover <issue>`, `job log`.
  *
  * State lives in the orchestration directory (FileJobStore + EventLog), so jobs survive a restart.
  * The state machine stays the only source of truth; this class only forwards to Orchestrator.
@@ -28,8 +30,13 @@ struct JobCommandResult {
  */
 class JobCommands {
 public:
+    /// Builds the executor for one issue and its owner-supplied task text (`job task`). May throw.
+    using ExecutorFactory =
+        std::function<std::unique_ptr<orchestration::RoleExecutor>(int issue, const std::string& task)>;
+
     /// @p executor must outlive this object; null selects the escalating default.
-    explicit JobCommands(std::filesystem::path directory, orchestration::RoleExecutor* executor = nullptr);
+    explicit JobCommands(std::filesystem::path directory, orchestration::RoleExecutor* executor = nullptr,
+                         ExecutorFactory factory = nullptr);
 
     JobCommands(const JobCommands&) = delete;
     JobCommands& operator=(const JobCommands&) = delete;
@@ -43,11 +50,15 @@ private:
     std::string step(const std::string& arguments);
     std::string recover(const std::string& arguments);
     std::string log() const;
+    std::string task(const std::string& arguments);
+    std::string load_task(int issue) const;
+    std::unique_ptr<orchestration::RoleExecutor> make_executor(int issue) const;
 
     std::filesystem::path directory_;
     orchestration::FileJobStore store_;
     orchestration::EventLog log_;
     orchestration::RoleExecutor* executor_;
+    ExecutorFactory factory_;
 };
 
 }  // namespace cipher

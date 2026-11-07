@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <fstream>
 #include <sstream>
 #include <vector>
 
@@ -51,15 +52,16 @@ std::string describe(int issue, const JobRecord& job) {
 
 constexpr const char* kUsage =
     "Usage: job new <issue> [research] [design] [security] | job status <issue> | job list | "
-    "job step <issue> | job recover <issue> | job log";
+    "job task <issue> <text> | job step <issue> | job recover <issue> | job log";
 
 }  // namespace
 
-JobCommands::JobCommands(std::filesystem::path directory, RoleExecutor* executor)
+JobCommands::JobCommands(std::filesystem::path directory, RoleExecutor* executor, ExecutorFactory factory)
     : directory_(directory),
       store_(directory),
       log_(directory / "events.log"),
-      executor_(executor != nullptr ? executor : &default_executor()) {}
+      executor_(executor != nullptr ? executor : &default_executor()),
+      factory_(std::move(factory)) {}
 
 JobCommandResult JobCommands::execute(const std::string& input) {
     const std::vector<std::string> words = split(input);
@@ -79,6 +81,7 @@ JobCommandResult JobCommands::execute(const std::string& input) {
         if (verb == "step") return {true, step(rest)};
         if (verb == "recover") return {true, recover(rest)};
         if (verb == "log") return {true, log()};
+        if (verb == "task") return {true, task(rest)};
     } catch (const std::exception& error) {
         return {true, std::string("job error: ") + error.what()};
     }
@@ -142,7 +145,8 @@ std::string JobCommands::step(const std::string& arguments) {
     const auto saved = store_.load(issue);
     if (!saved) return "No job for issue " + std::to_string(issue) + ".";
 
-    Orchestrator orchestrator(issue, saved->facts, *executor_, store_, Policy{});
+    std::unique_ptr<RoleExecutor> owned = make_executor(issue);
+    Orchestrator orchestrator(issue, saved->facts, owned ? *owned : *executor_, store_, Policy{});
     orchestrator.attach_event_log(log_);
     const bool moved = orchestrator.advance();
     return std::string(moved ? "advanced. " : "no step taken. ") + describe(issue, orchestrator.job());
@@ -154,10 +158,41 @@ std::string JobCommands::recover(const std::string& arguments) {
     const auto saved = store_.load(issue);
     if (!saved) return "No job for issue " + std::to_string(issue) + ".";
 
-    Orchestrator orchestrator(issue, saved->facts, *executor_, store_, Policy{});
+    std::unique_ptr<RoleExecutor> owned = make_executor(issue);
+    Orchestrator orchestrator(issue, saved->facts, owned ? *owned : *executor_, store_, Policy{});
     orchestrator.attach_event_log(log_);
     const bool recovered = orchestrator.recover();
     return std::string(recovered ? "recovered. " : "nothing in flight. ") + describe(issue, orchestrator.job());
+}
+
+std::string JobCommands::load_task(int issue) const {
+    std::ifstream in(directory_ / ("task-" + std::to_string(issue) + ".txt"), std::ios::binary);
+    std::ostringstream text;
+    text << in.rdbuf();
+    return in ? text.str() : std::string();
+}
+
+std::unique_ptr<RoleExecutor> JobCommands::make_executor(int issue) const {
+    if (!factory_) return nullptr;
+    const std::string task = load_task(issue);
+    return task.empty() ? nullptr : factory_(issue, task);
+}
+
+std::string JobCommands::task(const std::string& arguments) {
+    if (!factory_) {
+        return "job task is unavailable: orchestration_repo, orchestration_base_sha and orchestration_worktree_root "
+               "are not all set.";
+    }
+    const std::size_t split_at = arguments.find(' ');
+    const int issue = parse_issue(arguments.substr(0, split_at));
+    if (issue == 0 || split_at == std::string::npos) return "Usage: job task <issue> <text>";
+    if (!store_.load(issue)) return "No job for issue " + std::to_string(issue) + ".";
+    const std::string text = arguments.substr(split_at + 1);
+    if (text.size() > 2000) return "Task text is limited to 2000 characters.";
+    std::ofstream out(directory_ / ("task-" + std::to_string(issue) + ".txt"), std::ios::binary | std::ios::trunc);
+    out << text;
+    if (!out) return "Could not save the task.";
+    return "task saved for job " + std::to_string(issue) + "; run job step " + std::to_string(issue) + ".";
 }
 
 std::string JobCommands::log() const {

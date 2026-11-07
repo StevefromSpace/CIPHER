@@ -79,6 +79,28 @@ int main() {
         check(executor.calls == 1, "supplied executor runs exactly once per step");
     }
 
+    {
+        // `job task` is refused without a factory, and with one the task-specific executor is used.
+        check(contains(JobCommands(dir).execute("job task 11 do it").text, "unavailable"), "task refused without factory");
+        int built = 0;
+        std::string seen;
+        CountingExecutor task_executor;
+        JobCommands jobs(dir, nullptr, [&](int, const std::string& task) {
+            ++built;
+            seen = task;
+            return std::unique_ptr<cipher::orchestration::RoleExecutor>(new CountingExecutor());
+        });
+        jobs.execute("job new 12 research");
+        check(contains(jobs.execute("job step 12").text, "NEEDS_HUMAN"), "no task file: default executor");
+        check(built == 0, "factory unused before a task exists");
+        jobs.execute("job new 13 research");
+        check(contains(jobs.execute("job task 13 write docs").text, "task saved"), "task saved");
+        check(contains(jobs.execute("job task 99 x").text, "No job"), "task for missing job rejected");
+        check(contains(jobs.execute("job task 13").text, "Usage"), "task without text rejected");
+        jobs.execute("job step 13");
+        check(built == 1 && seen == "write docs", "factory built once with the saved task");
+    }
+
     std::error_code ec;
     fs::remove_all(dir, ec);
     std::cout << (failures == 0 ? "ALL PASSED\n" : "FAILURES\n");

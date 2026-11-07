@@ -167,6 +167,16 @@ ConfigResult parse_lines(std::istream& stream) {
 
         } else if (key == "orchestration_dir") {
             result.config.orchestration_dir = value;
+        } else if (key == "orchestration_repo") {
+            result.config.orchestration_repo = value;
+        } else if (key == "orchestration_base_sha") {
+            result.config.orchestration_base_sha = value;
+        } else if (key == "orchestration_worktree_root") {
+            result.config.orchestration_worktree_root = value;
+        } else if (key == "orchestration_model") {
+            result.config.orchestration_model = value;
+        } else if (key == "orchestration_budget") {
+            result.config.orchestration_budget = value;
 
         } else if (key == "ollama_port") {
             int port = 0;
@@ -273,6 +283,11 @@ Config ConfigParser::defaults() noexcept {
     cfg.memory_file = "";
     cfg.filesystem_read_root = "";
     cfg.orchestration_dir = "";
+    cfg.orchestration_repo = "";
+    cfg.orchestration_base_sha = "";
+    cfg.orchestration_worktree_root = "";
+    cfg.orchestration_model = "haiku";
+    cfg.orchestration_budget = "0.25";
     cfg.ollama_port = 0;
     cfg.model_tool_calls = false;
     return cfg;

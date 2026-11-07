@@ -63,6 +63,15 @@ The `cipher` executable links `cipher_orchestration`. With `orchestration_dir=<f
 
 **Placeholder:** the default executor escalates every role to `NEEDS_HUMAN` (`RoleNotSupported`). No role does real work from the REPL until the tool-enabled implementation executor exists.
 
+## Implementation executor (Milestone A)
+
+- `WorktreeTools` (fs.read/list/search/write/edit, process.run by pre-registered command id, git.status/diff/log): typed calls, `PermissionPolicy` check on every call, path containment (no absolute, `..`, `.git`), protected write paths (`.git`, `.github`, `tools/pipeline`, role contract), size/output limits, audit log. The model never gets a shell; `process.run` only runs argv registered by CIPHER.
+- `ImplementationExecutor`: allocates the job worktree, loops `ToolAgent` steps (step limit, no internal retry), runs the verify command, commits with `git add -A` and returns `ImplementationComplete` with the full HEAD sha. Two-execution limit comes from the existing Orchestrator policy. Other roles, and the PullRequest step, escalate to `NEEDS_HUMAN`.
+- REPL: `job task <issue> <text>` stores the task; with `orchestration_repo`, `orchestration_base_sha`, `orchestration_worktree_root` set, `job step` runs `ImplementationRig`.
+- **Verified:** automated tests with a scripted agent and real git (real worktree, real file edit, real commit, persistence and restart reload, failure and exhaustion paths). Windows ctest 29/29.
+- **Not verified:** `ClaudeToolAgent` has only been tested with a fake runner; no live Claude call has been made. It is paid per step.
+- **Not implemented:** PR creation, QA, Reviewer, independent review (Antigravity unverified), autonomous merge. Security-sensitive jobs stay `NEEDS_HUMAN`.
+
 ## Governance boundaries
 
 - Security-sensitive jobs remain `NEEDS_HUMAN`. No independent security-review backend exists, and none is faked.

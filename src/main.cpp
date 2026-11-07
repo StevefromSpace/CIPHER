@@ -7,6 +7,7 @@
 #endif
 #include "cipher/memory_commands.hpp"
 #include "cipher/model_tool_loop.hpp"
+#include "cipher/orchestration/implementation_rig.hpp"
 #include "cipher/orchestration/job_commands.hpp"
 #include "cipher/ollama_backend.hpp"
 #include "cipher/tool_commands.hpp"
@@ -155,7 +156,20 @@ int main() {
     std::unique_ptr<cipher::JobCommands> jobs;
     if (!cfg.orchestration_dir.empty()) {
         try {
-            jobs = std::make_unique<cipher::JobCommands>(cfg.orchestration_dir);
+            cipher::JobCommands::ExecutorFactory factory;
+            if (!cfg.orchestration_repo.empty() && !cfg.orchestration_base_sha.empty() &&
+                !cfg.orchestration_worktree_root.empty()) {
+                cipher::orchestration::RigConfig rig;
+                rig.repository = cfg.orchestration_repo;
+                rig.base_sha = cfg.orchestration_base_sha;
+                rig.worktree_root = cfg.orchestration_worktree_root;
+                rig.model = cfg.orchestration_model;
+                rig.max_budget_usd = cfg.orchestration_budget;
+                factory = [rig](int issue, const std::string& task) {
+                    return std::make_unique<cipher::orchestration::ImplementationRig>(rig, issue, task);
+                };
+            }
+            jobs = std::make_unique<cipher::JobCommands>(cfg.orchestration_dir, nullptr, factory);
         } catch (const std::exception& error) {
             std::cerr << "CIPHER: could not open orchestration_dir '" << cfg.orchestration_dir
                       << "': " << error.what() << '\n';

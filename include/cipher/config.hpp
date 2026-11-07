@@ -24,6 +24,8 @@
 //   memory_file — path to the persistent memory file  (default: empty = memory disabled)
 //   filesystem_read_root — folder that filesystem.read may read from (default: empty = tool unavailable)
 //   orchestration_dir — folder for persistent `job` state and events (default: empty = job commands disabled)
+//   orchestration_repo / orchestration_base_sha / orchestration_worktree_root — enable `job task` (paid Claude agent)
+//   orchestration_model, orchestration_budget — Claude model and per-call USD cap for that agent
 //   ollama_port — 127.0.0.1 port of a local Ollama server for the `ask` command (default: 0 = disabled)
 //   model_tool_calls — true lets `ask` answers request time.now/system.info, each needing owner "yes" (default: false)
 //   memory_deny — repeatable; a pattern that refuses memory actions, e.g. `share *` (default: none)
@@ -86,6 +88,11 @@ struct Config {
     std::string memory_file;                 // Empty = memory commands disabled
     std::string filesystem_read_root;        // Empty = filesystem.read not registered
     std::string orchestration_dir;           // Empty = `job` commands disabled
+    std::string orchestration_repo;          // Source repository for job worktrees
+    std::string orchestration_base_sha;      // Full 40-hex commit job worktrees start from
+    std::string orchestration_worktree_root; // Folder of job-<n> worktrees (repo+sha+root enable `job task`)
+    std::string orchestration_model = "haiku";  // Claude model for the implementation agent
+    std::string orchestration_budget = "0.25";  // Max USD per Claude call
     int         ollama_port = 0;             // 0 = `ask` disabled; otherwise 1-65535
     bool        model_tool_calls = false;    // Effective only when ollama_port is set
     std::vector<std::string> memory_deny;    // Blacklist patterns for memory actions ("<action> <id>")
