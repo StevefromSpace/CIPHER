@@ -144,6 +144,7 @@ add_library(cipher_orchestration
     src/orchestration/worktree_tools.cpp
     src/orchestration/implementation_executor.cpp
     src/orchestration/implementation_rig.cpp
+    src/orchestration/pipeline_roles.cpp
 )
 target_include_directories(cipher_orchestration PUBLIC include)
 target_link_libraries(cipher_orchestration PUBLIC cipher_assistant)
@@ -351,6 +352,9 @@ if(BUILD_TESTING)
     add_executable(cipher_orchestration_worktree_tests tests/test_orchestration_worktree.cpp)
     target_link_libraries(cipher_orchestration_worktree_tests PRIVATE cipher_orchestration)
     add_test(NAME cipher_orchestration_worktree_tests COMMAND cipher_orchestration_worktree_tests)
+    add_executable(cipher_orchestration_pipeline_tests tests/test_orchestration_pipeline.cpp)
+    target_link_libraries(cipher_orchestration_pipeline_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_pipeline_tests COMMAND cipher_orchestration_pipeline_tests)
 
     # v0.6: in-process llama.cpp backend. Real inference runs only when CIPHER_TEST_GGUF names a model file.
     if(CIPHER_WITH_LLAMA)

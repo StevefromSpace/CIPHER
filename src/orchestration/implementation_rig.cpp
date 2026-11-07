@@ -33,7 +33,20 @@ ImplementationRig::ImplementationRig(const RigConfig& config, int issue, const s
     settings.commands["check"] = {git, "-C", worktree.string(), "diff", "--check"};
     settings.verify_command_id = "check";
     settings.evidence_file = config.worktree_root / ("evidence-" + std::to_string(issue) + ".log");
-    executor_ = std::make_unique<ImplementationExecutor>(settings, *allocator_, runner_, *agent_, escalator_);
+    gh_runner_ = std::make_unique<GhProcessRunner>(runner_, resolve_executable_on_path("gh"), 60000);
+    gh_ = std::make_unique<GhAdapter>(*gh_runner_);
+
+    PipelineSettings pipeline;
+    pipeline.issue_number = issue;
+    pipeline.git_executable = git;
+    pipeline.base_sha = config.base_sha;
+    pipeline.evidence_file = settings.evidence_file;
+    pipeline.pr_body_file = config.worktree_root / ("pr-body-" + std::to_string(issue) + ".md");
+    // The only approved QA command; the owner adds real test commands deliberately, not the agent.
+    pipeline.test_commands["check"] = settings.commands["check"];
+    pipeline.qa_command_ids = {"check"};
+    pipeline_ = std::make_unique<PipelineExecutor>(pipeline, *allocator_, runner_, *gh_, escalator_);
+    executor_ = std::make_unique<ImplementationExecutor>(settings, *allocator_, runner_, *agent_, *pipeline_);
 }
 
 }  // namespace cipher::orchestration
