@@ -57,6 +57,12 @@ The Claude call is tool-less. It can answer Research and Architecture roles but 
 - A runner exception becomes `RUNNER_ERROR`, then `BLOCKED` at the role executor. Timeouts, non-zero exits, malformed results and Claude `is_error` map to failure.
 - Exactly one runner invocation per attempt. There is no hidden retry. The two-execution orchestration limit is unchanged.
 
+## REPL integration (Stage 11)
+
+The `cipher` executable links `cipher_orchestration`. With `orchestration_dir=<folder>` in `cipher.conf`, the REPL accepts `job new <issue> [research] [design] [security]`, `job status|step|recover <issue>`, `job list`, `job log`. State persists in `FileJobStore` and `events.log`, and survives restart (tested). Verified locally: unit tests plus a manual run of the real executable.
+
+**Placeholder:** the default executor escalates every role to `NEEDS_HUMAN` (`RoleNotSupported`). No role does real work from the REPL until the tool-enabled implementation executor exists.
+
 ## Governance boundaries
 
 - Security-sensitive jobs remain `NEEDS_HUMAN`. No independent security-review backend exists, and none is faked.

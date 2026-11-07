@@ -23,6 +23,7 @@
 //   log_file    — path to an optional log file        (default: empty = stderr only)
 //   memory_file — path to the persistent memory file  (default: empty = memory disabled)
 //   filesystem_read_root — folder that filesystem.read may read from (default: empty = tool unavailable)
+//   orchestration_dir — folder for persistent `job` state and events (default: empty = job commands disabled)
 //   ollama_port — 127.0.0.1 port of a local Ollama server for the `ask` command (default: 0 = disabled)
 //   model_tool_calls — true lets `ask` answers request time.now/system.info, each needing owner "yes" (default: false)
 //   memory_deny — repeatable; a pattern that refuses memory actions, e.g. `share *` (default: none)
@@ -84,6 +85,7 @@ struct Config {
     std::string log_file;                    // Empty = stderr only
     std::string memory_file;                 // Empty = memory commands disabled
     std::string filesystem_read_root;        // Empty = filesystem.read not registered
+    std::string orchestration_dir;           // Empty = `job` commands disabled
     int         ollama_port = 0;             // 0 = `ask` disabled; otherwise 1-65535
     bool        model_tool_calls = false;    // Effective only when ollama_port is set
     std::vector<std::string> memory_deny;    // Blacklist patterns for memory actions ("<action> <id>")

@@ -140,6 +140,7 @@ add_library(cipher_orchestration
     src/orchestration/process_runner.cpp
     src/orchestration/executable_resolver.cpp
     src/orchestration/git_worktree_backend.cpp
+    src/orchestration/job_commands.cpp
 )
 target_include_directories(cipher_orchestration PUBLIC include)
 target_include_directories(cipher_orchestration SYSTEM PRIVATE third_party)
@@ -222,7 +223,7 @@ endif()
 # cipher  â€”  main executable
 # ---------------------------------------------------------------------------
 add_executable(cipher src/main.cpp)
-target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands cipher_tools cipher_ollama)
+target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands cipher_tools cipher_ollama cipher_orchestration)
 if(CIPHER_WITH_LLAMA)
     target_link_libraries(cipher PRIVATE cipher_llama)
 endif()
@@ -337,6 +338,9 @@ if(BUILD_TESTING)
     add_executable(cipher_orchestration_executable_tests tests/test_orchestration_executable.cpp)
     target_link_libraries(cipher_orchestration_executable_tests PRIVATE cipher_orchestration)
     add_test(NAME cipher_orchestration_executable_tests COMMAND cipher_orchestration_executable_tests)
+    add_executable(cipher_orchestration_job_commands_tests tests/test_orchestration_job_commands.cpp)
+    target_link_libraries(cipher_orchestration_job_commands_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_job_commands_tests COMMAND cipher_orchestration_job_commands_tests)
     add_executable(cipher_orchestration_worktree_tests tests/test_orchestration_worktree.cpp)
     target_link_libraries(cipher_orchestration_worktree_tests PRIVATE cipher_orchestration)
     add_test(NAME cipher_orchestration_worktree_tests COMMAND cipher_orchestration_worktree_tests)

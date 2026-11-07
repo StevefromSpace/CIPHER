@@ -165,6 +165,9 @@ ConfigResult parse_lines(std::istream& stream) {
             // Any non-empty string is accepted here. The tool checks the folder at call time.
             result.config.filesystem_read_root = value;
 
+        } else if (key == "orchestration_dir") {
+            result.config.orchestration_dir = value;
+
         } else if (key == "ollama_port") {
             int port = 0;
             if (!parse_port(value, port)) {
@@ -269,6 +272,7 @@ Config ConfigParser::defaults() noexcept {
     cfg.log_file  = "";
     cfg.memory_file = "";
     cfg.filesystem_read_root = "";
+    cfg.orchestration_dir = "";
     cfg.ollama_port = 0;
     cfg.model_tool_calls = false;
     return cfg;
