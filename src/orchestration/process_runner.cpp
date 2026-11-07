@@ -15,6 +15,24 @@
 #include <thread>
 #endif
 
+#ifndef _WIN32
+#include <poll.h>
+#include <signal.h>
+#include <spawn.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <cerrno>
+#include <chrono>
+#include <cstring>
+#include <fcntl.h>
+
+// Passed to posix_spawn unchanged, so the child sees the same environment as this process.
+extern char** environ;
+#endif
+
 namespace cipher::orchestration {
 
 #ifdef _WIN32
@@ -186,12 +204,218 @@ ProcessResult SystemProcessRunner::run(const std::vector<std::string>& argv, int
 
 #else
 
+namespace {
+
+constexpr int kPollSliceMs = 10;      // longest single wait before the deadline and child exit are checked again
+constexpr int kDrainGraceMs = 1000;   // pipes still open after the group is killed count as a failure
+
+[[noreturn]] void throw_error(const char* what, int code) {
+    throw std::runtime_error(std::string(what) + " failed: " + std::strerror(code));
+}
+
+// Owns one file descriptor. Negative values are never closed.
+class Fd {
+public:
+    Fd() = default;
+    explicit Fd(int fd) : fd_(fd) {}
+    Fd(Fd&& other) noexcept : fd_(other.fd_) { other.fd_ = -1; }
+    Fd& operator=(Fd&& other) noexcept {
+        reset(other.fd_);
+        other.fd_ = -1;
+        return *this;
+    }
+    ~Fd() { reset(); }
+    Fd(const Fd&) = delete;
+    Fd& operator=(const Fd&) = delete;
+
+    int get() const { return fd_; }
+    void reset(int fd = -1) {
+        if (fd_ >= 0) ::close(fd_);
+        fd_ = fd;
+    }
+
+private:
+    int fd_ = -1;
+};
+
+// One captured stream: the read end, where its bytes go, and whether anything was discarded past the cap.
+struct Stream {
+    Fd fd;
+    std::string* text = nullptr;
+    bool overflow = false;
+};
+
+// Appends what fits under the cap. Past the cap the bytes are discarded, but the stream keeps draining.
+void absorb(Stream& stream, const char* data, std::size_t size, std::size_t cap) {
+    const std::size_t room = stream.text->size() < cap ? cap - stream.text->size() : 0;
+    stream.text->append(data, std::min(size, room));
+    if (size > room) stream.overflow = true;
+}
+
+// Reads one chunk from a stream that poll reported ready. EOF closes the stream.
+void read_chunk(Stream& stream, std::size_t cap) {
+    char buffer[4096];
+    const ssize_t n = ::read(stream.fd.get(), buffer, sizeof buffer);
+    if (n < 0) {
+        if (errno == EINTR || errno == EAGAIN) return;
+        throw_error("process output read", errno);
+    }
+    if (n == 0) {
+        stream.fd.reset();
+        return;
+    }
+    absorb(stream, buffer, static_cast<std::size_t>(n), cap);
+}
+
+// Waits up to timeout_ms for output on either open stream, then reads what is ready. Returns true while one is open.
+bool pump(Stream (&streams)[2], std::size_t cap, int timeout_ms) {
+    pollfd fds[2];
+    bool any_open = false;
+    for (std::size_t i = 0; i < 2; ++i) {
+        fds[i].fd = streams[i].fd.get();   // poll ignores negative fds, so closed streams drop out
+        fds[i].events = POLLIN;
+        fds[i].revents = 0;
+        any_open = any_open || streams[i].fd.get() >= 0;
+    }
+    if (!any_open) {
+        poll(nullptr, 0, timeout_ms);   // plain sleep
+        return false;
+    }
+    if (poll(fds, 2, timeout_ms) < 0) {
+        if (errno != EINTR) throw_error("process poll", errno);
+        return true;
+    }
+    for (std::size_t i = 0; i < 2; ++i) {
+        if (fds[i].revents != 0 && streams[i].fd.get() >= 0) read_chunk(streams[i], cap);
+    }
+    return streams[0].fd.get() >= 0 || streams[1].fd.get() >= 0;
+}
+
+// Starts argv with stdin on /dev/null and stdout/stderr on the given pipes. The child leads a new process group, so a
+// timeout can kill grandchildren that inherited the pipes. Exec failure is reported here, not as a silent exit.
+pid_t spawn_child(const std::vector<std::string>& argv, int stdout_fd, int stderr_fd) {
+    std::vector<char*> args;
+    args.reserve(argv.size() + 1);
+    for (const std::string& arg : argv) args.push_back(const_cast<char*>(arg.c_str()));
+    args.push_back(nullptr);
+
+    posix_spawn_file_actions_t actions;
+    if (const int rc = posix_spawn_file_actions_init(&actions)) throw_error("process file actions", rc);
+    posix_spawnattr_t attributes;
+    if (const int rc = posix_spawnattr_init(&attributes)) {
+        posix_spawn_file_actions_destroy(&actions);
+        throw_error("process attributes", rc);
+    }
+
+    pid_t pid = -1;
+    int rc = posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+    if (rc == 0) rc = posix_spawn_file_actions_adddup2(&actions, stdout_fd, STDOUT_FILENO);
+    if (rc == 0) rc = posix_spawn_file_actions_adddup2(&actions, stderr_fd, STDERR_FILENO);
+    if (rc == 0) rc = posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
+    if (rc == 0) rc = posix_spawnattr_setpgroup(&attributes, 0);   // 0 makes the child its own group leader
+    if (rc == 0) rc = posix_spawn(&pid, argv.front().c_str(), &actions, &attributes, args.data(), environ);
+    posix_spawnattr_destroy(&attributes);
+    posix_spawn_file_actions_destroy(&actions);
+    if (rc != 0) throw_error("process start", rc);
+    return pid;
+}
+
+// Owns the child's process group. The destructor kills and reaps it on any early exit, so no path leaves an orphan.
+class ChildProcess {
+public:
+    explicit ChildProcess(pid_t pid) : pid_(pid) {}
+    ~ChildProcess() {
+        if (pid_ > 0) {
+            kill_group();
+            wait_status();
+        }
+    }
+    ChildProcess(const ChildProcess&) = delete;
+    ChildProcess& operator=(const ChildProcess&) = delete;
+
+    pid_t pid() const { return pid_; }
+
+    // SIGKILL to the whole group. A zombie leader keeps its pid and group id reserved until it is reaped.
+    void kill_group() const { killpg(pid_, SIGKILL); }   // ESRCH after a normal exit is expected
+
+    int wait_status() {
+        int status = 0;
+        while (waitpid(pid_, &status, 0) < 0 && errno == EINTR) {
+        }
+        pid_ = -1;
+        return status;
+    }
+
+private:
+    pid_t pid_;
+};
+
+// True once the child has exited but before it is reaped, so its pid and group id stay reserved for the kill.
+bool child_exited(pid_t pid) {
+    siginfo_t info{};
+    if (waitid(P_PID, pid, &info, WEXITED | WNOHANG | WNOWAIT) != 0) {
+        if (errno == EINTR) return false;
+        throw_error("process wait", errno);
+    }
+    return info.si_pid == pid;
+}
+
+int exit_code_from_status(int status) {
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);   // shell convention: a signal death is non-zero
+    return -1;
+}
+
+}  // namespace
+
 SystemProcessRunner::SystemProcessRunner(std::size_t max_output_bytes) : max_output_bytes_(max_output_bytes) {}
 
 ProcessResult SystemProcessRunner::run(const std::vector<std::string>& argv, int timeout_ms) {
-    (void)argv;
-    (void)timeout_ms;
-    throw std::runtime_error("SystemProcessRunner is implemented for Windows only in this build");
+    if (argv.empty() || !std::filesystem::path(argv.front()).is_absolute())
+        throw std::invalid_argument("process argv[0] must be an absolute path");
+    if (timeout_ms <= 0) throw std::invalid_argument("process timeout must be positive");
+
+    int out_pipe[2];
+    if (pipe2(out_pipe, O_CLOEXEC) != 0) throw_error("process stdout pipe", errno);
+    Stream streams[2];
+    streams[0].fd = Fd(out_pipe[0]);
+    Fd out_write(out_pipe[1]);
+    int err_pipe[2];
+    if (pipe2(err_pipe, O_CLOEXEC) != 0) throw_error("process stderr pipe", errno);
+    streams[1].fd = Fd(err_pipe[0]);
+    Fd err_write(err_pipe[1]);
+
+    ChildProcess child(spawn_child(argv, out_write.get(), err_write.get()));
+    // The parent keeps only read ends, so EOF arrives once every write end in the group has closed.
+    out_write.reset();
+    err_write.reset();
+
+    ProcessResult result;
+    streams[0].text = &result.stdout_text;
+    streams[1].text = &result.stderr_text;
+    const std::size_t cap = max_output_bytes_;
+
+    // Output is drained while waiting, so a child that fills a pipe cannot block forever and look like a hang.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (!child_exited(child.pid())) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            result.timed_out = true;
+            break;
+        }
+        pump(streams, cap, kPollSliceMs);
+    }
+
+    child.kill_group();   // grandchildren that inherited the pipes die with the leader
+    const auto drain_end = std::chrono::steady_clock::now() + std::chrono::milliseconds(kDrainGraceMs);
+    while (pump(streams, cap, kPollSliceMs) && std::chrono::steady_clock::now() < drain_end) {
+    }
+    // Pipes still open after the group is dead means something escaped it. Treat that as a failure, not a partial success.
+    if (streams[0].fd.get() >= 0 || streams[1].fd.get() >= 0) result.timed_out = true;
+
+    const int status = child.wait_status();
+    result.exit_code = result.timed_out ? -1 : exit_code_from_status(status);
+    result.output_overflow = streams[0].overflow || streams[1].overflow;
+    return result;
 }
 
 #endif

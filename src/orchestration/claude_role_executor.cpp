@@ -54,8 +54,13 @@ RoleResult ClaudeRoleExecutor::run(Role role, const JobRecord& /*job*/) {
                 std::string()};
     }
 
-    const ClaudeResult result = run_claude(runner_, claude_executable_, model_, max_budget_usd_,
-                                           build_role_prompt(role, issue_number_), timeout_ms_);
+    ClaudeResult result;
+    try {
+        result = run_claude(runner_, claude_executable_, model_, max_budget_usd_,
+                            build_role_prompt(role, issue_number_), timeout_ms_);
+    } catch (const std::invalid_argument&) {
+        return {Event{EventKind::Blocked}, kClaudeFamily};   // bad model/budget/prompt: nothing was launched
+    }
     // A failed call is a tooling failure (BLOCKED), never an implementation attempt. The text is not stored.
     if (result.status != ClaudeStatus::Ok) {
         return {Event{EventKind::Blocked}, kClaudeFamily};

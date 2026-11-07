@@ -1,0 +1,45 @@
+{
+  "baseRefOid": "557e77d25a9781925b2aa96491e2ffc2d2d5b967",
+  "headRefOid": "c6b9a9c3796a4b2b2bbd2b386e98760f3514d183",
+  "mergeable": "UNKNOWN",
+  "number": 49,
+  "reviews": [],
+  "state": "MERGED",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "conclusion": "SUCCESS",
+      "name": "Build & Test (ubuntu-24.04)",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "conclusion": "SUCCESS",
+      "name": "Build & Test (windows-2022)",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "conclusion": "SUCCESS",
+      "name": "llama.cpp Runtime (ubuntu-24.04)",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "conclusion": "SUCCESS",
+      "name": "llama.cpp Runtime (windows-2022)",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "conclusion": "SUCCESS",
+      "name": "Assistant Adapters & Pipeline Tests (Python)",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    }
+  ]
+}

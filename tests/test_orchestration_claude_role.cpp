@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -120,6 +121,32 @@ void test_model_error_is_blocked() {
     check(result.event.kind == EventKind::Blocked, "claude role: budget/model error maps to Blocked");
 }
 
+class ThrowingProcessRunner final : public ProcessRunner {
+public:
+    int calls = 0;
+    ProcessResult run(const std::vector<std::string>&, int) override {
+        ++calls;
+        throw std::runtime_error("cannot launch");
+    }
+};
+
+void test_runner_exception_is_blocked_after_one_call() {
+    ThrowingProcessRunner process;
+    ClaudeRoleExecutor executor = make_executor(process);
+    const RoleResult result = executor.run(Role::Research, empty_job());
+    check(result.event.kind == EventKind::Blocked, "claude role: runner exception maps to Blocked");
+    check(process.calls == 1, "claude role: runner exception is not retried");
+}
+
+void test_invalid_budget_is_blocked_with_no_process_call() {
+    FakeProcessRunner process;
+    process.next = success_result();
+    ClaudeRoleExecutor executor(process, 42, "claude.exe", "claude-sonnet-5-5", "-1", 60000);
+    const RoleResult result = executor.run(Role::Research, empty_job());
+    check(result.event.kind == EventKind::Blocked && process.calls == 0,
+          "claude role: invalid budget is Blocked and nothing is launched");
+}
+
 void test_prompt_is_bounded_and_names_the_issue() {
     const std::string prompt = build_role_prompt(Role::Research, 42);
     check(prompt.find("#42") != std::string::npos, "claude role: prompt names the issue number");
@@ -153,6 +180,8 @@ int main() {
     test_nonzero_exit_is_blocked_not_implementation();
     test_timeout_is_blocked();
     test_model_error_is_blocked();
+    test_runner_exception_is_blocked_after_one_call();
+    test_invalid_budget_is_blocked_with_no_process_call();
     test_prompt_is_bounded_and_names_the_issue();
     test_round_trip_through_file_store();
     std::cout << (failures == 0 ? "ALL PASSED" : "FAILURES") << "\n";

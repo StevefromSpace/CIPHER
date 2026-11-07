@@ -16,7 +16,7 @@ configure_file(
 )
 
 # ---------------------------------------------------------------------------
-# cipher_core  —  command handling
+# cipher_core  â€”  command handling
 # ---------------------------------------------------------------------------
 add_library(cipher_core
     src/cipher_core.cpp
@@ -33,7 +33,7 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# cipher_config  —  configuration parser
+# cipher_config  â€”  configuration parser
 # ---------------------------------------------------------------------------
 add_library(cipher_config
     src/config.cpp
@@ -47,7 +47,7 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# cipher_logger  —  diagnostic logger
+# cipher_logger  â€”  diagnostic logger
 # ---------------------------------------------------------------------------
 add_library(cipher_logger
     src/logger.cpp
@@ -62,7 +62,7 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# cipher_memory  —  persistent memory subsystem (v0.3 foundation)
+# cipher_memory  â€”  persistent memory subsystem (v0.3 foundation)
 # ---------------------------------------------------------------------------
 add_library(cipher_memory
     src/memory.cpp
@@ -76,7 +76,7 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# cipher_memory_commands  —  REPL memory commands (remember/recall/forget)
+# cipher_memory_commands  â€”  REPL memory commands (remember/recall/forget)
 # ---------------------------------------------------------------------------
 add_library(cipher_memory_commands
     src/memory_commands.cpp
@@ -91,7 +91,7 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# cipher_assistant  —  assistant capability provider boundary (v0.4 preview)
+# cipher_assistant  â€”  assistant capability provider boundary (v0.4 preview)
 # ---------------------------------------------------------------------------
 add_library(cipher_assistant
     src/assistant_backend.cpp
@@ -105,7 +105,7 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# cipher_tools  —  v0.5 permissioned tool registry (static, built-in only)
+# cipher_tools  â€”  v0.5 permissioned tool registry (static, built-in only)
 # ---------------------------------------------------------------------------
 add_library(cipher_tools
     src/tool_registry.cpp
@@ -122,7 +122,7 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# cipher_orchestration  —  v1.x Stage 1 pure workflow state machine (no GitHub, model or network)
+# cipher_orchestration  â€”  v1.x Stage 1 pure workflow state machine (no GitHub, model or network)
 # ---------------------------------------------------------------------------
 add_library(cipher_orchestration
     src/orchestration/state_machine.cpp
@@ -138,6 +138,8 @@ add_library(cipher_orchestration
     src/orchestration/event_log.cpp
     src/orchestration/claude_executor.cpp
     src/orchestration/process_runner.cpp
+    src/orchestration/executable_resolver.cpp
+    src/orchestration/git_worktree_backend.cpp
 )
 target_include_directories(cipher_orchestration PUBLIC include)
 target_include_directories(cipher_orchestration SYSTEM PRIVATE third_party)
@@ -149,7 +151,7 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# cipher_ollama  —  loopback HTTP client, Ollama assistant backend, and `ask` command
+# cipher_ollama  â€”  loopback HTTP client, Ollama assistant backend, and `ask` command
 # ---------------------------------------------------------------------------
 add_library(cipher_ollama
     src/loopback_http.cpp
@@ -172,7 +174,7 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# cipher_llama  —  optional in-process llama.cpp backend (v0.6)
+# cipher_llama  â€”  optional in-process llama.cpp backend (v0.6)
 #
 # Off by default so the core build stays dependency-free. When ON, CMake fetches the
 # pinned llama.cpp source release below and checks its SHA-256. For an offline build,
@@ -217,7 +219,7 @@ if(CIPHER_WITH_LLAMA)
 endif()
 
 # ---------------------------------------------------------------------------
-# cipher  —  main executable
+# cipher  â€”  main executable
 # ---------------------------------------------------------------------------
 add_executable(cipher src/main.cpp)
 target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands cipher_tools cipher_ollama)
@@ -325,11 +327,19 @@ if(BUILD_TESTING)
     add_executable(cipher_orchestration_claude_tests tests/test_orchestration_claude.cpp)
     target_link_libraries(cipher_orchestration_claude_tests PRIVATE cipher_orchestration)
     add_test(NAME cipher_orchestration_claude_tests COMMAND cipher_orchestration_claude_tests)
-    if(WIN32)
-        add_executable(cipher_orchestration_process_tests tests/test_orchestration_process.cpp)
-        target_link_libraries(cipher_orchestration_process_tests PRIVATE cipher_orchestration)
-        add_test(NAME cipher_orchestration_process_tests COMMAND cipher_orchestration_process_tests)
-    endif()
+    add_executable(cipher_orchestration_process_tests tests/test_orchestration_process.cpp)
+    target_link_libraries(cipher_orchestration_process_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_process_tests COMMAND cipher_orchestration_process_tests)
+    add_executable(cipher_orchestration_github_json_tests tests/test_orchestration_github_json.cpp)
+    target_link_libraries(cipher_orchestration_github_json_tests PRIVATE cipher_orchestration)
+    target_compile_definitions(cipher_orchestration_github_json_tests PRIVATE CIPHER_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
+    add_test(NAME cipher_orchestration_github_json_tests COMMAND cipher_orchestration_github_json_tests)
+    add_executable(cipher_orchestration_executable_tests tests/test_orchestration_executable.cpp)
+    target_link_libraries(cipher_orchestration_executable_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_executable_tests COMMAND cipher_orchestration_executable_tests)
+    add_executable(cipher_orchestration_worktree_tests tests/test_orchestration_worktree.cpp)
+    target_link_libraries(cipher_orchestration_worktree_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_worktree_tests COMMAND cipher_orchestration_worktree_tests)
 
     # v0.6: in-process llama.cpp backend. Real inference runs only when CIPHER_TEST_GGUF names a model file.
     if(CIPHER_WITH_LLAMA)

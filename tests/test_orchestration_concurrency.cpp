@@ -175,6 +175,7 @@ void test_unrecorded_worktree_conflict_stops_all_admission() {
             ++adds;
             fs::create_directories(path);
         }
+        void remove(const fs::path& path, int) override { fs::remove_all(path); }
     };
 
     const fs::path root = fresh_dir("cipher-concurrency-worktrees") / "worktrees";

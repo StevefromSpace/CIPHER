@@ -192,13 +192,19 @@ public:
         last_issue = issue_number;
         fs::create_directories(path);
     }
+    void remove(const fs::path& path, int) override {
+        ++removals;
+        fs::remove_all(path);
+    }
     int calls = 0;
+    int removals = 0;
     int last_issue = 0;
 };
 
 class FailingWorktreeBackend final : public WorktreeBackend {
 public:
     void add(const fs::path&, int) override { throw std::runtime_error("simulated git failure"); }
+    void remove(const fs::path&, int) override { throw std::runtime_error("simulated git failure"); }
 };
 
 fs::path fresh_root(const std::string& name) {

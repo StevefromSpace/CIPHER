@@ -14,6 +14,33 @@ void require_safe_prompt(const std::string& prompt) {
     if (prompt.front() == '-') throw std::invalid_argument("claude prompt must not start with '-'");
 }
 
+// Model ids are plain tokens: a leading '-' would be read as a flag, whitespace or control bytes are never valid.
+void require_safe_model(const std::string& model) {
+    if (model.empty()) throw std::invalid_argument("claude model is empty");
+    if (model.front() == '-') throw std::invalid_argument("claude model must not start with '-'");
+    for (const unsigned char c : model) {
+        if (c <= ' ' || c == 0x7f) throw std::invalid_argument("claude model contains whitespace or control characters");
+    }
+}
+
+// Plain positive decimal such as "0.50" or "2": no sign, exponent, "nan" or "inf".
+void require_safe_budget(const std::string& budget) {
+    bool seen_dot = false;
+    bool seen_nonzero_digit = false;
+    for (const char c : budget) {
+        if (c == '.' && !seen_dot) {
+            seen_dot = true;
+        } else if (c >= '0' && c <= '9') {
+            if (c != '0') seen_nonzero_digit = true;
+        } else {
+            throw std::invalid_argument("claude budget must be a plain positive decimal");
+        }
+    }
+    if (budget.empty() || budget.front() == '.' || budget.back() == '.' || !seen_nonzero_digit) {
+        throw std::invalid_argument("claude budget must be a plain positive decimal");
+    }
+}
+
 }  // namespace
 
 const char* to_string(ClaudeStatus status) {
@@ -23,13 +50,15 @@ const char* to_string(ClaudeStatus status) {
         case ClaudeStatus::NonZeroExit: return "NON_ZERO_EXIT";
         case ClaudeStatus::MalformedOutput: return "MALFORMED_OUTPUT";
         case ClaudeStatus::ModelError: return "MODEL_ERROR";
+        case ClaudeStatus::RunnerError: return "RUNNER_ERROR";
     }
     return "UNKNOWN";
 }
 
 std::vector<std::string> build_claude_argv(const std::string& executable, const std::string& model,
                                            const std::string& max_budget_usd, const std::string& prompt) {
-    if (model.empty()) throw std::invalid_argument("claude model is empty");
+    require_safe_model(model);
+    require_safe_budget(max_budget_usd);
     require_safe_prompt(prompt);
     // --tools "" disables every tool, so this call can only return text.
     return {executable,
@@ -83,7 +112,16 @@ ClaudeResult parse_claude_output(const ProcessResult& process) {
 ClaudeResult run_claude(ProcessRunner& runner, const std::string& executable, const std::string& model,
                         const std::string& max_budget_usd, const std::string& prompt, int timeout_ms) {
     const std::vector<std::string> argv = build_claude_argv(executable, model, max_budget_usd, prompt);
-    return parse_claude_output(runner.run(argv, timeout_ms));
+    // Exactly one runner call, no retry. A runner failure becomes a status so callers never see a stray exception.
+    ProcessResult process;
+    try {
+        process = runner.run(argv, timeout_ms);
+    } catch (const std::exception&) {
+        ClaudeResult failed;
+        failed.status = ClaudeStatus::RunnerError;
+        return failed;
+    }
+    return parse_claude_output(process);
 }
 
 }  // namespace cipher::orchestration
