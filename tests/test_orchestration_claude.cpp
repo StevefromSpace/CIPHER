@@ -126,9 +126,67 @@ void test_is_error_true_is_model_error() {
     check(r.status == ClaudeStatus::ModelError, "model error: is_error true is MODEL_ERROR");
 }
 
+class ThrowingRunner final : public ProcessRunner {
+public:
+    int calls = 0;
+    ProcessResult run(const std::vector<std::string>&, int) override {
+        ++calls;
+        throw std::runtime_error("cannot launch");
+    }
+};
+
+bool rejects(const std::string& model, const std::string& budget, const std::string& prompt) {
+    FakeRunner runner;
+    runner.next = make_process(0, kSuccessJson);
+    try {
+        run_claude(runner, "c", model, budget, prompt, 1000);
+    } catch (const std::invalid_argument&) {
+        return runner.calls == 0;   // rejected before the runner was ever invoked
+    }
+    return false;
+}
+
+void test_invalid_input_never_launches() {
+    check(rejects("", "0.5", "hi"), "prelaunch: empty model rejected");
+    check(rejects("-m", "0.5", "hi"), "prelaunch: flag-like model rejected");
+    check(rejects("a b", "0.5", "hi"), "prelaunch: model with whitespace rejected");
+    check(rejects("m", "", "hi"), "prelaunch: empty budget rejected");
+    check(rejects("m", "0", "hi"), "prelaunch: zero budget rejected");
+    check(rejects("m", "0.0", "hi"), "prelaunch: 0.0 budget rejected");
+    check(rejects("m", "-1", "hi"), "prelaunch: negative budget rejected");
+    check(rejects("m", "nan", "hi"), "prelaunch: nan budget rejected");
+    check(rejects("m", "1e3", "hi"), "prelaunch: exponent budget rejected");
+    check(rejects("m", ".5", "hi"), "prelaunch: budget without leading digit rejected");
+    check(rejects("m", "0.5.1", "hi"), "prelaunch: budget with two dots rejected");
+    check(rejects("m", "0.5", ""), "prelaunch: empty prompt rejected");
+    check(rejects("m", "0.5", "--flag"), "prelaunch: flag-like prompt rejected");
+}
+
+void test_runner_exception_is_a_status_and_not_retried() {
+    ThrowingRunner runner;
+    const ClaudeResult r = run_claude(runner, "c", "m", "0.5", "hi", 1000);
+    check(r.status == ClaudeStatus::RunnerError, "runner throw: mapped to RUNNER_ERROR, not propagated");
+    check(runner.calls == 1, "runner throw: exactly one invocation, no hidden retry");
+}
+
+void test_each_failure_costs_one_invocation() {
+    const ProcessResult failures_to_try[] = {make_process(-1, "", true), make_process(1, "garbage"),
+                                             make_process(0, "not json"),
+                                             make_process(0, R"J({"subtype":"success","is_error":true})J")};
+    for (const ProcessResult& failure : failures_to_try) {
+        FakeRunner runner;
+        runner.next = failure;
+        const ClaudeResult r = run_claude(runner, "c", "m", "0.5", "hi", 1000);
+        check(r.status != ClaudeStatus::Ok && runner.calls == 1, "failure: not OK and exactly one invocation");
+    }
+}
+
 }  // namespace
 
 int main() {
+    test_invalid_input_never_launches();
+    test_runner_exception_is_a_status_and_not_retried();
+    test_each_failure_costs_one_invocation();
     test_argv_is_fixed_and_bounded();
     test_argv_rejects_unsafe_input();
     test_success_returns_text_and_cost();

@@ -11,6 +11,8 @@ public:
     virtual ~WorktreeBackend() = default;
     // Creates a worktree directory at path for the job. Must leave an existing directory in place on success.
     virtual void add(const std::filesystem::path& path, int issue_number) = 0;
+    // Removes a worktree previously created by add. Must refuse a dirty or unregistered tree; never force.
+    virtual void remove(const std::filesystem::path& path, int issue_number) = 0;
 };
 
 enum class WorktreeOutcome {
@@ -26,6 +28,8 @@ public:
     WorktreeAllocator(std::filesystem::path root, WorktreeBackend& backend);
 
     WorktreeOutcome allocate(int issue_number);
+    // Removes the worktree and its record only when the record names this issue. Never deletes a bare directory.
+    void release(int issue_number);
     std::filesystem::path path_for(int issue_number) const;
     std::filesystem::path owner_record_for(int issue_number) const;
 

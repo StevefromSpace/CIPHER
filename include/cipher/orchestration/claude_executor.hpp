@@ -16,6 +16,7 @@ enum class ClaudeStatus {
     NonZeroExit,
     MalformedOutput,
     ModelError,   // JSON parsed but is_error or subtype is not "success"
+    RunnerError,  // the runner itself threw (could not launch); the call was not retried
 };
 
 const char* to_string(ClaudeStatus status);
@@ -28,7 +29,8 @@ struct ClaudeResult {
 };
 
 // Fixed argv. The prompt is a single argv element, so no shell or flag injection through prompt text.
-// Throws std::invalid_argument for a prompt that starts with '-' (it would be read as a flag) or an empty model.
+// Throws std::invalid_argument for a prompt or model that starts with '-' (read as a flag), an empty or
+// whitespace-containing model, or a budget that is not a plain positive decimal.
 std::vector<std::string> build_claude_argv(const std::string& executable, const std::string& model,
                                            const std::string& max_budget_usd, const std::string& prompt);
 

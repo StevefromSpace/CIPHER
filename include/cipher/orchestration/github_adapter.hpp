@@ -13,7 +13,8 @@ namespace cipher::orchestration {
 // There is no generic API passthrough and no shell string: the runner receives an argument vector.
 
 enum class GhOperation {
-    ReadPullRequest,     // read-only
+    ReadPullRequest,     // read-only (TSV)
+    ReadPullRequestJson, // read-only, strict JSON incl. checks and reviews
     ReadIssue,           // read-only
     CommentOnPullRequest,// write: comment body comes from a file, never inline
     MergePullRequest     // write: squash merge pinned to the head SHA that was gated
@@ -48,6 +49,8 @@ public:
 
     // Reads the PR and maps the tab-separated fields requested by build_gh_argv. Throws on malformed output.
     PullRequestFacts read_pull_request(int number);
+    // Strict JSON read: fails closed on any missing, mistyped or unknown security-relevant field.
+    PullRequestFacts read_pull_request_detail(int number);
     IssueObservation read_issue(int number);
     void comment_on_pull_request(int number, const std::string& body_file);
     // Returns true only when gh exits 0. The caller must re-read and re-gate before calling.
@@ -59,6 +62,10 @@ private:
 
 // Parses the TSV line produced by the read argv: number, state, headRefOid, baseRefOid, mergeable.
 PullRequestFacts parse_pull_request_line(const std::string& line);
+
+// Strict parser for `gh pr view --json number,state,headRefOid,baseRefOid,mergeable,statusCheckRollup,reviews`.
+// Throws std::runtime_error on malformed JSON, missing/mistyped fields, non-full SHAs or unknown enum values.
+PullRequestFacts parse_pull_request_json(const std::string& text);
 
 }  // namespace cipher::orchestration
 
