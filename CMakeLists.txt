@@ -143,6 +143,7 @@ add_library(cipher_orchestration
     src/orchestration/job_commands.cpp
     src/orchestration/worktree_tools.cpp
     src/orchestration/implementation_executor.cpp
+    src/orchestration/readonly_executor.cpp
     src/orchestration/implementation_rig.cpp
     src/orchestration/qa_profile.cpp
     src/orchestration/pipeline_roles.cpp
