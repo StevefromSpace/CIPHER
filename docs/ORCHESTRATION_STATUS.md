@@ -70,7 +70,29 @@ The `cipher` executable links `cipher_orchestration`. With `orchestration_dir=<f
 - REPL: `job task <issue> <text>` stores the task; with `orchestration_repo`, `orchestration_base_sha`, `orchestration_worktree_root` set, `job step` runs `ImplementationRig`.
 - **Verified:** automated tests with a scripted agent and real git (real worktree, real file edit, real commit, persistence and restart reload, failure and exhaustion paths). Windows ctest 29/29.
 - **Not verified:** `ClaudeToolAgent` has only been tested with a fake runner; no live Claude call has been made. It is paid per step.
-- **Not implemented:** PR creation, QA, Reviewer, independent review (Antigravity unverified), autonomous merge. Security-sensitive jobs stay `NEEDS_HUMAN`.
+- **Not implemented:** independent review, autonomous merge. Security-sensitive jobs stay `NEEDS_HUMAN`.
+
+## Pipeline roles (Milestone C) - fake-tested only
+
+`PipelineExecutor` (src/orchestration/pipeline_roles.cpp) plugs into the existing state machine as the fallback of `ImplementationExecutor`; there is no second engine.
+
+- **PR creation** (Implementation role at the PullRequest state): verifies worktree HEAD == job head sha, refuses if more than one open PR exists for the job branch `cipher/job-<n>`, pushes with a plain (never forced) `git push`, creates the PR only if none exists (`GhAdapter::create_pull_request`, validated branch names, head != base), re-reads the PR with the strict JSON reader and requires open + head sha match. Never merges. PR number/head/base go to the evidence file and the `PullRequestOpened` event.
+- **QA**: independent of implementation (separate argv registered by CIPHER, no file writes). Empty diff, source without tests, non-zero exit => `ChangesRequested`; timeout, unknown command id, no configured commands, or HEAD moving during the run => `Blocked`. Out of the box the only approved command is `git diff --check`; real test commands must be added by the owner.
+- **Reviewer (mechanical)**: family `cipher-mechanical`. Checks protected paths (tools/pipeline, .github, third_party, .claude, AGENTS.md, role contract, CMakeLists.txt, env/secret/credential names), diff size, secret markers, source-without-tests. Security-sensitive jobs always get `NEEDS_HUMAN`. **This is not an independent or semantic review** and must not be counted as one.
+- **CI observer** (`observe_ci`): reads PR checks, no event while pending, `CiResult` when decided, `Blocked` on closed PR / head mismatch / malformed output. Not yet driven from the `job` REPL (no `job ci` command); today it is a library function.
+- **Verified:** automated tests with fake git and fake gh (PR created / reused / duplicate / mismatch / push failure / ambiguous output, QA and review outcomes, CI states). No live GitHub mutation was performed.
+- **Not verified live:** PR creation against real GitHub, the real `gh pr create` output format.
+
+## Antigravity / Gemini investigation
+
+Checked on the owner machine: `antigravity`, `agy` and `gemini` are not on PATH. No documented, verified way to invoke Gemini programmatically through Antigravity, capture structured output, or verify the reviewing model's identity has been established. No CLI was invented and none was installed. Consequence: no independent reviewer exists; security-sensitive tasks stay `NEEDS_HUMAN`. Re-open this item only when the owner supplies a concrete, documented invocation surface.
+
+## Pilot prerequisites (not started)
+
+1. Owner authorizes one small paid Claude validation of `ClaudeToolAgent` (budget stated up front); until then the real tool-use protocol is unverified.
+2. Owner defines real QA test commands (the default only runs `git diff --check`).
+3. A disposable docs-only or test-only issue, disposable branch, isolated worktree, real PR, CI, no autonomous merge.
+4. A `job ci` / PR-step command to drive `observe_ci` from the REPL.
 
 ## Governance boundaries
 
