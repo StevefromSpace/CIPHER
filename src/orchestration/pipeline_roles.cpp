@@ -156,10 +156,16 @@ RoleResult PipelineExecutor::run_qa(const JobRecord& job) {
             const auto it = settings_.test_commands.find(id);
             if (it == settings_.test_commands.end()) return result(Verdict::Blocked, "unknown command id " + id);
             const ProcessResult run = runner_.run(it->second, kTestTimeoutMs);
+            note("QA " + id + " @" + job.head_sha + " exit=" + std::to_string(run.exit_code) +
+                 (run.timed_out ? " timed_out" : "") + (run.output_overflow ? " output_overflow" : ""));
             if (run.timed_out || run.output_overflow) return result(Verdict::Blocked, id + " timed out or overflowed");
             if (run.exit_code != 0) return result(Verdict::ChangesRequested, id + " exited " + std::to_string(run.exit_code));
         }
         if (!head_matches(job)) return result(Verdict::Blocked, "HEAD moved while QA ran");
+        // QA only verifies: any change to tracked files (e.g. a test rewriting sources) invalidates the evidence.
+        const ProcessResult status = git({"status", "--porcelain", "--untracked-files=no"});
+        if (status.exit_code != 0 || !trim(status.stdout_text).empty())
+            return result(Verdict::Blocked, "QA modified tracked files or git status failed");
         return result(Verdict::Approve, std::to_string(files.size()) + " files, all approved commands passed");
     } catch (const std::exception& error) {
         return result(Verdict::Blocked, error.what());

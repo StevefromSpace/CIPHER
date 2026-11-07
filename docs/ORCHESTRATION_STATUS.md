@@ -79,9 +79,17 @@ The `cipher` executable links `cipher_orchestration`. With `orchestration_dir=<f
 - **PR creation** (Implementation role at the PullRequest state): verifies worktree HEAD == job head sha, refuses if more than one open PR exists for the job branch `cipher/job-<n>`, pushes with a plain (never forced) `git push`, creates the PR only if none exists (`GhAdapter::create_pull_request`, validated branch names, head != base), re-reads the PR with the strict JSON reader and requires open + head sha match. Never merges. PR number/head/base go to the evidence file and the `PullRequestOpened` event.
 - **QA**: independent of implementation (separate argv registered by CIPHER, no file writes). Empty diff, source without tests, non-zero exit => `ChangesRequested`; timeout, unknown command id, no configured commands, or HEAD moving during the run => `Blocked`. Out of the box the only approved command is `git diff --check`; real test commands must be added by the owner.
 - **Reviewer (mechanical)**: family `cipher-mechanical`. Checks protected paths (tools/pipeline, .github, third_party, .claude, AGENTS.md, role contract, CMakeLists.txt, env/secret/credential names), diff size, secret markers, source-without-tests. Security-sensitive jobs always get `NEEDS_HUMAN`. **This is not an independent or semantic review** and must not be counted as one.
-- **CI observer** (`observe_ci`): reads PR checks, no event while pending, `CiResult` when decided, `Blocked` on closed PR / head mismatch / malformed output. Not yet driven from the `job` REPL (no `job ci` command); today it is a library function.
+- **CI observer** (`observe_ci`): reads PR checks, no event while pending, `CiResult` when decided, `Blocked` on closed PR / head mismatch / malformed output. Driven from the REPL by `job ci <issue> <pr>` (PR #53; fake-tested, needs `gh` on PATH).
 - **Verified:** automated tests with fake git and fake gh (PR created / reused / duplicate / mismatch / push failure / ambiguous output, QA and review outcomes, CI states). No live GitHub mutation was performed.
 - **Not verified live:** PR creation against real GitHub, the real `gh pr create` output format.
+
+## Configurable QA (Milestone D)
+- Config key `orchestration_qa` (comma list, default `check`) selects approved profiles: `check` (git diff --check), `build` (cmake configure+build, out-of-tree in `<worktree_root>/qa-build-<n>`), `ctest`, `python` (unittest discovery of `integrations/` and `tools/pipeline/tests`; fails on zero tests or skips). `src/orchestration/qa_profile.cpp`.
+- Commands are fixed argv with absolute executables (no shell), bounded by the 600 s command timeout and the runner output cap. Unknown/duplicate profiles, `ctest` without `build`, and missing tools throw, so a check is never silently skipped.
+- QA verdicts: PASS (Approve), FAIL (ChangesRequested), BLOCKED. Blocked if HEAD differs from the job head before or after, a command times out/overflows, or `git status --untracked-files=no` shows tracked files modified by QA.
+- Evidence lines record command id, exact head SHA and exit code in the job evidence log.
+- Tested with fakes only (`tests/test_orchestration_pipeline.cpp`); no real cmake/ctest/python QA run through the rig yet. Locally on Windows, `tools/pipeline/tests` shows 6 failures (FAILED_VERIFICATION in orchestrator tests) while CI on Linux passes; the `python` profile is therefore unproven on Windows.
+- Pilot readiness: still not ready. Independent security review is unavailable, #51/#52/#53 are unmerged, Claude tool use is unverified live.
 
 ## Antigravity / Gemini investigation
 
@@ -92,7 +100,7 @@ Checked on the owner machine: `antigravity`, `agy` and `gemini` are not on PATH.
 1. Owner authorizes one small paid Claude validation of `ClaudeToolAgent` (budget stated up front); until then the real tool-use protocol is unverified.
 2. Owner defines real QA test commands (the default only runs `git diff --check`).
 3. A disposable docs-only or test-only issue, disposable branch, isolated worktree, real PR, CI, no autonomous merge.
-4. A `job ci` / PR-step command to drive `observe_ci` from the REPL.
+4. (done in PR #53) `job ci` drives `observe_ci` from the REPL.
 
 ## Governance boundaries
 

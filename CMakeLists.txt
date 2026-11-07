@@ -144,6 +144,7 @@ add_library(cipher_orchestration
     src/orchestration/worktree_tools.cpp
     src/orchestration/implementation_executor.cpp
     src/orchestration/implementation_rig.cpp
+    src/orchestration/qa_profile.cpp
     src/orchestration/pipeline_roles.cpp
 )
 target_include_directories(cipher_orchestration PUBLIC include)
