@@ -356,6 +356,8 @@ if(BUILD_TESTING)
     # Manual only (nested CMake build): see the header of tests/qa_real_validation.cpp.
     add_executable(cipher_qa_real_validation tests/qa_real_validation.cpp)
     target_link_libraries(cipher_qa_real_validation PRIVATE cipher_orchestration)
+    add_executable(cipher_gh_pr_validation tests/gh_pr_live_validation.cpp)
+    target_link_libraries(cipher_gh_pr_validation PRIVATE cipher_orchestration)
     add_executable(cipher_orchestration_pipeline_tests tests/test_orchestration_pipeline.cpp)
     target_link_libraries(cipher_orchestration_pipeline_tests PRIVATE cipher_orchestration)
     add_test(NAME cipher_orchestration_pipeline_tests COMMAND cipher_orchestration_pipeline_tests)
