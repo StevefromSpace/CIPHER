@@ -95,6 +95,11 @@ private:
     Event escalation_event(EscalationReason reason) const;
     void restore_in_flight(const std::string& previous_family);
     void log_record(const ExecutionRecord& record);
+    // After a save threw, the write may or may not have landed. Memory adopts the durable record (never a stale
+    // copy). Returns true when the durable record equals `intended`, i.e. the write landed.
+    bool adopt_durable(const JobRecord& intended);
+    void resync_from_disk();
+    void require_usable() const;
 
     int issue_number_;
     RoleExecutor& executor_;
@@ -104,6 +109,9 @@ private:
     std::vector<ExecutionRecord> records_;
     EventLog* event_log_ = nullptr;
     std::string log_error_;
+    // Set when the durable state could not be read back after a failed save. Every mutating call then refuses
+    // until a new Orchestrator is built from storage.
+    bool poisoned_ = false;
 };
 
 }  // namespace cipher::orchestration

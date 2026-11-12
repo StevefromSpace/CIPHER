@@ -24,7 +24,48 @@ Orchestrator::Orchestrator(int issue_number, IssueFacts facts, RoleExecutor& exe
     }
 }
 
+namespace {
+
+// Compares the fields that define a durable transition; used to tell whether an ambiguous save landed.
+bool same_durable(const JobRecord& a, const JobRecord& b) {
+    return a.state == b.state && a.resume_state == b.resume_state && a.escalation == b.escalation &&
+           a.implementation_executions == b.implementation_executions && a.review_rounds == b.review_rounds &&
+           a.blocked_count == b.blocked_count && a.pull_request_open == b.pull_request_open &&
+           a.ci_passed == b.ci_passed && a.review_approved == b.review_approved && a.run_id == b.run_id &&
+           a.implementation_family == b.implementation_family && a.execution_in_flight == b.execution_in_flight;
+}
+
+}  // namespace
+
+void Orchestrator::require_usable() const {
+    if (poisoned_) {
+        throw std::runtime_error("orchestrator: durable state unknown after a failed save; restart and run recover");
+    }
+}
+
+bool Orchestrator::adopt_durable(const JobRecord& intended) {
+    std::optional<JobRecord> durable;
+    try {
+        durable = store_.load(issue_number_);
+    } catch (...) {
+        poisoned_ = true;
+        return false;
+    }
+    if (!durable) return false;
+    job_ = *durable;
+    return same_durable(job_, intended);
+}
+
+void Orchestrator::resync_from_disk() {
+    try {
+        if (const auto durable = store_.load(issue_number_)) job_ = *durable;
+    } catch (...) {
+        poisoned_ = true;
+    }
+}
+
 bool Orchestrator::start() {
+    require_usable();
     if (job_.state != State::Issue) return false;
     Event event;
     event.kind = EventKind::Start;
@@ -32,12 +73,21 @@ bool Orchestrator::start() {
 }
 
 void Orchestrator::assign_run_id(const std::string& run_id) {
+    require_usable();
     if (!job_.run_id.empty() || run_id.empty()) return;
-    job_.run_id = run_id;
-    store_.save(issue_number_, job_);
+    JobRecord next = job_;
+    next.run_id = run_id;
+    try {
+        store_.save(issue_number_, next);
+    } catch (...) {
+        adopt_durable(next);
+        throw;
+    }
+    job_ = next;
 }
 
 bool Orchestrator::apply(const Event& event, const std::string& model_family) {
+    require_usable();
     const TransitionResult result = transition(job_, event, policy_);
 
     ExecutionRecord record;
@@ -51,9 +101,14 @@ bool Orchestrator::apply(const Event& event, const std::string& model_family) {
     record.reason = result.reason;
 
     if (result.accepted) {
-        // Save first: if the save throws, the in-memory job must not show a transition the disk does not have.
-        store_.save(issue_number_, result.next);
-        job_ = result.next;
+        // Save first. If the save throws, the write may still have landed: adopt the durable record. If it landed,
+        // the transition stands (no throw); if not, the exception propagates with memory matching the disk.
+        try {
+            store_.save(issue_number_, result.next);
+            job_ = result.next;
+        } catch (...) {
+            if (!adopt_durable(result.next)) throw;
+        }
     }
     record.to = job_.state;
     record.escalation = job_.escalation;
@@ -93,6 +148,7 @@ void Orchestrator::log_record(const ExecutionRecord& record) {
 }
 
 bool Orchestrator::advance() {
+    require_usable();
     const std::optional<Role> role = role_for(job_.state);
     if (!role) return false;
     // A flagged record is an execution that may have run already: recover() must decide before anything dispatches.
@@ -106,18 +162,20 @@ bool Orchestrator::advance() {
         if (job_.implementation_executions >= policy_.max_implementation_executions) {
             return apply(escalation_event(EscalationReason::RetryBudgetExhausted));  // defensive: no dispatch
         }
-        const int previous_executions = job_.implementation_executions;
-        job_.execution_in_flight = true;
-        ++job_.implementation_executions;
+        JobRecord reserved = job_;
+        reserved.execution_in_flight = true;
+        ++reserved.implementation_executions;
         try {
-            store_.save(issue_number_, job_);
+            store_.save(issue_number_, reserved);
         } catch (...) {
-            // Not dispatched: the save did not land, so the charge and flag are rolled back in memory.
-            job_.execution_in_flight = false;
-            job_.implementation_executions = previous_executions;
+            // Not dispatched. Whether or not the write landed, memory must match disk; a landed reservation
+            // leaves the record flagged, so recover() decides and nothing dispatches here.
+            adopt_durable(reserved);
             throw;
         }
+        job_ = reserved;
     }
+    // If the executor throws, memory keeps the flag the disk already holds, so recover() takes over.
     const RoleResult result = executor_.run(*role, job_);
     if (counted) {
         // Flag and family are cleared in memory only: apply() persists them with the transition in one save.
@@ -136,7 +194,8 @@ bool Orchestrator::advance() {
             accepted = apply(result.event, result.model_family);
         }
     } catch (...) {
-        if (counted) restore_in_flight(previous_family);
+        // apply() already adopted whatever is durable; anything it could not read back is poisoned.
+        if (counted) resync_from_disk();
         throw;
     }
     // Rejected: the disk still holds the flag from the first save, so memory must match it.
@@ -150,6 +209,7 @@ void Orchestrator::restore_in_flight(const std::string& previous_family) {
 }
 
 bool Orchestrator::recover() {
+    require_usable();
     if (!job_.execution_in_flight) return false;
 
     // Clear the flag in memory only: apply() persists flag and failure charge in one atomic save, so a crash
@@ -161,7 +221,7 @@ bool Orchestrator::recover() {
     try {
         accepted = apply(event);
     } catch (...) {
-        job_.execution_in_flight = true;  // save failed: disk still flagged
+        resync_from_disk();  // whatever is durable (flagged, or already charged) becomes memory
         throw;
     }
     if (accepted) return true;

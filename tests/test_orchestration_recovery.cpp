@@ -507,9 +507,121 @@ void test_failed_final_save_does_not_advance_memory() {
     fs::remove_all(dir);
 }
 
+// A save fault at a chosen point: the Nth save from now throws, either before the write or after it lands.
+class FaultStore final : public JobStore {
+public:
+    explicit FaultStore(const fs::path& dir) : inner_(dir) {}
+    int countdown = -1;          // -1 = never; 0 = the next save faults; n = that many saves pass first
+    bool write_then_throw = false;
+    void save(int issue, const JobRecord& job) override {
+        if (countdown == 0) {
+            countdown = -1;
+            if (write_then_throw) inner_.save(issue, job);
+            throw std::runtime_error("simulated fault during save");
+        }
+        if (countdown > 0) --countdown;
+        inner_.save(issue, job);
+    }
+    std::optional<JobRecord> load(int issue) const override { return inner_.load(issue); }
+
+private:
+    FileJobStore inner_;
+};
+
+// Final save writes the transition and then throws. The same object must adopt the durable state, not overwrite it.
+void test_final_save_write_then_throw_is_adopted_not_reverted() {
+    const fs::path dir = fresh_dir("cipher-writethrow-final");
+    IssueFacts facts;
+    CrashingExecutor executor;
+    executor.crash_on_implementation = false;
+    FaultStore store(dir);
+    Orchestrator orch(kIssue, facts, executor, store, Policy{});
+    orch.assign_run_id("run-wt-final");
+    orch.start();
+    store.countdown = 1;  // reservation save passes, the final save faults after writing
+    store.write_then_throw = true;
+    bool advanced = false;
+    try {
+        advanced = orch.advance();
+    } catch (const std::runtime_error&) {
+    }
+    check(advanced, "write-then-throw final: the durable transition is adopted and advance reports it");
+    check(orch.job().state == State::PullRequest && !orch.job().execution_in_flight,
+          "write-then-throw final: memory shows the landed PullRequest state, unflagged");
+    check(orch.job().implementation_executions == 1 && orch.job().run_id == "run-wt-final",
+          "write-then-throw final: one charge and run_id preserved");
+    check(!orch.recover() && executor.implementation_calls == 1,
+          "write-then-throw final: recover() on the same object is a no-op and never re-runs the executor");
+
+    FileJobStore reopened(dir);
+    Orchestrator restarted(kIssue, facts, executor, reopened, Policy{});
+    check(restarted.job().state == State::PullRequest && restarted.job().implementation_executions == 1,
+          "write-then-throw final: a restarted process sees the same durable PullRequest state");
+    fs::remove_all(dir);
+}
+
+// Reservation save writes the flag and charge and then throws. Nothing may dispatch; the same object recovers.
+void test_reservation_write_then_throw_blocks_dispatch_and_recovers() {
+    const fs::path dir = fresh_dir("cipher-writethrow-reserve");
+    IssueFacts facts;
+    CrashingExecutor executor;
+    executor.crash_on_implementation = false;
+    FaultStore store(dir);
+    Orchestrator orch(kIssue, facts, executor, store, Policy{});
+    orch.assign_run_id("run-wt-reserve");
+    orch.start();
+    store.countdown = 0;
+    store.write_then_throw = true;
+    bool threw = false;
+    try {
+        orch.advance();
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    check(threw && executor.implementation_calls == 0,
+          "write-then-throw reservation: the executor never runs when the reservation save throws");
+    check(orch.job().execution_in_flight && orch.job().implementation_executions == 1,
+          "write-then-throw reservation: memory matches the landed flag and charge");
+    check(!orch.advance() && executor.implementation_calls == 0,
+          "write-then-throw reservation: a flagged record refuses dispatch");
+    check(orch.recover() && !orch.job().execution_in_flight && orch.job().implementation_executions == 1,
+          "write-then-throw reservation: recover() clears the flag without a second charge");
+    fs::remove_all(dir);
+}
+
+// Final save throws before writing. Memory must match the disk (still flagged), and recovery must work.
+void test_final_save_fault_before_write_keeps_memory_equal_to_disk() {
+    const fs::path dir = fresh_dir("cipher-fault-before-final");
+    IssueFacts facts;
+    CrashingExecutor executor;
+    executor.crash_on_implementation = false;
+    FaultStore store(dir);
+    Orchestrator orch(kIssue, facts, executor, store, Policy{});
+    orch.assign_run_id("run-before-final");
+    orch.start();
+    store.countdown = 1;
+    store.write_then_throw = false;
+    bool threw = false;
+    try {
+        orch.advance();
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    check(threw && executor.implementation_calls == 1,
+          "fault before write: the executor ran once and the final save threw");
+    check(orch.job().state == State::Implementation && orch.job().execution_in_flight,
+          "fault before write: memory is the durable flagged Implementation state");
+    check(orch.recover() && orch.job().implementation_executions == 1 && executor.implementation_calls == 1,
+          "fault before write: recover() charges nothing extra and never re-runs the executor");
+    fs::remove_all(dir);
+}
+
 }  // namespace
 
 int main() {
+    test_final_save_write_then_throw_is_adopted_not_reverted();
+    test_reservation_write_then_throw_blocks_dispatch_and_recovers();
+    test_final_save_fault_before_write_keeps_memory_equal_to_disk();
     test_recover_interrupted_before_completion_can_be_retried();
     test_recover_repeated_changes_nothing_and_preserves_history();
     test_recover_leaves_existing_worktree_and_branch_dirs_alone();

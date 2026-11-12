@@ -10,8 +10,8 @@ namespace cipher::orchestration {
 // Exclusive per-job lock across processes. The OS holds it for as long as the handle is open and releases it
 // when the process exits, even after a crash, so a stale lock file never blocks `job recover`.
 // Windows: CreateFileW with share mode 0. POSIX: flock(LOCK_EX | LOCK_NB).
-// shortcut: locks one job file only; events.log is shared across jobs and its appends are not serialized,
-// upgrade to a directory-wide lock when a second job-writing process is expected.
+// shortcut: locks one job file only; events.log appends are serialized separately (event_log.cpp), so a
+// directory-wide job lock is only needed if job files themselves must be written atomically across jobs.
 class JobLock final {
 public:
     // Returns nullopt when another handle holds the lock. Throws std::runtime_error on other I/O failures.

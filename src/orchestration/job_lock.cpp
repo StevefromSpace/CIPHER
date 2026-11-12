@@ -59,7 +59,8 @@ void JobLock::release() noexcept {
 #else
 
 std::optional<JobLock> JobLock::try_acquire(const std::filesystem::path& lock_file) {
-    const int fd = ::open(lock_file.c_str(), O_CREAT | O_RDWR, 0644);
+    // O_CLOEXEC: a spawned child must not inherit the fd, or the lock outlives a killed CIPHER process.
+    const int fd = ::open(lock_file.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0644);
     if (fd < 0) throw std::runtime_error("could not open job lock file " + lock_file.string());
     if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
         const bool busy = errno == EWOULDBLOCK || errno == EAGAIN;
