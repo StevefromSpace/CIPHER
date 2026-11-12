@@ -225,9 +225,9 @@ void test_orchestrator_resumes_from_disk() {
     FileJobStore reopened(dir);
     Orchestrator second(11, facts, executor, reopened, Policy{});
     check(second.job().state == State::Implementation, "resume: a restarted orchestrator reloads the same state");
-    check(second.job().implementation_executions == 1, "resume: the reloaded counter is not reset to zero");
+    check(second.job().implementation_executions == 0, "resume: entering implementation is uncharged, so the reloaded counter is 0");
     check(!second.recover(), "resume: nothing is in flight, so recovery does nothing");
-    check(second.job().implementation_executions == 1, "resume: recovery with nothing in flight leaves the counter alone");
+    check(second.job().implementation_executions == 0, "resume: recovery with nothing in flight leaves the counter alone");
 }
 
 void test_schema_1_records_load_without_run_id() {

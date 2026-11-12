@@ -98,16 +98,23 @@ bool Orchestrator::advance() {
     // A flagged record is an execution that may have run already: recover() must decide before anything dispatches.
     if (job_.execution_in_flight) return false;
 
-    // Only an implementation execution counts against the budget. Mark it before the role runs, so a crash
-    // during the run is visible on restart (see recover()).
+    // Only an implementation execution counts against the budget (section 5.1, charge on dispatch). The charge
+    // and the in-flight flag are saved together before dispatch, so a crash during the run is visible on restart.
     const bool counted = *role == Role::Implementation && job_.state == State::Implementation;
     const std::string previous_family = job_.implementation_family;
     if (counted) {
+        if (job_.implementation_executions >= policy_.max_implementation_executions) {
+            return apply(escalation_event(EscalationReason::RetryBudgetExhausted));  // defensive: no dispatch
+        }
+        const int previous_executions = job_.implementation_executions;
         job_.execution_in_flight = true;
+        ++job_.implementation_executions;
         try {
             store_.save(issue_number_, job_);
         } catch (...) {
-            job_.execution_in_flight = false;  // not dispatched: disk never saw the flag
+            // Not dispatched: the save did not land, so the charge and flag are rolled back in memory.
+            job_.execution_in_flight = false;
+            job_.implementation_executions = previous_executions;
             throw;
         }
     }

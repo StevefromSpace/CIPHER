@@ -278,6 +278,16 @@ These limits are policy. They must be enforced by the orchestrator through count
 3. The count is per issue, not per agent or per job. A new job for the same issue continues the count. It is stored in the job record.
 4. The orchestrator may assign attempt 2 to a higher model tier (section 3.3). That is a model change within the same execution, not a third execution.
 5. If attempt 2 fails, the job becomes `NEEDS_HUMAN`. No further implementation execution is started. Escalation is a human handoff, not another implementation run.
+6. **Charge on dispatch (owner decision, Stage 16 reliability).** An execution is charged only when it is dispatched to the external implementer. The charge is persisted, together with an in-flight marker, before dispatch.
+   - Rejected before dispatch: no charge.
+   - Entering `IMPLEMENTATION` alone: no charge.
+   - External execution dispatched: charge.
+   - Empty-head or invalid completion after dispatch: charge (already made at dispatch).
+   - Execution failure after dispatch: charge (already made at dispatch).
+   - Recovery of an already-charged attempt: no additional charge. Recovery re-enters `IMPLEMENTATION` uncharged; the retry is charged when it is dispatched.
+7. **Ambiguous crashes are at-least-once, bounded by the budget.** A crash after dispatch but before the outcome is saved leaves the in-flight marker set. `recover` consumes that attempt as a failure and re-enters `IMPLEMENTATION` uncharged; the next dispatch is charged. The total number of dispatches is still bounded by section 5.1 item 1. The external side effects of a lost run (for example, a commit in the worktree) may still exist and are not reconciled automatically. Exactly-once execution is not claimed without provider-supported idempotency.
+8. A record that is still flagged in flight refuses new dispatch until `recover` is run.
+9. Legacy records: a record that entered `IMPLEMENTATION` under the earlier charge-on-entry code may carry one extra charge at upgrade. This is conservative and is not corrected automatically.
 
 Existing pipeline: `MAX_REPAIR_ROUNDS = 2` (`config.py:31`) allows two repair rounds, which is up to three implementation runs inside one pipeline job. The 2-total limit applies to the orchestration layer, which must count executions across calls. The orchestration-layer enforcement gap is recorded in section 12.2, item 1. The pipeline does not need to be rewritten to meet this contract.
 

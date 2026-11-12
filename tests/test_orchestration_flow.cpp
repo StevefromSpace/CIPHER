@@ -409,9 +409,9 @@ void test_restart_recovery() {
     Orchestrator restarted(21, facts, crashing, crash_store, Policy{});
     const int runs_before_recover = crashing.implementation_runs;
     check(restarted.recover(), "restart: in-flight execution is recovered", "nothing recovered");
-    check(restarted.job().implementation_executions == 2 && restarted.job().state == State::Implementation &&
+    check(restarted.job().implementation_executions == 1 && restarted.job().state == State::Implementation &&
               !restarted.job().execution_in_flight,
-          "restart: recovered execution is counted once and the attempt is retried", "counter or state wrong");
+          "restart: recovery keeps the dispatch charge and re-enters implementation uncharged", "counter or state wrong");
     check(crashing.implementation_runs == runs_before_recover, "restart: recovery never re-runs the role",
           "role ran during recovery");
     check(!restarted.recover(), "restart: recovery is a no-op when nothing is in flight", "recovered twice");

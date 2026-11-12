@@ -26,13 +26,14 @@ TransitionResult escalate(JobRecord job, EscalationReason reason) {
     return accept(std::move(job));
 }
 
-// Starts an implementation execution. The first start and every retry share this path, so the
-// 2-execution limit (section 5.1) is enforced in one place. A retry clears the per-attempt gates.
+// Enters Implementation. The first entry and every retry share this path, so the 2-execution limit
+// (section 5.1) is checked in one place. Entering alone is not a charge: the charge is made when the
+// execution is dispatched (Orchestrator::advance), so a rejected or never-dispatched entry costs nothing.
+// A retry clears the per-attempt gates.
 TransitionResult begin_execution(JobRecord job, const Policy& policy) {
     if (job.implementation_executions >= policy.max_implementation_executions) {
         return escalate(std::move(job), EscalationReason::RetryBudgetExhausted);
     }
-    ++job.implementation_executions;
     job.state = State::Implementation;
     job.qa_approved = false;
     job.ci_passed = false;

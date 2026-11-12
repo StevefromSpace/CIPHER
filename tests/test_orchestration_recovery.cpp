@@ -95,8 +95,8 @@ void test_restart_while_queued_keeps_the_saved_state() {
     }
     FileJobStore store(dir);
     Orchestrator restarted(kIssue, facts, executor, store, Policy{});
-    check(restarted.job().state == State::Implementation && restarted.job().implementation_executions == 1,
-          "restart queued: the saved state and the first counted execution are reloaded");
+    check(restarted.job().state == State::Implementation && restarted.job().implementation_executions == 0,
+          "restart queued: the saved state is reloaded and nothing is charged before dispatch");
     fs::remove_all(dir);
 }
 
@@ -120,10 +120,10 @@ void test_restart_during_in_flight_execution_counts_it_once() {
     check(restarted.job().execution_in_flight, "restart in flight: the in-flight marker survives the crash");
 
     const bool recovered = restarted.recover();
-    // The crashed run is counted once (attempt 1). Recovery opens the single allowed retry as attempt 2.
-    check(recovered && restarted.job().implementation_executions == 2 && !restarted.job().execution_in_flight &&
+    // The crashed run was charged at dispatch (attempt 1). Recovery adds no charge; the retry is charged when dispatched.
+    check(recovered && restarted.job().implementation_executions == 1 && !restarted.job().execution_in_flight &&
               restarted.job().state == State::Implementation,
-          "restart in flight: recovery counts the crashed run once and opens only the retry as attempt 2");
+          "restart in flight: recovery keeps the single dispatch charge and clears the flag, with no new charge");
     check(after_restart.implementation_calls == 0,
           "restart in flight: recovery never re-runs the implementation executor");
     fs::remove_all(dir);
@@ -250,7 +250,7 @@ void test_leftover_tmp_is_ignored() {
 
     FileJobStore store(dir);
     Orchestrator restarted(kIssue, facts, executor, store, Policy{});
-    check(restarted.job().state == State::Implementation && restarted.job().implementation_executions == 1,
+    check(restarted.job().state == State::Implementation && restarted.job().implementation_executions == 0,
           "leftover tmp: a stale .tmp is ignored and the last committed .state is used");
     fs::remove_all(dir);
 }
@@ -305,8 +305,8 @@ void test_recover_interrupted_before_completion_can_be_retried() {
     check(on_disk.execution_in_flight && on_disk.implementation_executions == 1,
           "recover interrupted: disk still shows the run in flight and uncharged (nothing half-applied)");
     Orchestrator again(kIssue, facts, executor, after_crash, Policy{});
-    check(again.recover() && again.job().implementation_executions == 2 && !again.job().execution_in_flight,
-          "recover interrupted: a second recover completes and charges exactly once");
+    check(again.recover() && again.job().implementation_executions == 1 && !again.job().execution_in_flight,
+          "recover interrupted: a second recover clears the flag and adds no second charge");
     fs::remove_all(dir);
 }
 
@@ -405,7 +405,7 @@ void test_event_log_failure_after_save_is_reported_without_repeating_the_transit
     }
     FileJobStore reread(dir);
     const JobRecord saved = *reread.load(kIssue);
-    check(saved.implementation_executions == 2 && !saved.execution_in_flight && saved.run_id == "run-42-test",
+    check(saved.implementation_executions == 1 && !saved.execution_in_flight && saved.run_id == "run-42-test",
           "log failure: the saved record has the charge, the cleared flag and the run_id");
     check(good.read_all() == history, "log failure: the earlier event history is untouched");
 
@@ -443,12 +443,12 @@ void test_crash_before_dispatch_then_retry_dispatches_once() {
     }
     FileJobStore store(dir);
     const JobRecord saved = *store.load(kIssue);
-    check(!saved.execution_in_flight && saved.implementation_executions == 1,
-          "pre-dispatch: disk shows the entry charge only, with no flag");
+    check(!saved.execution_in_flight && saved.implementation_executions == 0,
+          "pre-dispatch: the failed flag save left no charge and no flag on disk");
     Orchestrator restarted(kIssue, facts, executor, store, Policy{});
     check(restarted.advance(), "pre-dispatch retry: the step runs");
     check(executor.implementation_calls == 1, "pre-dispatch retry: the executor runs exactly once");
-    check(restarted.job().implementation_executions == 1, "pre-dispatch retry: the single entry charge is not repeated");
+    check(restarted.job().implementation_executions == 1, "pre-dispatch retry: exactly one charge, made at dispatch");
     fs::remove_all(dir);
 }
 
@@ -500,8 +500,9 @@ void test_failed_final_save_does_not_advance_memory() {
     check(orch.job().run_id == "run-42-test", "final save: run_id is unchanged");
 
     store.saves_until_death = -1;  // the simulated crash is over; the process restarts with a working disk
-    const bool recovered = orch.recover();  // the flag is still on disk: one retry charge, no new dispatch
-    check(recovered && orch.job().implementation_executions == 2, "final save: recovery charges the retry once");
+    const bool recovered = orch.recover();  // the flag is still on disk: clears it, no new charge, no dispatch
+    check(recovered && orch.job().implementation_executions == 1 && !orch.job().execution_in_flight,
+          "final save: recovery clears the flag without a second charge");
     check(executor.implementation_calls == 1, "final save: recovery never re-runs the executor");
     fs::remove_all(dir);
 }
