@@ -1,4 +1,5 @@
 #include "cipher/orchestration/job_commands.hpp"
+#include "cipher/orchestration/job_lock.hpp"
 
 #include <algorithm>
 #include <ctime>
@@ -101,6 +102,20 @@ JobCommandResult JobCommands::execute(const std::string& input) {
         return joined;
     }();
     try {
+        // Writers take the per-job OS lock before any load, so a second process cannot interleave a save.
+        const bool writes = verb == "new" || verb == "step" || verb == "recover" || verb == "ci" || verb == "task";
+        std::optional<orchestration::JobLock> job_lock;
+        if (writes && words.size() > 2) {
+            const int issue = parse_issue(words[2]);
+            if (issue != 0) {
+                std::filesystem::create_directories(directory_);  // the lock file lives beside the job record
+                job_lock = orchestration::JobLock::try_acquire(
+                    directory_ / ("job-" + std::to_string(issue) + ".lock"));
+                if (!job_lock) {
+                    return {true, "job " + std::to_string(issue) + " is in use by another process; try again."};
+                }
+            }
+        }
         if (verb == "new") return {true, create(rest)};
         if (verb == "status") return {true, status(rest)};
         if (verb == "list") return {true, list()};
