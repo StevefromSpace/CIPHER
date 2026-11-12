@@ -62,6 +62,20 @@ int main() {
         const std::string stepped = jobs.execute("job step 7").text;
         check(contains(stepped, "NEEDS_HUMAN") && contains(stepped, "role not supported"), "default executor escalates");
         check(contains(jobs.execute("job log").text, "7"), "events recorded in log");
+
+        const std::string shown = jobs.execute("job show 7").text;
+        check(contains(shown, "job 7: NEEDS_HUMAN") && contains(shown, "events:") && contains(shown, "issue=7"),
+              "show prints state and that job's events");
+        const std::string json = jobs.execute("job show 7 --json").text;
+        check(json.front() == '{' && json.back() == '}' && contains(json, "\"issue\":7") &&
+                  contains(json, "\"state\":\"NEEDS_HUMAN\""), "show --json is a flat object");
+        check(contains(shown, "run_id=run-7-") && contains(json, "\"run_id\":\"run-7-"), "job carries a run id");
+        check(contains(jobs.execute("job log 7").text, "run=run-7-") && contains(jobs.execute("job log 7").text, "ts="),
+              "events carry run id and timestamp");
+        check(contains(jobs.execute("job show 99").text, "No job"), "show missing job");
+        check(contains(jobs.execute("job show x").text, "Usage"), "show rejects bad issue");
+        check(contains(jobs.execute("job log abc").text, "positive issue"), "log rejects bad issue");
+        check(contains(jobs.execute("job log 99").text, "No job events"), "log filters by issue");
     }
     {
         // A new instance on the same directory sees the persisted job (restart).
@@ -139,6 +153,34 @@ int main() {
         check(contains(jobs.execute("job log").text, "21"), "ci evidence in event log");
         std::error_code cec;
         fs::remove_all(cdir, cec);
+    }
+
+    {
+        // A failed log write after a successful save is a warning, not a job error: the record is authoritative.
+        using namespace cipher::orchestration;
+        const fs::path ldir = fresh_dir();
+        fs::create_directories(ldir / "events.log");  // a directory where the log file should be: every append fails
+        JobCommands jobs(ldir);
+        const std::string created = jobs.execute("job new 31 research").text;
+        check(contains(created, "job 31:") && contains(created, "WARNING") && !contains(created, "job error"),
+              "log failure on new: reported as a warning, not an error");
+        check(FileJobStore(ldir).load(31).has_value() && !FileJobStore(ldir).load(31)->run_id.empty(),
+              "log failure on new: the job and its run id were still saved");
+        const std::string stepped = jobs.execute("job step 31").text;
+        check(contains(stepped, "NEEDS_HUMAN") && contains(stepped, "WARNING") && !contains(stepped, "job error"),
+              "log failure on step: the step is kept and the failure is warned about");
+        check(!contains(jobs.execute("job recover 31").text, "WARNING"), "nothing in flight: no log write, no warning");
+
+        // A flagged record outside Implementation cannot come from a real crash: refuse and leave it for the owner.
+        JobRecord odd;
+        odd.state = State::Qa;
+        odd.execution_in_flight = true;
+        FileJobStore(ldir).save(32, odd);
+        const std::string refused = jobs.execute("job recover 32").text;
+        check(contains(refused, "inconsistent record") && FileJobStore(ldir).load(32)->execution_in_flight,
+              "recover of an inconsistent record is refused and the record stays flagged");
+        std::error_code lec;
+        fs::remove_all(ldir, lec);
     }
 
     std::error_code ec;

@@ -2,9 +2,11 @@
 // directory, which is what a process restart looks like to the orchestrator. Scripted executors only; no model,
 // process or GitHub call.
 
+#include "cipher/orchestration/event_log.hpp"
 #include "cipher/orchestration/job_store_file.hpp"
 #include "cipher/orchestration/orchestrator.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -253,9 +255,180 @@ void test_leftover_tmp_is_ignored() {
     fs::remove_all(dir);
 }
 
+// Real store that dies on the Nth save from now, the way a killed process leaves the previous file intact.
+class DyingStore final : public JobStore {
+public:
+    explicit DyingStore(const fs::path& dir) : inner_(dir) {}
+    int saves_until_death = -1;  // -1 = never
+    void save(int issue, const JobRecord& job) override {
+        if (saves_until_death == 0) throw std::runtime_error("simulated crash during save");
+        if (saves_until_death > 0) --saves_until_death;
+        inner_.save(issue, job);
+    }
+    std::optional<JobRecord> load(int issue) const override { return inner_.load(issue); }
+
+private:
+    FileJobStore inner_;
+};
+
+// Leaves a job crashed mid-execution on disk: Implementation, in flight, one counted run.
+void crash_mid_run(const fs::path& dir, EventLog* log = nullptr, const std::string& run_id = "") {
+    IssueFacts facts;
+    CrashingExecutor executor;
+    FileJobStore store(dir);
+    Orchestrator orch(kIssue, facts, executor, store, Policy{});
+    if (log != nullptr) orch.attach_event_log(*log);
+    orch.assign_run_id(run_id);
+    orch.start();
+    try {
+        orch.advance();
+    } catch (const std::runtime_error&) {
+    }
+}
+
+void test_recover_interrupted_before_completion_can_be_retried() {
+    const fs::path dir = fresh_dir("cipher-recovery-interrupted");
+    crash_mid_run(dir);
+    IssueFacts facts;
+    CrashingExecutor executor;
+    {
+        DyingStore store(dir);
+        Orchestrator orch(kIssue, facts, executor, store, Policy{});
+        store.saves_until_death = 0;  // the single atomic save in recover() dies
+        try {
+            orch.recover();
+        } catch (const std::runtime_error&) {
+        }
+    }
+    FileJobStore after_crash(dir);
+    const JobRecord on_disk = *after_crash.load(kIssue);
+    check(on_disk.execution_in_flight && on_disk.implementation_executions == 1,
+          "recover interrupted: disk still shows the run in flight and uncharged (nothing half-applied)");
+    Orchestrator again(kIssue, facts, executor, after_crash, Policy{});
+    check(again.recover() && again.job().implementation_executions == 2 && !again.job().execution_in_flight,
+          "recover interrupted: a second recover completes and charges exactly once");
+    fs::remove_all(dir);
+}
+
+void test_recover_repeated_changes_nothing_and_preserves_history() {
+    const fs::path dir = fresh_dir("cipher-recovery-repeat");
+    const fs::path log_file = dir / "events.log";
+    EventLog log(log_file);
+    crash_mid_run(dir, &log, "run-42-test");
+    IssueFacts facts;
+    CrashingExecutor executor;
+    FileJobStore store(dir);
+    Orchestrator orch(kIssue, facts, executor, store, Policy{});
+    orch.attach_event_log(log);
+    const std::vector<std::string> before = log.read_all();
+    check(orch.recover(), "recover repeated: first recover succeeds");
+    const std::vector<std::string> after_first = log.read_all();
+    const JobRecord first = orch.job();
+    check(after_first.size() == before.size() + 1 &&
+              std::equal(before.begin(), before.end(), after_first.begin()),
+          "recover repeated: exactly one new event appended, earlier events unchanged");
+
+    check(!orch.recover(), "recover repeated: second recover reports nothing to do");
+    FileJobStore reread(dir);
+    Orchestrator restarted(kIssue, facts, executor, reread, Policy{});
+    check(!restarted.recover(), "recover repeated: a restarted process also finds nothing to do");
+    check(log.read_all() == after_first, "recover repeated: no events added by repeats");
+    const JobRecord now = *reread.load(kIssue);
+    check(serialize_job(now) == serialize_job(first), "recover repeated: persisted record is byte-identical");
+    check(now.run_id == "run-42-test", "recover repeated: run_id preserved");
+    fs::remove_all(dir);
+}
+
+void test_recover_leaves_existing_worktree_and_branch_dirs_alone() {
+    const fs::path dir = fresh_dir("cipher-recovery-worktree");
+    crash_mid_run(dir);
+    const fs::path worktree = dir / "worktrees" / "job-42";
+    fs::create_directories(worktree);
+    write_text(worktree / "work.txt", "uncommitted work");
+    IssueFacts facts;
+    CrashingExecutor executor;
+    FileJobStore store(dir);
+    Orchestrator orch(kIssue, facts, executor, store, Policy{});
+    orch.recover();
+    orch.recover();
+    check(read_text(worktree / "work.txt") == "uncommitted work" && fs::exists(worktree),
+          "recover: an existing worktree directory and its files are untouched");
+    check(executor.implementation_calls == 0, "recover: no executor is run, so no commit or branch can be created");
+    fs::remove_all(dir);
+}
+
+void test_recover_inconsistent_record_is_left_unchanged() {
+    const fs::path dir = fresh_dir("cipher-recovery-inconsistent");
+    crash_mid_run(dir);
+    {
+        FileJobStore store(dir);
+        JobRecord job = *store.load(kIssue);
+        job.state = State::Qa;  // in flight, but not in Implementation: cannot come from a real crash
+        store.save(kIssue, job);
+    }
+    IssueFacts facts;
+    CrashingExecutor executor;
+    FileJobStore store(dir);
+    Orchestrator orch(kIssue, facts, executor, store, Policy{});
+    const std::string before = serialize_job(*store.load(kIssue));
+    check(!orch.recover(), "recover inconsistent: refused");
+    check(serialize_job(*store.load(kIssue)) == before && store.load(kIssue)->execution_in_flight,
+          "recover inconsistent: the stored record is unchanged and still flagged for the owner");
+    check(orch.job().execution_in_flight && orch.job().state == State::Qa,
+          "recover inconsistent: in-memory job matches disk");
+    fs::remove_all(dir);
+}
+
+// The job record is authoritative and is saved before its event is logged. A failed append after a successful
+// save must not undo the transition, repeat it, or hide the failure; the missing line is documented as lost.
+void test_event_log_failure_after_save_is_reported_without_repeating_the_transition() {
+    const fs::path dir = fresh_dir("cipher-recovery-logfail");
+    const fs::path log_file = dir / "events.log";
+    EventLog good(log_file);
+    crash_mid_run(dir, &good, "run-42-test");
+    const std::vector<std::string> history = good.read_all();
+
+    // A log whose file path is a directory: the folder exists, but opening it for append fails.
+    fs::create_directories(dir / "bad" / "events.log");
+    EventLog bad(dir / "bad" / "events.log");
+
+    IssueFacts facts;
+    CrashingExecutor executor;
+    {
+        FileJobStore store(dir);
+        Orchestrator orch(kIssue, facts, executor, store, Policy{});
+        orch.attach_event_log(bad);
+        check(orch.recover(), "log failure: the recovery itself succeeds, it is not turned into an error");
+        check(orch.log_error().find("cannot append to") != std::string::npos,
+              "log failure: the failed append is reported through log_error(), not swallowed");
+        check(orch.records().size() == 1, "log failure: the in-memory execution record still exists");
+    }
+    FileJobStore reread(dir);
+    const JobRecord saved = *reread.load(kIssue);
+    check(saved.implementation_executions == 2 && !saved.execution_in_flight && saved.run_id == "run-42-test",
+          "log failure: the saved record has the charge, the cleared flag and the run_id");
+    check(good.read_all() == history, "log failure: the earlier event history is untouched");
+
+    // A restarted process cannot see the lost line and must not repeat the transition to recreate it.
+    const std::string before = serialize_job(saved);
+    Orchestrator restarted(kIssue, facts, executor, reread, Policy{});
+    restarted.attach_event_log(good);
+    check(!restarted.recover(), "log failure restart: recover reports nothing in flight");
+    check(restarted.log_error().empty(), "log failure restart: a healthy log reports no error");
+    check(serialize_job(*reread.load(kIssue)) == before, "log failure restart: the record is unchanged, no second charge");
+    check(good.read_all() == history, "log failure restart: no event was added or duplicated");
+    check(executor.implementation_calls == 0, "log failure restart: the executor never ran");
+    fs::remove_all(dir);
+}
+
 }  // namespace
 
 int main() {
+    test_recover_interrupted_before_completion_can_be_retried();
+    test_recover_repeated_changes_nothing_and_preserves_history();
+    test_recover_leaves_existing_worktree_and_branch_dirs_alone();
+    test_recover_inconsistent_record_is_left_unchanged();
+    test_event_log_failure_after_save_is_reported_without_repeating_the_transition();
     test_restart_while_queued_keeps_the_saved_state();
     test_restart_during_in_flight_execution_counts_it_once();
     test_restart_after_pr_and_stale_ci_head_is_rejected();

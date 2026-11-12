@@ -22,9 +22,12 @@ struct JobCommandResult {
 /**
  * @brief Owner-typed REPL commands that drive the orchestration state machine:
  *        `job new <issue> [research] [design] [security]`, `job status <issue>`, `job list`,
- *        `job task <issue> <text>`, `job step <issue>`, `job recover <issue>`, `job log`.
+ *        `job task <issue> <text>`, `job step <issue>`, `job recover <issue>`, `job show <issue> [--json]`,
+ *        `job log [issue]`.
  *
  * State lives in the orchestration directory (FileJobStore + EventLog), so jobs survive a restart.
+ * The saved job record is authoritative; the event log is best-effort diagnostic history. If a log write
+ * fails after a successful save, the command reports a WARNING and the missing line is not back-filled.
  * The state machine stays the only source of truth; this class only forwards to Orchestrator.
  * Until a real tool-enabled executor is supplied, the default executor escalates every role to the
  * owner (RoleNotSupported). It never fabricates a result.
@@ -53,7 +56,8 @@ private:
     std::string list() const;
     std::string step(const std::string& arguments);
     std::string recover(const std::string& arguments);
-    std::string log() const;
+    std::string log(const std::string& arguments) const;
+    std::string show(const std::string& arguments) const;
     std::string ci(const std::string& arguments);
     std::string task(const std::string& arguments);
     std::string load_task(int issue) const;

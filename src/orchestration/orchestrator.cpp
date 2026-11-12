@@ -1,5 +1,7 @@
 #include "cipher/orchestration/orchestrator.hpp"
 
+#include <exception>
+
 namespace cipher::orchestration {
 
 void InMemoryJobStore::save(int issue_number, const JobRecord& job) {
@@ -27,6 +29,12 @@ bool Orchestrator::start() {
     Event event;
     event.kind = EventKind::Start;
     return apply(event);
+}
+
+void Orchestrator::assign_run_id(const std::string& run_id) {
+    if (!job_.run_id.empty() || run_id.empty()) return;
+    job_.run_id = run_id;
+    store_.save(issue_number_, job_);
 }
 
 bool Orchestrator::apply(const Event& event, const std::string& model_family) {
@@ -57,7 +65,11 @@ void Orchestrator::attach_event_log(EventLog& log) {
     event_log_ = &log;
 }
 
-void Orchestrator::log_record(const ExecutionRecord& record) const {
+const std::string& Orchestrator::log_error() const {
+    return log_error_;
+}
+
+void Orchestrator::log_record(const ExecutionRecord& record) {
     if (event_log_ == nullptr) return;
     // Reason text is produced by transition(), but a log line must stay one line with three fields.
     std::string reason = record.reason;
@@ -70,7 +82,13 @@ void Orchestrator::log_record(const ExecutionRecord& record) const {
     if (record.escalation != EscalationReason::None) {
         detail += std::string(" escalation=") + to_string(record.escalation);
     }
-    event_log_->append(issue_number_, "transition", detail);
+    // The record was saved before this call, so a log failure must not turn a persisted transition into an
+    // error (a retry would be rejected or, worse, charged again). Keep the first failure for the caller.
+    try {
+        event_log_->append(issue_number_, "transition", detail, job_.run_id);
+    } catch (const std::exception& error) {
+        if (log_error_.empty()) log_error_ = error.what();
+    }
 }
 
 bool Orchestrator::advance() {
@@ -105,11 +123,14 @@ bool Orchestrator::advance() {
 bool Orchestrator::recover() {
     if (!job_.execution_in_flight) return false;
 
+    // Clear the flag in memory only: apply() persists flag and failure charge in one atomic save, so a crash
+    // here either leaves the job still flagged (recover again) or fully charged, never uncharged and unflagged.
     job_.execution_in_flight = false;
-    store_.save(issue_number_, job_);
     Event event;
     event.kind = EventKind::ImplementationFailed;
-    return apply(event);
+    if (apply(event)) return true;
+    job_.execution_in_flight = true;  // rejected (inconsistent record): stay flagged on disk and in memory
+    return false;
 }
 
 const JobRecord& Orchestrator::job() const {

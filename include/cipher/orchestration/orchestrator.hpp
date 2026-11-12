@@ -66,6 +66,9 @@ public:
     // Applies Start once, from State::Issue. Returns false if the job already started.
     bool start();
 
+    // Stamps the lifecycle id once. A job that already has one keeps it (the id never changes).
+    void assign_run_id(const std::string& run_id);
+
     // Routes one event through transition(). A rejected event is recorded and leaves the job unchanged.
     bool apply(const Event& event, const std::string& model_family = std::string());
 
@@ -80,13 +83,17 @@ public:
     const JobRecord& job() const;
     const std::vector<ExecutionRecord>& records() const;
 
-    // Stage 8: every attempted transition is also appended to this log. Optional; the log is not read back.
+    // Stage 8: every attempted transition is also appended to this log. Optional; no logic reads it back.
+    // The saved job record is authoritative and is written first. The log is best-effort diagnostic history:
+    // a failed append never undoes or repeats a transition; the first failure is kept in log_error() and the
+    // missing line is not back-filled.
     void attach_event_log(EventLog& log);
+    const std::string& log_error() const;
 
 private:
     std::optional<Role> role_for(State state) const;
     Event escalation_event(EscalationReason reason) const;
-    void log_record(const ExecutionRecord& record) const;
+    void log_record(const ExecutionRecord& record);
 
     int issue_number_;
     RoleExecutor& executor_;
@@ -95,6 +102,7 @@ private:
     JobRecord job_;
     std::vector<ExecutionRecord> records_;
     EventLog* event_log_ = nullptr;
+    std::string log_error_;
 };
 
 }  // namespace cipher::orchestration

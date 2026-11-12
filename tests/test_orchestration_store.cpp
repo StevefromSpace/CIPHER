@@ -52,6 +52,7 @@ JobRecord sample_job() {
     job.head_sha = "0123456789abcdef0123456789abcdef01234567";
     job.reviewed_head_sha = "0123456789abcdef0123456789abcdef01234567";
     job.implementation_family = "claude";
+    job.run_id = "run-7-20261112T100000Z";
     job.execution_in_flight = false;
     job.facts.research = true;
     job.facts.needs_design = false;
@@ -123,7 +124,7 @@ void test_wrong_schema_is_refused() {
     FileJobStore store(dir);
     store.save(5, sample_job());
     std::string text = serialize_job(sample_job());
-    text.replace(text.find("schema=1"), 8, "schema=0");
+    text.replace(text.find("schema=2"), 8, "schema=0");
     write_text(store.path_for(5), text);
     bool threw = false;
     try {
@@ -229,9 +230,40 @@ void test_orchestrator_resumes_from_disk() {
     check(second.job().implementation_executions == 1, "resume: recovery with nothing in flight leaves the counter alone");
 }
 
+void test_schema_1_records_load_without_run_id() {
+    const std::string v2 = serialize_job(sample_job());
+    std::string v1 = v2;
+    v1.replace(v1.find("schema=2"), 8, "schema=1");
+    v1.erase(v1.find("run_id="));  // run_id is the last key
+    const JobRecord loaded = parse_job(v1);
+    check(loaded.run_id.empty(), "schema 1 record loads with an empty run_id");
+    check(loaded.review_rounds == 1 && loaded.head_sha == sample_job().head_sha, "schema 1 fields still read");
+    check(serialize_job(loaded).find("schema=2") == 0, "a loaded v1 record is rewritten as schema 2");
+
+    bool threw = false;
+    try {
+        parse_job(v2.substr(0, v2.find("schema=2")) + "schema=1" + v2.substr(v2.find("schema=2") + 8));
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    check(threw, "schema 1 record carrying run_id is refused");
+
+    std::string no_id = v2;
+    no_id.erase(no_id.find("run_id="));
+    threw = false;
+    try {
+        parse_job(no_id);
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    check(threw, "schema 2 record without run_id is refused");
+    check(parse_job(v2).run_id == "run-7-20261112T100000Z", "schema 2 keeps run_id");
+}
+
 }  // namespace
 
 int main() {
+    test_schema_1_records_load_without_run_id();
     test_round_trip_and_reload();
     test_rename_replaces_existing_file();
     test_corrupt_file_throws_and_is_kept();

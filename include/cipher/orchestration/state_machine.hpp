@@ -106,6 +106,7 @@ struct JobRecord {
     bool qa_approved = false;                // per attempt; cleared when a retry starts
     bool ci_passed = false;
     bool review_approved = false;
+    std::string run_id;                      // one durable id for the whole job lifecycle; empty on legacy (schema 1) jobs
     std::string head_sha;                    // current PR head
     std::string reviewed_head_sha;           // head of the last counted review
     std::string implementation_family;       // reviewer must come from a different family (section 8.2)
