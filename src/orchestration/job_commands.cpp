@@ -173,6 +173,11 @@ std::string JobCommands::step(const std::string& arguments) {
     if (issue == 0) return "job step needs a positive issue number.";
     const auto saved = store_.load(issue);
     if (!saved) return "No job for issue " + std::to_string(issue) + ".";
+    // Checked before make_executor so a flagged record never reaches an executor.
+    if (saved->execution_in_flight) {
+        return "execution in flight for issue " + std::to_string(issue) + "; run job recover " +
+               std::to_string(issue) + " first. No step taken.";
+    }
 
     std::unique_ptr<RoleExecutor> owned = make_executor(issue);
     Orchestrator orchestrator(issue, saved->facts, owned ? *owned : *executor_, store_, Policy{});

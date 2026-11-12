@@ -51,8 +51,9 @@ bool Orchestrator::apply(const Event& event, const std::string& model_family) {
     record.reason = result.reason;
 
     if (result.accepted) {
+        // Save first: if the save throws, the in-memory job must not show a transition the disk does not have.
+        store_.save(issue_number_, result.next);
         job_ = result.next;
-        store_.save(issue_number_, job_);
     }
     record.to = job_.state;
     record.escalation = job_.escalation;
@@ -94,30 +95,51 @@ void Orchestrator::log_record(const ExecutionRecord& record) {
 bool Orchestrator::advance() {
     const std::optional<Role> role = role_for(job_.state);
     if (!role) return false;
+    // A flagged record is an execution that may have run already: recover() must decide before anything dispatches.
+    if (job_.execution_in_flight) return false;
 
     // Only an implementation execution counts against the budget. Mark it before the role runs, so a crash
     // during the run is visible on restart (see recover()).
     const bool counted = *role == Role::Implementation && job_.state == State::Implementation;
+    const std::string previous_family = job_.implementation_family;
     if (counted) {
         job_.execution_in_flight = true;
-        store_.save(issue_number_, job_);
+        try {
+            store_.save(issue_number_, job_);
+        } catch (...) {
+            job_.execution_in_flight = false;  // not dispatched: disk never saw the flag
+            throw;
+        }
     }
     const RoleResult result = executor_.run(*role, job_);
     if (counted) {
+        // Flag and family are cleared in memory only: apply() persists them with the transition in one save.
         job_.execution_in_flight = false;
         job_.implementation_family = result.model_family;
-        store_.save(issue_number_, job_);
     }
 
     // A security-sensitive review must come from a model family other than the implementation family
     // (contract sections 1.5, 8.2). An empty or equal family is treated as no independent review.
-    if (*role == Role::Reviewer && job_.facts.security_sensitive) {
-        const bool independent = !result.model_family.empty() && result.model_family != job_.implementation_family;
-        if (!independent) {
-            return apply(escalation_event(EscalationReason::SecurityReviewUnavailable), result.model_family);
+    bool accepted = false;
+    try {
+        if (*role == Role::Reviewer && job_.facts.security_sensitive &&
+            (result.model_family.empty() || result.model_family == job_.implementation_family)) {
+            accepted = apply(escalation_event(EscalationReason::SecurityReviewUnavailable), result.model_family);
+        } else {
+            accepted = apply(result.event, result.model_family);
         }
+    } catch (...) {
+        if (counted) restore_in_flight(previous_family);
+        throw;
     }
-    return apply(result.event, result.model_family);
+    // Rejected: the disk still holds the flag from the first save, so memory must match it.
+    if (!accepted && counted) restore_in_flight(previous_family);
+    return accepted;
+}
+
+void Orchestrator::restore_in_flight(const std::string& previous_family) {
+    job_.execution_in_flight = true;
+    job_.implementation_family = previous_family;
 }
 
 bool Orchestrator::recover() {
@@ -128,7 +150,14 @@ bool Orchestrator::recover() {
     job_.execution_in_flight = false;
     Event event;
     event.kind = EventKind::ImplementationFailed;
-    if (apply(event)) return true;
+    bool accepted = false;
+    try {
+        accepted = apply(event);
+    } catch (...) {
+        job_.execution_in_flight = true;  // save failed: disk still flagged
+        throw;
+    }
+    if (accepted) return true;
     job_.execution_in_flight = true;  // rejected (inconsistent record): stay flagged on disk and in memory
     return false;
 }

@@ -421,6 +421,91 @@ void test_event_log_failure_after_save_is_reported_without_repeating_the_transit
     fs::remove_all(dir);
 }
 
+void test_crash_before_dispatch_then_retry_dispatches_once() {
+    const fs::path dir = fresh_dir("cipher-recovery-predispatch");
+    IssueFacts facts;
+    CrashingExecutor executor;
+    executor.crash_on_implementation = false;
+    {
+        DyingStore store(dir);
+        Orchestrator orch(kIssue, facts, executor, store, Policy{});
+        orch.start();
+        store.saves_until_death = 0;  // the in-flight flag save never reaches disk
+        bool crashed = false;
+        try {
+            orch.advance();
+        } catch (const std::runtime_error&) {
+            crashed = true;
+        }
+        check(crashed, "pre-dispatch: the flag save fails");
+        check(executor.implementation_calls == 0, "pre-dispatch: the executor is not called without a persisted flag");
+        check(!orch.job().execution_in_flight, "pre-dispatch: memory matches disk, no flag");
+    }
+    FileJobStore store(dir);
+    const JobRecord saved = *store.load(kIssue);
+    check(!saved.execution_in_flight && saved.implementation_executions == 1,
+          "pre-dispatch: disk shows the entry charge only, with no flag");
+    Orchestrator restarted(kIssue, facts, executor, store, Policy{});
+    check(restarted.advance(), "pre-dispatch retry: the step runs");
+    check(executor.implementation_calls == 1, "pre-dispatch retry: the executor runs exactly once");
+    check(restarted.job().implementation_executions == 1, "pre-dispatch retry: the single entry charge is not repeated");
+    fs::remove_all(dir);
+}
+
+void test_flagged_record_is_not_redispatched_without_recover() {
+    const fs::path dir = fresh_dir("cipher-recovery-flagged-advance");
+    IssueFacts facts;
+    CrashingExecutor executor;
+    {
+        FileJobStore store(dir);
+        Orchestrator orch(kIssue, facts, executor, store, Policy{});
+        orch.start();
+        try {
+            orch.advance();  // dispatches, then crashes: the flag stays on disk
+        } catch (const std::runtime_error&) {
+        }
+    }
+    FileJobStore store(dir);
+    CrashingExecutor after_restart;
+    after_restart.crash_on_implementation = false;
+    Orchestrator restarted(kIssue, facts, after_restart, store, Policy{});
+    check(!restarted.advance(), "flagged advance: a flagged record takes no step");
+    check(after_restart.implementation_calls == 0, "flagged advance: the executor is not called");
+    check(restarted.job().execution_in_flight, "flagged advance: the flag is still set");
+    fs::remove_all(dir);
+}
+
+void test_failed_final_save_does_not_advance_memory() {
+    const fs::path dir = fresh_dir("cipher-recovery-finalsave");
+    IssueFacts facts;
+    CrashingExecutor executor;
+    executor.crash_on_implementation = false;
+    DyingStore store(dir);
+    Orchestrator orch(kIssue, facts, executor, store, Policy{});
+    orch.assign_run_id("run-42-test");
+    orch.start();
+    store.saves_until_death = 1;  // flag save passes, the save after the executor dies
+    bool crashed = false;
+    try {
+        orch.advance();
+    } catch (const std::runtime_error&) {
+        crashed = true;
+    }
+    check(crashed, "final save: the transition save fails");
+    check(executor.implementation_calls == 1, "final save: the executor ran once before the failed save");
+    check(orch.job().state == State::Implementation && orch.job().execution_in_flight,
+          "final save: memory does not advance past a transition the disk lacks");
+    check(orch.records().size() == 1 && orch.records().front().event == EventKind::Start,
+          "final save: no transition record was added for the failed save");
+    check(orch.job().run_id == "run-42-test", "final save: run_id is unchanged");
+
+    store.saves_until_death = -1;  // the simulated crash is over; the process restarts with a working disk
+    const bool recovered = orch.recover();  // the flag is still on disk: one retry charge, no new dispatch
+    check(recovered && orch.job().implementation_executions == 2, "final save: recovery charges the retry once");
+    check(executor.implementation_calls == 1, "final save: recovery never re-runs the executor");
+    fs::remove_all(dir);
+}
+
 }  // namespace
 
 int main() {
@@ -436,6 +521,9 @@ int main() {
     test_second_crash_after_restart_exhausts_the_budget();
     test_corrupt_state_fails_closed();
     test_leftover_tmp_is_ignored();
+    test_crash_before_dispatch_then_retry_dispatches_once();
+    test_flagged_record_is_not_redispatched_without_recover();
+    test_failed_final_save_does_not_advance_memory();
     std::cout << (g_failures == 0 ? "ALL PASSED" : "FAILURES") << "\n";
     return g_failures == 0 ? 0 : 1;
 }

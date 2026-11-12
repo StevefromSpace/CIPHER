@@ -93,6 +93,7 @@ public:
 private:
     std::optional<Role> role_for(State state) const;
     Event escalation_event(EscalationReason reason) const;
+    void restore_in_flight(const std::string& previous_family);
     void log_record(const ExecutionRecord& record);
 
     int issue_number_;
