@@ -1,5 +1,8 @@
 #include "cipher/orchestration/orchestrator.hpp"
 
+#include <exception>
+#include <stdexcept>
+
 namespace cipher::orchestration {
 
 void InMemoryJobStore::save(int issue_number, const JobRecord& job) {
@@ -22,14 +25,71 @@ Orchestrator::Orchestrator(int issue_number, IssueFacts facts, RoleExecutor& exe
     }
 }
 
+namespace {
+
+// Compares the fields that define a durable transition; used to tell whether an ambiguous save landed.
+bool same_durable(const JobRecord& a, const JobRecord& b) {
+    return a.state == b.state && a.resume_state == b.resume_state && a.escalation == b.escalation &&
+           a.implementation_executions == b.implementation_executions && a.review_rounds == b.review_rounds &&
+           a.blocked_count == b.blocked_count && a.pull_request_open == b.pull_request_open &&
+           a.ci_passed == b.ci_passed && a.review_approved == b.review_approved && a.run_id == b.run_id &&
+           a.implementation_family == b.implementation_family && a.execution_in_flight == b.execution_in_flight &&
+           a.accounting_unreconciled == b.accounting_unreconciled;
+}
+
+}  // namespace
+
+void Orchestrator::require_usable() const {
+    if (poisoned_) {
+        throw std::runtime_error("orchestrator: durable state unknown after a failed save; restart and run recover");
+    }
+}
+
+bool Orchestrator::adopt_durable(const JobRecord& intended) {
+    std::optional<JobRecord> durable;
+    try {
+        durable = store_.load(issue_number_);
+    } catch (...) {
+        poisoned_ = true;
+        return false;
+    }
+    if (!durable) return false;
+    job_ = *durable;
+    return same_durable(job_, intended);
+}
+
+void Orchestrator::resync_from_disk() {
+    try {
+        if (const auto durable = store_.load(issue_number_)) job_ = *durable;
+    } catch (...) {
+        poisoned_ = true;
+    }
+}
+
 bool Orchestrator::start() {
+    require_usable();
     if (job_.state != State::Issue) return false;
     Event event;
     event.kind = EventKind::Start;
     return apply(event);
 }
 
+void Orchestrator::assign_run_id(const std::string& run_id) {
+    require_usable();
+    if (!job_.run_id.empty() || run_id.empty()) return;
+    JobRecord next = job_;
+    next.run_id = run_id;
+    try {
+        store_.save(issue_number_, next);
+    } catch (...) {
+        adopt_durable(next);
+        throw;
+    }
+    job_ = next;
+}
+
 bool Orchestrator::apply(const Event& event, const std::string& model_family) {
+    require_usable();
     const TransitionResult result = transition(job_, event, policy_);
 
     ExecutionRecord record;
@@ -43,8 +103,14 @@ bool Orchestrator::apply(const Event& event, const std::string& model_family) {
     record.reason = result.reason;
 
     if (result.accepted) {
-        job_ = result.next;
-        store_.save(issue_number_, job_);
+        // Save first. If the save throws, the write may still have landed: adopt the durable record. If it landed,
+        // the transition stands (no throw); if not, the exception propagates with memory matching the disk.
+        try {
+            store_.save(issue_number_, result.next);
+            job_ = result.next;
+        } catch (...) {
+            if (!adopt_durable(result.next)) throw;
+        }
     }
     record.to = job_.state;
     record.escalation = job_.escalation;
@@ -57,7 +123,11 @@ void Orchestrator::attach_event_log(EventLog& log) {
     event_log_ = &log;
 }
 
-void Orchestrator::log_record(const ExecutionRecord& record) const {
+const std::string& Orchestrator::log_error() const {
+    return log_error_;
+}
+
+void Orchestrator::log_record(const ExecutionRecord& record) {
     if (event_log_ == nullptr) return;
     // Reason text is produced by transition(), but a log line must stay one line with three fields.
     std::string reason = record.reason;
@@ -70,46 +140,129 @@ void Orchestrator::log_record(const ExecutionRecord& record) const {
     if (record.escalation != EscalationReason::None) {
         detail += std::string(" escalation=") + to_string(record.escalation);
     }
-    event_log_->append(issue_number_, "transition", detail);
+    // The record was saved before this call, so a log failure must not turn a persisted transition into an
+    // error (a retry would be rejected or, worse, charged again). Keep the first failure for the caller.
+    try {
+        event_log_->append(issue_number_, "transition", detail, job_.run_id);
+    } catch (const std::exception& error) {
+        if (log_error_.empty()) log_error_ = error.what();
+    }
 }
 
 bool Orchestrator::advance() {
+    require_usable();
     const std::optional<Role> role = role_for(job_.state);
     if (!role) return false;
+    // A flagged record is an execution that may have run already: recover() must decide before anything dispatches.
+    if (job_.execution_in_flight) return false;
+    // A legacy record with an unknown run count must be settled by `reconcile` before any charge is made on it.
+    if (job_.accounting_unreconciled && *role == Role::Implementation && job_.state == State::Implementation) return false;
 
-    // Only an implementation execution counts against the budget. Mark it before the role runs, so a crash
-    // during the run is visible on restart (see recover()).
+    // Only an implementation execution counts against the budget (section 5.1, charge on dispatch). The charge
+    // and the in-flight flag are saved together before dispatch, so a crash during the run is visible on restart.
     const bool counted = *role == Role::Implementation && job_.state == State::Implementation;
+    const std::string previous_family = job_.implementation_family;
     if (counted) {
-        job_.execution_in_flight = true;
-        store_.save(issue_number_, job_);
+        if (job_.implementation_executions >= policy_.max_implementation_executions) {
+            return apply(escalation_event(EscalationReason::RetryBudgetExhausted));  // defensive: no dispatch
+        }
+        JobRecord reserved = job_;
+        reserved.execution_in_flight = true;
+        ++reserved.implementation_executions;
+        try {
+            store_.save(issue_number_, reserved);
+        } catch (...) {
+            // Not dispatched. Whether or not the write landed, memory must match disk; a landed reservation
+            // leaves the record flagged, so recover() decides and nothing dispatches here.
+            adopt_durable(reserved);
+            throw;
+        }
+        job_ = reserved;
     }
+    // If the executor throws, memory keeps the flag the disk already holds, so recover() takes over.
     const RoleResult result = executor_.run(*role, job_);
     if (counted) {
+        // Flag and family are cleared in memory only: apply() persists them with the transition in one save.
         job_.execution_in_flight = false;
         job_.implementation_family = result.model_family;
-        store_.save(issue_number_, job_);
     }
 
     // A security-sensitive review must come from a model family other than the implementation family
     // (contract sections 1.5, 8.2). An empty or equal family is treated as no independent review.
-    if (*role == Role::Reviewer && job_.facts.security_sensitive) {
-        const bool independent = !result.model_family.empty() && result.model_family != job_.implementation_family;
-        if (!independent) {
-            return apply(escalation_event(EscalationReason::SecurityReviewUnavailable), result.model_family);
+    bool accepted = false;
+    try {
+        if (*role == Role::Reviewer && job_.facts.security_sensitive &&
+            (result.model_family.empty() || result.model_family == job_.implementation_family)) {
+            accepted = apply(escalation_event(EscalationReason::SecurityReviewUnavailable), result.model_family);
+        } else {
+            accepted = apply(result.event, result.model_family);
         }
+    } catch (...) {
+        // apply() already adopted whatever is durable; anything it could not read back is poisoned.
+        if (counted) resync_from_disk();
+        throw;
     }
-    return apply(result.event, result.model_family);
+    // Rejected: the disk still holds the flag from the first save, so memory must match it.
+    if (!accepted && counted) restore_in_flight(previous_family);
+    return accepted;
+}
+
+void Orchestrator::restore_in_flight(const std::string& previous_family) {
+    job_.execution_in_flight = true;
+    job_.implementation_family = previous_family;
 }
 
 bool Orchestrator::recover() {
+    require_usable();
     if (!job_.execution_in_flight) return false;
 
+    // Clear the flag in memory only: apply() persists flag and failure charge in one atomic save, so a crash
+    // here either leaves the job still flagged (recover again) or fully charged, never uncharged and unflagged.
     job_.execution_in_flight = false;
-    store_.save(issue_number_, job_);
     Event event;
     event.kind = EventKind::ImplementationFailed;
-    return apply(event);
+    bool accepted = false;
+    try {
+        accepted = apply(event);
+    } catch (...) {
+        resync_from_disk();  // whatever is durable (flagged, or already charged) becomes memory
+        throw;
+    }
+    if (accepted) return true;
+    job_.execution_in_flight = true;  // rejected (inconsistent record): stay flagged on disk and in memory
+    return false;
+}
+
+bool Orchestrator::reconcile(bool never_dispatched, const std::string& evidence) {
+    require_usable();
+    if (!job_.accounting_unreconciled) return false;
+    if (never_dispatched && evidence.empty()) {
+        throw std::invalid_argument("reconcile: k-1 needs evidence that the execution was never dispatched");
+    }
+    if (never_dispatched && job_.implementation_executions < 1) {
+        throw std::invalid_argument("reconcile: count is already zero");
+    }
+    JobRecord next = job_;
+    next.accounting_unreconciled = false;
+    if (never_dispatched) --next.implementation_executions;
+    try {
+        store_.save(issue_number_, next);
+    } catch (...) {
+        adopt_durable(next);
+        throw;
+    }
+    job_ = next;
+    if (event_log_ != nullptr) {
+        try {
+            event_log_->append(issue_number_, "reconcile",
+                               std::string("count=") + std::to_string(job_.implementation_executions) +
+                                   (never_dispatched ? " mode=k-1 evidence=" + evidence : " mode=k"),
+                               job_.run_id);
+        } catch (const std::exception& error) {
+            if (log_error_.empty()) log_error_ = error.what();
+        }
+    }
+    return true;
 }
 
 const JobRecord& Orchestrator::job() const {

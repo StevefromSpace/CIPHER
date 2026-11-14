@@ -70,11 +70,16 @@ public:
     std::string list_output;     // existing PR numbers
     std::string view_output = pr_json(kHead, "SUCCESS");
     int create_exit = 0;
+    bool pr_exists_after_failed_create = false;  // models a timeout after GitHub already made the PR
     int creates = 0;
     std::string create_output = "https://github.com/o/r/pull/7\n";
     GhResult run(const std::vector<std::string>& argv) override {
         if (argv[1] == "pr" && argv[2] == "list") return {0, list_output};
-        if (argv[2] == "create") { ++creates; return {create_exit, create_output}; }
+        if (argv[2] == "create") {
+            ++creates;
+            if (create_exit != 0 && pr_exists_after_failed_create) list_output = "7\n";
+            return {create_exit, create_output};
+        }
         return {0, view_output};
     }
 };
@@ -129,6 +134,23 @@ void test_pr_creation() {
     dup.gh_runner.list_output = "7\n";
     r = dup.exec->run(Role::Implementation, dup.job);
     check(is(r, EventKind::PullRequestOpened) && dup.gh_runner.creates == 0, "existing PR reused, no duplicate");
+
+    Rig timed("pr-timeout");
+    timed.job.state = State::PullRequest;
+    timed.gh_runner.create_exit = 1;
+    timed.gh_runner.pr_exists_after_failed_create = true;
+    r = timed.exec->run(Role::Implementation, timed.job);
+    check(is(r, EventKind::PullRequestOpened) && timed.gh_runner.creates == 1,
+          "create failed after GitHub made the PR: the PR is found and reused, not blocked");
+    r = timed.exec->run(Role::Implementation, timed.job);
+    check(is(r, EventKind::PullRequestOpened) && timed.gh_runner.creates == 1,
+          "a retry after that reuses the PR and never creates a second one");
+
+    Rig failed("pr-failed");
+    failed.job.state = State::PullRequest;
+    failed.gh_runner.create_exit = 1;
+    check(is(failed.exec->run(Role::Implementation, failed.job), EventKind::Blocked),
+          "create failed and no PR exists: blocked");
 
     Rig two("pr3");
     two.job.state = State::PullRequest;

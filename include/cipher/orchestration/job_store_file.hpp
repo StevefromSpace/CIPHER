@@ -9,8 +9,10 @@
 
 namespace cipher::orchestration {
 
-// Schema of the on-disk job record. A file with any other value is refused, never upgraded silently.
-inline constexpr int kJobStoreSchemaVersion = 1;
+// Schema of the on-disk job record. v2 adds run_id; v3 adds accounting_unreconciled (charge-on-dispatch).
+// v1/v2 records still load and are written back as v3 on the next save; any other value is refused, so an
+// older binary rejects a v3 file instead of mis-charging it.
+inline constexpr int kJobStoreSchemaVersion = 3;
 
 // Stage 8 durable store. One file per issue: <directory>/job-<issue>.state, key=value lines.
 // A save writes <file>.tmp and renames it over the target, so a reader sees the old or the new record.

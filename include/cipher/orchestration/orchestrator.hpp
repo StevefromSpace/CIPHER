@@ -66,6 +66,9 @@ public:
     // Applies Start once, from State::Issue. Returns false if the job already started.
     bool start();
 
+    // Stamps the lifecycle id once. A job that already has one keeps it (the id never changes).
+    void assign_run_id(const std::string& run_id);
+
     // Routes one event through transition(). A rejected event is recorded and leaves the job unchanged.
     bool apply(const Event& event, const std::string& model_family = std::string());
 
@@ -77,16 +80,31 @@ public:
     // (a counted attempt). The role is never run again here. Returns false when nothing was in flight.
     bool recover();
 
+    // Settles a legacy record whose implementation count may or may not include a run (accounting_unreconciled).
+    // Default keeps the count (k, conservative). never_dispatched=true lowers it to k-1 and needs a non-empty
+    // evidence string. Idempotent: returns false when nothing is unreconciled. Never raises the budget silently.
+    bool reconcile(bool never_dispatched, const std::string& evidence);
+
     const JobRecord& job() const;
     const std::vector<ExecutionRecord>& records() const;
 
-    // Stage 8: every attempted transition is also appended to this log. Optional; the log is not read back.
+    // Stage 8: every attempted transition is also appended to this log. Optional; no logic reads it back.
+    // The saved job record is authoritative and is written first. The log is best-effort diagnostic history:
+    // a failed append never undoes or repeats a transition; the first failure is kept in log_error() and the
+    // missing line is not back-filled.
     void attach_event_log(EventLog& log);
+    const std::string& log_error() const;
 
 private:
     std::optional<Role> role_for(State state) const;
     Event escalation_event(EscalationReason reason) const;
-    void log_record(const ExecutionRecord& record) const;
+    void restore_in_flight(const std::string& previous_family);
+    void log_record(const ExecutionRecord& record);
+    // After a save threw, the write may or may not have landed. Memory adopts the durable record (never a stale
+    // copy). Returns true when the durable record equals `intended`, i.e. the write landed.
+    bool adopt_durable(const JobRecord& intended);
+    void resync_from_disk();
+    void require_usable() const;
 
     int issue_number_;
     RoleExecutor& executor_;
@@ -95,6 +113,10 @@ private:
     JobRecord job_;
     std::vector<ExecutionRecord> records_;
     EventLog* event_log_ = nullptr;
+    std::string log_error_;
+    // Set when the durable state could not be read back after a failed save. Every mutating call then refuses
+    // until a new Orchestrator is built from storage.
+    bool poisoned_ = false;
 };
 
 }  // namespace cipher::orchestration

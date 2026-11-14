@@ -16,7 +16,8 @@ class EventLog {
 public:
     explicit EventLog(std::filesystem::path file);
 
-    void append(int issue_number, const std::string& event, const std::string& detail);
+    // A non-empty run_id adds run=<id> after issue and a trailing UTC ts=; without one the line is the Stage 8 format.
+    void append(int issue_number, const std::string& event, const std::string& detail, const std::string& run_id = "");
     std::vector<std::string> read_all() const;
 
 private:

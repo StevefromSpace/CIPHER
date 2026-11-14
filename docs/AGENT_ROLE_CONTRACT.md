@@ -278,6 +278,19 @@ These limits are policy. They must be enforced by the orchestrator through count
 3. The count is per issue, not per agent or per job. A new job for the same issue continues the count. It is stored in the job record.
 4. The orchestrator may assign attempt 2 to a higher model tier (section 3.3). That is a model change within the same execution, not a third execution.
 5. If attempt 2 fails, the job becomes `NEEDS_HUMAN`. No further implementation execution is started. Escalation is a human handoff, not another implementation run.
+6. **Charge on dispatch (owner decision, Stage 16 reliability).** An execution is charged only when it is dispatched to the external implementer. The charge is persisted, together with an in-flight marker, before dispatch.
+   - Rejected before dispatch: no charge.
+   - Entering `IMPLEMENTATION` alone: no charge.
+   - External execution dispatched: charge.
+   - Empty-head or invalid completion after dispatch: charge (already made at dispatch).
+   - Execution failure after dispatch: charge (already made at dispatch).
+   - Recovery of an already-charged attempt: no additional charge. Recovery re-enters `IMPLEMENTATION` uncharged; the retry is charged when it is dispatched.
+7. **Ambiguous crashes are at-least-once, bounded by the budget.** A crash after dispatch but before the outcome is saved leaves the in-flight marker set. `recover` consumes that attempt as a failure and re-enters `IMPLEMENTATION` uncharged; the next dispatch is charged. The total number of dispatches is still bounded by section 5.1 item 1. The external side effects of a lost run (for example, a commit in the worktree) may still exist and are not reconciled automatically. Exactly-once execution is not claimed without provider-supported idempotency.
+8. A record that is still flagged in flight refuses new dispatch until `recover` is run.
+9. **Legacy records are migrated, never silently refunded.** A schema 1 or 2 record loads as schema 3 with its historical `implementation_executions` unchanged. Schema 2 was written by both the charge-on-entry and the charge-on-dispatch code, so the file cannot say which wrote it. A counted record waiting in `IMPLEMENTATION` (or `BLOCKED` resuming into it) with no in-flight flag is therefore marked `accounting_unreconciled`. A flagged record is unambiguous: the flag means a dispatch happened.
+   - `job step` refuses to dispatch an unreconciled record until the owner runs `job reconcile <issue> --confirm`.
+   - The default keeps the count (assumes the charge was a real dispatch). Removing one charge requires `--never-dispatched <evidence>` plus `--confirm`, is refused without evidence, and is logged with that evidence.
+   - Neither path raises the budget or resets the run id. A schema 3 file is refused by older binaries, so an old binary cannot under-charge it.
 
 Existing pipeline: `MAX_REPAIR_ROUNDS = 2` (`config.py:31`) allows two repair rounds, which is up to three implementation runs inside one pipeline job. The 2-total limit applies to the orchestration layer, which must count executions across calls. The orchestration-layer enforcement gap is recorded in section 12.2, item 1. The pipeline does not need to be rewritten to meet this contract.
 

@@ -1,6 +1,8 @@
 #include "cipher/orchestration/job_commands.hpp"
+#include "cipher/orchestration/job_lock.hpp"
 
 #include <algorithm>
+#include <ctime>
 #include <exception>
 #include <fstream>
 #include <sstream>
@@ -41,6 +43,20 @@ int parse_issue(const std::string& text) {
     return std::stoi(text);
 }
 
+// Unique per job: create() refuses a second job for the same issue, so issue + creation second is stable.
+std::string new_run_id(int issue) {
+    const std::time_t now = std::time(nullptr);
+    std::tm parts{};
+#ifdef _WIN32
+    gmtime_s(&parts, &now);
+#else
+    gmtime_r(&now, &parts);
+#endif
+    char buffer[32];
+    std::strftime(buffer, sizeof buffer, "%Y%m%dT%H%M%SZ", &parts);
+    return "run-" + std::to_string(issue) + "-" + buffer;
+}
+
 std::string describe(int issue, const JobRecord& job) {
     std::ostringstream out;
     out << "job " << issue << ": " << to_string(job.state);
@@ -50,9 +66,18 @@ std::string describe(int issue, const JobRecord& job) {
     return out.str();
 }
 
+// The record is saved before the event is logged, so a failed log write leaves a correct, persisted job. Say so
+// instead of reporting a job error, and say plainly that the missing line is not back-filled.
+std::string log_warning(const Orchestrator& orchestrator) {
+    if (orchestrator.log_error().empty()) return std::string();
+    return "\nWARNING: the job state was saved, but its event could not be logged (" + orchestrator.log_error() +
+           "). The event log is diagnostic history; this line will not be added later.";
+}
+
 constexpr const char* kUsage =
     "Usage: job new <issue> [research] [design] [security] | job status <issue> | job list | "
-    "job task <issue> <text> | job step <issue> | job recover <issue> | job ci <issue> <pr> | job log";
+    "job task <issue> <text> | job step <issue> | job recover <issue> | job reconcile <issue> --confirm [--never-dispatched <evidence>] | job ci <issue> <pr> | "
+    "job show <issue> [--json] | job log [issue]";
 
 }  // namespace
 
@@ -77,12 +102,28 @@ JobCommandResult JobCommands::execute(const std::string& input) {
         return joined;
     }();
     try {
+        // Writers take the per-job OS lock before any load, so a second process cannot interleave a save.
+        const bool writes = verb == "new" || verb == "step" || verb == "recover" || verb == "reconcile" || verb == "ci" || verb == "task";
+        std::optional<orchestration::JobLock> job_lock;
+        if (writes && words.size() > 2) {
+            const int issue = parse_issue(words[2]);
+            if (issue != 0) {
+                std::filesystem::create_directories(directory_);  // the lock file lives beside the job record
+                job_lock = orchestration::JobLock::try_acquire(
+                    directory_ / ("job-" + std::to_string(issue) + ".lock"));
+                if (!job_lock) {
+                    return {true, "job " + std::to_string(issue) + " is in use by another process; try again."};
+                }
+            }
+        }
         if (verb == "new") return {true, create(rest)};
         if (verb == "status") return {true, status(rest)};
         if (verb == "list") return {true, list()};
         if (verb == "step") return {true, step(rest)};
         if (verb == "recover") return {true, recover(rest)};
-        if (verb == "log") return {true, log()};
+        if (verb == "reconcile") return {true, reconcile(rest)};
+        if (verb == "log") return {true, log(rest)};
+        if (verb == "show") return {true, show(rest)};
         if (verb == "ci") return {true, ci(rest)};
         if (verb == "task") return {true, task(rest)};
     } catch (const std::exception& error) {
@@ -107,8 +148,9 @@ std::string JobCommands::create(const std::string& arguments) {
 
     Orchestrator orchestrator(issue, facts, *executor_, store_, Policy{});
     orchestrator.attach_event_log(log_);
+    orchestrator.assign_run_id(new_run_id(issue));
     orchestrator.start();
-    return describe(issue, orchestrator.job());
+    return describe(issue, orchestrator.job()) + log_warning(orchestrator);
 }
 
 std::string JobCommands::status(const std::string& arguments) const {
@@ -147,12 +189,23 @@ std::string JobCommands::step(const std::string& arguments) {
     if (issue == 0) return "job step needs a positive issue number.";
     const auto saved = store_.load(issue);
     if (!saved) return "No job for issue " + std::to_string(issue) + ".";
+    // Checked before make_executor so a flagged record never reaches an executor.
+    if (saved->execution_in_flight) {
+        return "execution in flight for issue " + std::to_string(issue) + "; run job recover " +
+               std::to_string(issue) + " first. No step taken.";
+    }
+
+    if (saved->accounting_unreconciled && saved->state == State::Implementation) {
+        return "issue " + std::to_string(issue) + " has legacy execution accounting that must be settled first; run job reconcile " +
+               std::to_string(issue) + " to see the options. No step taken.";
+    }
 
     std::unique_ptr<RoleExecutor> owned = make_executor(issue);
     Orchestrator orchestrator(issue, saved->facts, owned ? *owned : *executor_, store_, Policy{});
     orchestrator.attach_event_log(log_);
     const bool moved = orchestrator.advance();
-    return std::string(moved ? "advanced. " : "no step taken. ") + describe(issue, orchestrator.job());
+    return std::string(moved ? "advanced. " : "no step taken. ") + describe(issue, orchestrator.job()) +
+           log_warning(orchestrator);
 }
 
 std::string JobCommands::recover(const std::string& arguments) {
@@ -165,7 +218,54 @@ std::string JobCommands::recover(const std::string& arguments) {
     Orchestrator orchestrator(issue, saved->facts, owned ? *owned : *executor_, store_, Policy{});
     orchestrator.attach_event_log(log_);
     const bool recovered = orchestrator.recover();
-    return std::string(recovered ? "recovered. " : "nothing in flight. ") + describe(issue, orchestrator.job());
+    if (!recovered && orchestrator.job().execution_in_flight) {
+        return "inconsistent record: execution flagged in flight outside Implementation; left unchanged for the owner. " +
+               describe(issue, orchestrator.job()) + log_warning(orchestrator);
+    }
+    return std::string(recovered ? "recovered. " : "nothing in flight. ") + describe(issue, orchestrator.job()) +
+           log_warning(orchestrator);
+}
+
+std::string JobCommands::reconcile(const std::string& arguments) {
+    const auto words = split(arguments);
+    const int issue = words.empty() ? 0 : parse_issue(words[0]);
+    if (issue == 0) return "job reconcile needs a positive issue number.";
+    const auto saved = store_.load(issue);
+    if (!saved) return "No job for issue " + std::to_string(issue) + ".";
+    if (!saved->accounting_unreconciled) return "nothing to reconcile. " + describe(issue, *saved);
+
+    const int k = saved->implementation_executions;
+    bool confirm = false;
+    bool never_dispatched = false;
+    std::string evidence;
+    for (std::size_t i = 1; i < words.size(); ++i) {
+        if (words[i] == "--confirm") {
+            confirm = true;
+        } else if (words[i] == "--never-dispatched") {
+            never_dispatched = true;
+            for (++i; i < words.size() && words[i] != "--confirm"; ++i) evidence += (evidence.empty() ? "" : " ") + words[i];
+            if (i < words.size()) --i;
+        } else {
+            return "unknown reconcile argument: " + words[i];
+        }
+    }
+    if (!confirm) {
+        return "Issue " + std::to_string(issue) + " was written by an earlier version that charged an execution on entry, "
+               "so its count of " + std::to_string(k) + " may or may not include a run that was dispatched. "
+               "Default: keep " + std::to_string(k) + " (assumes it ran; never refunds). Only if you can show it was never "
+               "dispatched, use --never-dispatched <evidence> to lower it to " + std::to_string(k - 1) + ". "
+               "Nothing changed; re-run with --confirm. " + describe(issue, *saved);
+    }
+    if (never_dispatched && evidence.empty()) {
+        return "--never-dispatched needs evidence text (for example the events.log line or a git check). Nothing changed.";
+    }
+
+    std::unique_ptr<RoleExecutor> owned = make_executor(issue);
+    Orchestrator orchestrator(issue, saved->facts, owned ? *owned : *executor_, store_, Policy{});
+    orchestrator.attach_event_log(log_);
+    orchestrator.reconcile(never_dispatched, evidence);
+    return std::string("reconciled (") + (never_dispatched ? "k-1" : "k") + "). " + describe(issue, orchestrator.job()) +
+           log_warning(orchestrator);
 }
 
 std::string JobCommands::load_task(int issue) const {
@@ -217,15 +317,56 @@ std::string JobCommands::ci(const std::string& arguments) {
     orchestrator.attach_event_log(log_);
     const bool accepted = orchestrator.apply(*event);
     return std::string(accepted ? "CI recorded. " : "CI result rejected (stale or invalid). ") +
-           describe(issue, orchestrator.job());
+           describe(issue, orchestrator.job()) + log_warning(orchestrator);
 }
 
-std::string JobCommands::log() const {
-    const std::vector<std::string> lines = log_.read_all();
-    if (lines.empty()) return "No job events.";
+std::string JobCommands::log(const std::string& arguments) const {
+    const std::string filter = arguments.empty() ? std::string() : std::to_string(parse_issue(arguments));
+    if (!arguments.empty() && filter == "0") return "job log takes an optional positive issue number.";
+    const std::string prefix = "issue=" + filter + '\t';
     std::string out;
-    for (const std::string& line : lines) out += (out.empty() ? "" : "\n") + line;
-    return out;
+    for (const std::string& line : log_.read_all()) {
+        if (!filter.empty() && line.rfind(prefix, 0) != 0) continue;
+        out += (out.empty() ? "" : "\n") + line;
+    }
+    return out.empty() ? "No job events." : out;
+}
+
+// Read-only summary of the persisted record plus that job's own events. --json emits a flat object for scripts.
+std::string JobCommands::show(const std::string& arguments) const {
+    const std::vector<std::string> words = split(arguments);
+    const bool json = words.size() == 2 && words[1] == "--json";
+    const int issue = (words.size() == 1 || json) ? parse_issue(words[0]) : 0;
+    if (issue == 0) return "Usage: job show <issue> [--json]";
+    const auto job = store_.load(issue);
+    if (!job) return "No job for issue " + std::to_string(issue) + ".";
+
+    const auto yn = [](bool v) { return v ? "true" : "false"; };
+    std::ostringstream out;
+    if (json) {
+        // Values are enum names and hex SHAs only, so no escaping is needed.
+        out << "{\"issue\":" << issue << ",\"run_id\":\"" << job->run_id << "\",\"state\":\"" << to_string(job->state) << "\",\"escalation\":\""
+            << to_string(job->escalation) << "\",\"implementation_executions\":" << job->implementation_executions
+            << ",\"review_rounds\":" << job->review_rounds << ",\"blocked_count\":" << job->blocked_count
+            << ",\"pull_request_open\":" << yn(job->pull_request_open) << ",\"qa_approved\":"
+            << yn(job->qa_approved) << ",\"ci_passed\":" << yn(job->ci_passed) << ",\"review_approved\":"
+            << yn(job->review_approved) << ",\"head_sha\":\"" << job->head_sha << "\",\"reviewed_head_sha\":\""
+            << job->reviewed_head_sha << "\",\"execution_in_flight\":" << yn(job->execution_in_flight) << "}";
+        return out.str();
+    }
+    out << describe(issue, *job) << '\n'
+        << "  run_id=" << (job->run_id.empty() ? "-" : job->run_id) << '\n'
+        << "  blocked_count=" << job->blocked_count << " pull_request_open=" << yn(job->pull_request_open)
+        << " qa_approved=" << yn(job->qa_approved) << " ci_passed=" << yn(job->ci_passed)
+        << " review_approved=" << yn(job->review_approved) << '\n'
+        << "  head_sha=" << (job->head_sha.empty() ? "-" : job->head_sha)
+        << " reviewed_head_sha=" << (job->reviewed_head_sha.empty() ? "-" : job->reviewed_head_sha) << '\n'
+        << "  execution_in_flight=" << yn(job->execution_in_flight)
+        << (job->execution_in_flight ? " (run job recover)" : "") << '\n'
+        << "  accounting_unreconciled=" << yn(job->accounting_unreconciled)
+        << (job->accounting_unreconciled ? " (run job reconcile)" : "") << '\n'
+        << "events:\n" << log(std::to_string(issue));
+    return out.str();
 }
 
 }  // namespace cipher

@@ -82,10 +82,17 @@ JobRecord apply(const JobRecord& job, const Event& e, const Policy& policy, cons
     return result.next;
 }
 
-// Drives a job from ISSUE to IMPLEMENTATION with no research or design step.
+// Models the dispatch-time charge that Orchestrator::advance() makes (section 5.1). Entering
+// IMPLEMENTATION is never a charge; only a dispatched execution is.
+JobRecord dispatch(JobRecord job) {
+    ++job.implementation_executions;
+    return job;
+}
+
+// Drives a job from ISSUE to a dispatched first IMPLEMENTATION execution with no research or design step.
 JobRecord start_plain(const Policy& policy) {
     JobRecord job;
-    return apply(job, event(EventKind::Start), policy, "start");
+    return dispatch(apply(job, event(EventKind::Start), policy, "start"));
 }
 
 // Gets a job to REVIEW on head A through a clean QA and CI pass.
@@ -121,16 +128,18 @@ void test_full_workflow_with_research_and_design() {
     job = apply(job, event(EventKind::ResearchComplete), policy, "research complete");
     check(job.state == State::Architecture, "architecture after research", "did not enter ARCHITECTURE");
     job = apply(job, event(EventKind::ArchitectureComplete), policy, "architecture complete");
-    check(job.state == State::Implementation && job.implementation_executions == 1,
-          "implementation is execution 1", "implementation count was not 1");
+    check(job.state == State::Implementation && job.implementation_executions == 0,
+          "entering implementation charges nothing", "entering implementation changed the count");
+    job = dispatch(job);
+    check(job.implementation_executions == 1, "dispatch is execution 1", "dispatch did not charge once");
 }
 
 void test_pr_path_skipped_on_retry() {
     const Policy policy;
     JobRecord job = to_review(policy);
     job = apply(job, with_verdict(EventKind::ReviewVerdict, Verdict::ChangesRequested), policy, "changes requested");
-    check(job.state == State::Implementation && job.implementation_executions == 2,
-          "changes requested starts attempt 2", "attempt 2 did not start");
+    check(job.state == State::Implementation && job.implementation_executions == 1,
+          "changes requested enters attempt 2 without a charge", "entry charged or moved state wrongly");
 
     job = apply(job, with_head(EventKind::ImplementationComplete, kHeadB), policy, "attempt 2 complete");
     check(job.state == State::Qa, "attempt 2 goes to QA, not PR", "attempt 2 did not enter QA");
@@ -150,6 +159,7 @@ void test_implementation_budget_is_two_total() {
     const Policy policy;
     JobRecord job = to_review(policy);
     job = apply(job, with_verdict(EventKind::ReviewVerdict, Verdict::ChangesRequested), policy, "attempt 1 failed");
+    job = dispatch(job);
     job = apply(job, with_head(EventKind::ImplementationComplete, kHeadB), policy, "attempt 2 complete");
     job = apply(job, with_verdict(EventKind::QaResult, Verdict::Approve, kHeadB), policy, "qa 2");
     job = apply(job, with_ci(false, kHeadB), policy, "ci failed on attempt 2");
@@ -164,8 +174,11 @@ void test_ci_failure_consumes_attempt() {
     job = apply(job, with_head(EventKind::PullRequestOpened, kHeadA), policy, "pr");
     job = apply(job, with_verdict(EventKind::QaResult, Verdict::Approve), policy, "qa");
     job = apply(job, with_ci(false), policy, "ci failed");
-    check(job.state == State::Implementation && job.implementation_executions == 2,
-          "CI failure starts attempt 2", "CI failure did not start attempt 2");
+    check(job.state == State::Implementation && job.implementation_executions == 1,
+          "CI failure enters attempt 2 without a charge", "CI failure entry charged or moved state wrongly");
+    job = dispatch(job);
+    check(job.implementation_executions == 2, "CI failure: attempt 2 dispatch is the second charge",
+          "attempt 2 dispatch did not charge");
 }
 
 void test_qa_must_precede_ci() {

@@ -16,7 +16,8 @@ const std::set<std::string> kKeys = {
     "schema", "state", "resume_state", "escalation", "implementation_executions", "review_rounds",
     "blocked_count", "reevaluation_used", "reevaluation_pending", "pull_request_open", "qa_approved",
     "ci_passed", "review_approved", "head_sha", "reviewed_head_sha", "implementation_family",
-    "execution_in_flight", "facts_research", "facts_needs_design", "facts_security_sensitive"};
+    "execution_in_flight", "facts_research", "facts_needs_design", "facts_security_sensitive", "run_id",
+    "accounting_unreconciled"};
 
 void require_plain(const std::string& value) {
     if (value.find('\n') != std::string::npos || value.find('\r') != std::string::npos) {
@@ -93,6 +94,7 @@ std::string serialize_job(const JobRecord& job) {
     require_plain(head_sha);
     require_plain(reviewed);
     require_plain(family);
+    require_plain(job.run_id);
 
     std::ostringstream out;
     out << "schema=" << kJobStoreSchemaVersion << '\n'
@@ -114,7 +116,9 @@ std::string serialize_job(const JobRecord& job) {
         << "execution_in_flight=" << flag(job.execution_in_flight) << '\n'
         << "facts_research=" << flag(job.facts.research) << '\n'
         << "facts_needs_design=" << flag(job.facts.needs_design) << '\n'
-        << "facts_security_sensitive=" << flag(job.facts.security_sensitive) << '\n';
+        << "facts_security_sensitive=" << flag(job.facts.security_sensitive) << '\n'
+        << "run_id=" << job.run_id << '\n'
+        << "accounting_unreconciled=" << flag(job.accounting_unreconciled) << '\n';
     return out.str();
 }
 
@@ -132,13 +136,21 @@ JobRecord parse_job(const std::string& text) {
             throw std::runtime_error("job store: duplicate key " + key);
         }
     }
-    for (const auto& key : kKeys) {
-        if (!values.count(key)) throw std::runtime_error("job store: missing key " + key);
-    }
-
+    if (!values.count("schema")) throw std::runtime_error("job store: missing key schema");
     const int schema = parse_int(values.at("schema"), "schema");
-    if (schema != kJobStoreSchemaVersion) {
+    if (schema < 1 || schema > kJobStoreSchemaVersion) {
         throw std::runtime_error("job store: unsupported schema version " + std::to_string(schema));
+    }
+    // A v1 record predates run_id: it must not carry the key, and loads with an empty id.
+    if (schema == 1 && values.count("run_id")) throw std::runtime_error("job store: run_id in a schema 1 record");
+    // accounting_unreconciled is a schema 3 key; older records must not carry it.
+    if (schema < 3 && values.count("accounting_unreconciled")) {
+        throw std::runtime_error("job store: accounting_unreconciled in a schema " + std::to_string(schema) + " record");
+    }
+    for (const auto& key : kKeys) {
+        if (schema == 1 && key == "run_id") continue;
+        if (schema < 3 && key == "accounting_unreconciled") continue;
+        if (!values.count(key)) throw std::runtime_error("job store: missing key " + key);
     }
 
     JobRecord job;
@@ -154,6 +166,7 @@ JobRecord parse_job(const std::string& text) {
     job.qa_approved = parse_bool(values.at("qa_approved"), "qa_approved");
     job.ci_passed = parse_bool(values.at("ci_passed"), "ci_passed");
     job.review_approved = parse_bool(values.at("review_approved"), "review_approved");
+    if (schema >= 2) job.run_id = values.at("run_id");
     job.head_sha = values.at("head_sha");
     job.reviewed_head_sha = values.at("reviewed_head_sha");
     job.implementation_family = values.at("implementation_family");
@@ -161,6 +174,17 @@ JobRecord parse_job(const std::string& text) {
     job.facts.research = parse_bool(values.at("facts_research"), "facts_research");
     job.facts.needs_design = parse_bool(values.at("facts_needs_design"), "facts_needs_design");
     job.facts.security_sensitive = parse_bool(values.at("facts_security_sensitive"), "facts_security_sensitive");
+    if (schema >= 3) {
+        job.accounting_unreconciled = parse_bool(values.at("accounting_unreconciled"), "accounting_unreconciled");
+    } else {
+        // Migration (contract 5.1 item 9). Historical counts are preserved untouched; nothing is refunded or added.
+        // The only ambiguous shape is a counted, unflagged record waiting in Implementation.
+        const bool waiting_in_implementation =
+            job.state == State::Implementation ||
+            (job.state == State::Blocked && job.resume_state == State::Implementation);
+        job.accounting_unreconciled =
+            waiting_in_implementation && !job.execution_in_flight && job.implementation_executions > 0;
+    }
     return job;
 }
 

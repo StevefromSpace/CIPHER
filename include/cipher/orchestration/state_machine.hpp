@@ -106,10 +106,15 @@ struct JobRecord {
     bool qa_approved = false;                // per attempt; cleared when a retry starts
     bool ci_passed = false;
     bool review_approved = false;
+    std::string run_id;                      // one durable id for the whole job lifecycle; empty on legacy (schema 1) jobs
     std::string head_sha;                    // current PR head
     std::string reviewed_head_sha;           // head of the last counted review
     std::string implementation_family;       // reviewer must come from a different family (section 8.2)
     bool execution_in_flight = false;        // an implementation execution started and has not reported
+    // Legacy (schema 1/2) record in Implementation with a count but no flag: the old entry-charge code and the
+    // dispatch-charge code write identical bytes, so whether that count includes a run is unknown. Dispatch is
+    // refused until `job reconcile` settles it (section 5.1 item 9). Never set on a new schema 3 job.
+    bool accounting_unreconciled = false;
 };
 
 struct TransitionResult {
