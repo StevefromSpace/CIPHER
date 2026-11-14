@@ -160,6 +160,17 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
+# cipher_openclaw  -  OpenClaw CLI assistant backend (runs the CLI through the orchestration ProcessRunner)
+add_library(cipher_openclaw src/openclaw_backend.cpp)
+target_include_directories(cipher_openclaw PUBLIC include)
+target_include_directories(cipher_openclaw SYSTEM PRIVATE third_party)
+target_link_libraries(cipher_openclaw PUBLIC cipher_assistant cipher_orchestration)
+if(MSVC)
+    target_compile_options(cipher_openclaw PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(cipher_openclaw PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 # cipher_ollama  â€”  loopback HTTP client, Ollama assistant backend, and `ask` command
 # ---------------------------------------------------------------------------
 add_library(cipher_ollama
@@ -231,7 +242,7 @@ endif()
 # cipher  â€”  main executable
 # ---------------------------------------------------------------------------
 add_executable(cipher src/main.cpp)
-target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands cipher_tools cipher_ollama cipher_orchestration)
+target_link_libraries(cipher PRIVATE cipher_core cipher_config cipher_logger cipher_memory_commands cipher_tools cipher_ollama cipher_openclaw cipher_orchestration)
 if(CIPHER_WITH_LLAMA)
     target_link_libraries(cipher PRIVATE cipher_llama)
 endif()
@@ -289,6 +300,10 @@ if(BUILD_TESTING)
     add_executable(cipher_filesystem_tools_tests tests/test_filesystem_tools.cpp)
     target_link_libraries(cipher_filesystem_tools_tests PRIVATE cipher_tools)
     add_test(NAME cipher_filesystem_tools_tests COMMAND cipher_filesystem_tools_tests)
+
+    add_executable(cipher_openclaw_tests tests/test_openclaw_backend.cpp)
+    target_link_libraries(cipher_openclaw_tests PRIVATE cipher_openclaw)
+    add_test(NAME cipher_openclaw_tests COMMAND cipher_openclaw_tests)
 
     add_executable(cipher_ollama_tests tests/test_ollama_backend.cpp)
     target_link_libraries(cipher_ollama_tests PRIVATE cipher_ollama)
