@@ -110,9 +110,18 @@ RoleResult PipelineExecutor::open_pull_request(const JobRecord& job) {
                  << "Head: " << job.head_sha << "\nBase: " << settings_.base_sha
                  << "\n\nNot merged automatically. Requires normal review and green CI.\n";
             body.close();
-            number = gh_.create_pull_request(branch, settings_.base_branch,
-                                             "cipher: implementation for issue #" + std::to_string(settings_.issue_number),
-                                             settings_.pr_body_file.string());
+            try {
+                number = gh_.create_pull_request(branch, settings_.base_branch,
+                                                 "cipher: implementation for issue #" + std::to_string(settings_.issue_number),
+                                                 settings_.pr_body_file.string());
+            } catch (const std::exception&) {
+                // A timeout or non-zero exit can still have created the PR on GitHub: look before giving up,
+                // so a retry never reports failure for a PR that exists. Exactly one match is reused.
+                const std::vector<int> created = gh_.find_open_pull_requests(branch);
+                if (created.size() != 1) throw;
+                number = created.front();
+                note("PR: create reported failure but PR #" + std::to_string(number) + " exists; reusing it");
+            }
         }
         const PullRequestFacts pr = gh_.read_pull_request_detail(number);
         if (!pr.open || pr.head_sha != job.head_sha) {
