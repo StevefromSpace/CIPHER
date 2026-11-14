@@ -124,7 +124,7 @@ void test_wrong_schema_is_refused() {
     FileJobStore store(dir);
     store.save(5, sample_job());
     std::string text = serialize_job(sample_job());
-    text.replace(text.find("schema=2"), 8, "schema=0");
+    text.replace(text.find("schema=3"), 8, "schema=0");
     write_text(store.path_for(5), text);
     bool threw = false;
     try {
@@ -230,40 +230,92 @@ void test_orchestrator_resumes_from_disk() {
     check(second.job().implementation_executions == 0, "resume: recovery with nothing in flight leaves the counter alone");
 }
 
+// Builds a legacy (schema 1 or 2) text from the current serializer by stripping the schema 3 key
+// (and, for schema 1, run_id). Both keys are written last, in this order: run_id, accounting_unreconciled.
+std::string legacy_text(const JobRecord& job, int schema) {
+    std::string text = serialize_job(job);
+    text.replace(text.find("schema=3"), 8, "schema=" + std::to_string(schema));
+    text.erase(text.find("accounting_unreconciled="));
+    if (schema == 1) text.erase(text.find("run_id="));
+    return text;
+}
+
+bool parse_throws(const std::string& text) {
+    try {
+        parse_job(text);
+    } catch (const std::runtime_error&) {
+        return true;
+    }
+    return false;
+}
+
 void test_schema_1_records_load_without_run_id() {
-    const std::string v2 = serialize_job(sample_job());
-    std::string v1 = v2;
-    v1.replace(v1.find("schema=2"), 8, "schema=1");
-    v1.erase(v1.find("run_id="));  // run_id is the last key
-    const JobRecord loaded = parse_job(v1);
+    const JobRecord loaded = parse_job(legacy_text(sample_job(), 1));
     check(loaded.run_id.empty(), "schema 1 record loads with an empty run_id");
     check(loaded.review_rounds == 1 && loaded.head_sha == sample_job().head_sha, "schema 1 fields still read");
-    check(serialize_job(loaded).find("schema=2") == 0, "a loaded v1 record is rewritten as schema 2");
+    check(serialize_job(loaded).find("schema=3") == 0, "a loaded v1 record is rewritten as schema 3");
 
-    bool threw = false;
-    try {
-        parse_job(v2.substr(0, v2.find("schema=2")) + "schema=1" + v2.substr(v2.find("schema=2") + 8));
-    } catch (const std::runtime_error&) {
-        threw = true;
-    }
-    check(threw, "schema 1 record carrying run_id is refused");
+    check(parse_throws(legacy_text(sample_job(), 2).replace(0, 8, "schema=1")),
+          "schema 1 record carrying run_id is refused");
 
-    std::string no_id = v2;
-    no_id.erase(no_id.find("run_id="));
-    threw = false;
-    try {
-        parse_job(no_id);
-    } catch (const std::runtime_error&) {
-        threw = true;
+    const std::string v3 = serialize_job(sample_job());
+    std::string no_id = v3;
+    no_id.erase(no_id.find("run_id="), no_id.find("accounting_unreconciled=") - no_id.find("run_id="));
+    check(parse_throws(no_id), "schema 3 record without run_id is refused");
+    check(parse_throws(legacy_text(sample_job(), 2).replace(0, 8, "schema=2") + "accounting_unreconciled=no\n"),
+          "schema 2 record carrying accounting_unreconciled is refused");
+    check(parse_job(v3).run_id == "run-7-20261112T100000Z", "schema 3 keeps run_id");
+}
+
+// Contract 5.1 item 9: only a counted, unflagged record waiting in Implementation is ambiguous.
+void test_legacy_records_migrate_accounting_conservatively() {
+    JobRecord waiting = sample_job();
+    waiting.state = State::Implementation;
+    waiting.resume_state = State::Implementation;
+    waiting.escalation = EscalationReason::None;
+    waiting.implementation_executions = 1;
+    waiting.execution_in_flight = false;
+    waiting.accounting_unreconciled = false;
+
+    for (const int schema : {1, 2}) {
+        const JobRecord migrated = parse_job(legacy_text(waiting, schema));
+        check(migrated.accounting_unreconciled, "legacy counted unflagged Implementation record needs reconcile");
+        check(migrated.implementation_executions == 1,
+              "migration keeps the historical count: nothing is refunded or added");
+        check(migrated.run_id == (schema == 1 ? "" : waiting.run_id), "migration keeps run_id");
     }
-    check(threw, "schema 2 record without run_id is refused");
-    check(parse_job(v2).run_id == "run-7-20261112T100000Z", "schema 2 keeps run_id");
+
+    JobRecord flagged = waiting;
+    flagged.execution_in_flight = true;
+    check(!parse_job(legacy_text(flagged, 2)).accounting_unreconciled,
+          "a flagged legacy record is unambiguous: the flag means a dispatch happened");
+
+    JobRecord fresh = waiting;
+    fresh.implementation_executions = 0;
+    check(!parse_job(legacy_text(fresh, 2)).accounting_unreconciled,
+          "a legacy record with no charge has nothing to reconcile");
+
+    JobRecord later = waiting;
+    later.state = State::Review;
+    check(!parse_job(legacy_text(later, 2)).accounting_unreconciled,
+          "a legacy record past Implementation needs no reconcile");
+
+    JobRecord blocked = waiting;
+    blocked.state = State::Blocked;
+    blocked.resume_state = State::Implementation;
+    check(parse_job(legacy_text(blocked, 2)).accounting_unreconciled,
+          "a legacy Blocked record that resumes into Implementation needs reconcile");
+
+    const JobRecord reloaded = parse_job(serialize_job(parse_job(legacy_text(waiting, 2))));
+    check(reloaded.accounting_unreconciled && reloaded.implementation_executions == 1,
+          "the migrated marker survives a save and reload");
 }
 
 }  // namespace
 
 int main() {
     test_schema_1_records_load_without_run_id();
+    test_legacy_records_migrate_accounting_conservatively();
     test_round_trip_and_reload();
     test_rename_replaces_existing_file();
     test_corrupt_file_throws_and_is_kept();

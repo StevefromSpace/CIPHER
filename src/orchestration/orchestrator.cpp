@@ -1,6 +1,7 @@
 #include "cipher/orchestration/orchestrator.hpp"
 
 #include <exception>
+#include <stdexcept>
 
 namespace cipher::orchestration {
 
@@ -32,7 +33,8 @@ bool same_durable(const JobRecord& a, const JobRecord& b) {
            a.implementation_executions == b.implementation_executions && a.review_rounds == b.review_rounds &&
            a.blocked_count == b.blocked_count && a.pull_request_open == b.pull_request_open &&
            a.ci_passed == b.ci_passed && a.review_approved == b.review_approved && a.run_id == b.run_id &&
-           a.implementation_family == b.implementation_family && a.execution_in_flight == b.execution_in_flight;
+           a.implementation_family == b.implementation_family && a.execution_in_flight == b.execution_in_flight &&
+           a.accounting_unreconciled == b.accounting_unreconciled;
 }
 
 }  // namespace
@@ -153,6 +155,8 @@ bool Orchestrator::advance() {
     if (!role) return false;
     // A flagged record is an execution that may have run already: recover() must decide before anything dispatches.
     if (job_.execution_in_flight) return false;
+    // A legacy record with an unknown run count must be settled by `reconcile` before any charge is made on it.
+    if (job_.accounting_unreconciled && *role == Role::Implementation && job_.state == State::Implementation) return false;
 
     // Only an implementation execution counts against the budget (section 5.1, charge on dispatch). The charge
     // and the in-flight flag are saved together before dispatch, so a crash during the run is visible on restart.
@@ -227,6 +231,38 @@ bool Orchestrator::recover() {
     if (accepted) return true;
     job_.execution_in_flight = true;  // rejected (inconsistent record): stay flagged on disk and in memory
     return false;
+}
+
+bool Orchestrator::reconcile(bool never_dispatched, const std::string& evidence) {
+    require_usable();
+    if (!job_.accounting_unreconciled) return false;
+    if (never_dispatched && evidence.empty()) {
+        throw std::invalid_argument("reconcile: k-1 needs evidence that the execution was never dispatched");
+    }
+    if (never_dispatched && job_.implementation_executions < 1) {
+        throw std::invalid_argument("reconcile: count is already zero");
+    }
+    JobRecord next = job_;
+    next.accounting_unreconciled = false;
+    if (never_dispatched) --next.implementation_executions;
+    try {
+        store_.save(issue_number_, next);
+    } catch (...) {
+        adopt_durable(next);
+        throw;
+    }
+    job_ = next;
+    if (event_log_ != nullptr) {
+        try {
+            event_log_->append(issue_number_, "reconcile",
+                               std::string("count=") + std::to_string(job_.implementation_executions) +
+                                   (never_dispatched ? " mode=k-1 evidence=" + evidence : " mode=k"),
+                               job_.run_id);
+        } catch (const std::exception& error) {
+            if (log_error_.empty()) log_error_ = error.what();
+        }
+    }
+    return true;
 }
 
 const JobRecord& Orchestrator::job() const {

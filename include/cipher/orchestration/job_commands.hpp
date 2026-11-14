@@ -56,6 +56,7 @@ private:
     std::string list() const;
     std::string step(const std::string& arguments);
     std::string recover(const std::string& arguments);
+    std::string reconcile(const std::string& arguments);
     std::string log(const std::string& arguments) const;
     std::string show(const std::string& arguments) const;
     std::string ci(const std::string& arguments);

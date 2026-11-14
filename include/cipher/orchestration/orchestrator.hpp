@@ -80,6 +80,11 @@ public:
     // (a counted attempt). The role is never run again here. Returns false when nothing was in flight.
     bool recover();
 
+    // Settles a legacy record whose implementation count may or may not include a run (accounting_unreconciled).
+    // Default keeps the count (k, conservative). never_dispatched=true lowers it to k-1 and needs a non-empty
+    // evidence string. Idempotent: returns false when nothing is unreconciled. Never raises the budget silently.
+    bool reconcile(bool never_dispatched, const std::string& evidence);
+
     const JobRecord& job() const;
     const std::vector<ExecutionRecord>& records() const;
 

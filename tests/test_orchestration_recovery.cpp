@@ -475,6 +475,79 @@ void test_flagged_record_is_not_redispatched_without_recover() {
     fs::remove_all(dir);
 }
 
+// Writes a legacy (schema 2) record that was charged on entry and waits in Implementation, unflagged.
+void write_legacy_waiting_record(const fs::path& dir, int count) {
+    JobRecord job;
+    job.state = State::Implementation;
+    job.implementation_executions = count;
+    job.run_id = "run-42-20261101T000000Z";
+    std::string text = serialize_job(job);
+    text.replace(text.find("schema=3"), 8, "schema=2");
+    text.erase(text.find("accounting_unreconciled="));
+    write_text(FileJobStore(dir).path_for(kIssue), text);
+}
+
+void test_legacy_record_refuses_dispatch_until_reconciled() {
+    const fs::path dir = fresh_dir("cipher-recovery-legacy-refuse");
+    write_legacy_waiting_record(dir, 1);
+    FileJobStore store(dir);
+    CrashingExecutor executor;
+    executor.crash_on_implementation = false;
+    IssueFacts facts;
+    Orchestrator orch(kIssue, facts, executor, store, Policy{});
+    check(orch.job().accounting_unreconciled && orch.job().implementation_executions == 1,
+          "legacy: the load keeps the historical count and flags the record");
+    check(!orch.advance(), "legacy: an unreconciled record takes no step");
+    check(executor.implementation_calls == 0, "legacy: the executor is not called before reconcile");
+    check(store.load(kIssue)->implementation_executions == 1, "legacy: refusing dispatch leaves the disk count unchanged");
+    fs::remove_all(dir);
+}
+
+void test_reconcile_default_keeps_count_and_never_double_charges() {
+    const fs::path dir = fresh_dir("cipher-recovery-reconcile-k");
+    write_legacy_waiting_record(dir, 1);
+    FileJobStore store(dir);
+    CrashingExecutor executor;
+    executor.crash_on_implementation = false;
+    IssueFacts facts;
+    Orchestrator orch(kIssue, facts, executor, store, Policy{});
+    check(orch.reconcile(false, ""), "reconcile k: the marker is cleared");
+    check(orch.job().implementation_executions == 1, "reconcile k: the historical count is kept");
+    check(store.load(kIssue)->implementation_executions == 1 && !store.load(kIssue)->accounting_unreconciled,
+          "reconcile k: disk agrees");
+    check(!orch.reconcile(false, ""), "reconcile k: a second reconcile is a no-op");
+    check(orch.advance(), "reconcile k: dispatch is allowed afterwards");
+    check(orch.job().implementation_executions == 2, "reconcile k: the next dispatch is charged exactly once more");
+    fs::remove_all(dir);
+}
+
+void test_reconcile_never_dispatched_needs_evidence_and_refunds_one() {
+    const fs::path dir = fresh_dir("cipher-recovery-reconcile-km1");
+    write_legacy_waiting_record(dir, 1);
+    FileJobStore store(dir);
+    CrashingExecutor executor;
+    IssueFacts facts;
+    Orchestrator orch(kIssue, facts, executor, store, Policy{});
+    bool threw = false;
+    try {
+        orch.reconcile(true, "");
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    check(threw, "reconcile k-1: refused without evidence");
+    check(orch.job().accounting_unreconciled && orch.job().implementation_executions == 1,
+          "reconcile k-1: a refused request changes nothing");
+    check(orch.reconcile(true, "operator confirmed no execution ran"), "reconcile k-1: accepted with evidence");
+    check(orch.job().implementation_executions == 0, "reconcile k-1: the count drops by exactly one");
+    check(store.load(kIssue)->implementation_executions == 0, "reconcile k-1: disk agrees");
+
+    write_legacy_waiting_record(dir, 0);  // count 0 is not ambiguous, so k-1 cannot go below zero
+    FileJobStore again(dir);
+    Orchestrator zero(kIssue, facts, executor, again, Policy{});
+    check(!zero.reconcile(true, "evidence"), "reconcile k-1: nothing to settle at count zero");
+    fs::remove_all(dir);
+}
+
 void test_failed_final_save_does_not_advance_memory() {
     const fs::path dir = fresh_dir("cipher-recovery-finalsave");
     IssueFacts facts;
@@ -619,6 +692,9 @@ void test_final_save_fault_before_write_keeps_memory_equal_to_disk() {
 }  // namespace
 
 int main() {
+    test_legacy_record_refuses_dispatch_until_reconciled();
+    test_reconcile_default_keeps_count_and_never_double_charges();
+    test_reconcile_never_dispatched_needs_evidence_and_refunds_one();
     test_final_save_write_then_throw_is_adopted_not_reverted();
     test_reservation_write_then_throw_blocks_dispatch_and_recovers();
     test_final_save_fault_before_write_keeps_memory_equal_to_disk();

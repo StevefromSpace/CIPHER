@@ -76,7 +76,7 @@ std::string log_warning(const Orchestrator& orchestrator) {
 
 constexpr const char* kUsage =
     "Usage: job new <issue> [research] [design] [security] | job status <issue> | job list | "
-    "job task <issue> <text> | job step <issue> | job recover <issue> | job ci <issue> <pr> | "
+    "job task <issue> <text> | job step <issue> | job recover <issue> | job reconcile <issue> --confirm [--never-dispatched <evidence>] | job ci <issue> <pr> | "
     "job show <issue> [--json] | job log [issue]";
 
 }  // namespace
@@ -103,7 +103,7 @@ JobCommandResult JobCommands::execute(const std::string& input) {
     }();
     try {
         // Writers take the per-job OS lock before any load, so a second process cannot interleave a save.
-        const bool writes = verb == "new" || verb == "step" || verb == "recover" || verb == "ci" || verb == "task";
+        const bool writes = verb == "new" || verb == "step" || verb == "recover" || verb == "reconcile" || verb == "ci" || verb == "task";
         std::optional<orchestration::JobLock> job_lock;
         if (writes && words.size() > 2) {
             const int issue = parse_issue(words[2]);
@@ -121,6 +121,7 @@ JobCommandResult JobCommands::execute(const std::string& input) {
         if (verb == "list") return {true, list()};
         if (verb == "step") return {true, step(rest)};
         if (verb == "recover") return {true, recover(rest)};
+        if (verb == "reconcile") return {true, reconcile(rest)};
         if (verb == "log") return {true, log(rest)};
         if (verb == "show") return {true, show(rest)};
         if (verb == "ci") return {true, ci(rest)};
@@ -194,6 +195,11 @@ std::string JobCommands::step(const std::string& arguments) {
                std::to_string(issue) + " first. No step taken.";
     }
 
+    if (saved->accounting_unreconciled && saved->state == State::Implementation) {
+        return "issue " + std::to_string(issue) + " has legacy execution accounting that must be settled first; run job reconcile " +
+               std::to_string(issue) + " to see the options. No step taken.";
+    }
+
     std::unique_ptr<RoleExecutor> owned = make_executor(issue);
     Orchestrator orchestrator(issue, saved->facts, owned ? *owned : *executor_, store_, Policy{});
     orchestrator.attach_event_log(log_);
@@ -217,6 +223,48 @@ std::string JobCommands::recover(const std::string& arguments) {
                describe(issue, orchestrator.job()) + log_warning(orchestrator);
     }
     return std::string(recovered ? "recovered. " : "nothing in flight. ") + describe(issue, orchestrator.job()) +
+           log_warning(orchestrator);
+}
+
+std::string JobCommands::reconcile(const std::string& arguments) {
+    const auto words = split(arguments);
+    const int issue = words.empty() ? 0 : parse_issue(words[0]);
+    if (issue == 0) return "job reconcile needs a positive issue number.";
+    const auto saved = store_.load(issue);
+    if (!saved) return "No job for issue " + std::to_string(issue) + ".";
+    if (!saved->accounting_unreconciled) return "nothing to reconcile. " + describe(issue, *saved);
+
+    const int k = saved->implementation_executions;
+    bool confirm = false;
+    bool never_dispatched = false;
+    std::string evidence;
+    for (std::size_t i = 1; i < words.size(); ++i) {
+        if (words[i] == "--confirm") {
+            confirm = true;
+        } else if (words[i] == "--never-dispatched") {
+            never_dispatched = true;
+            for (++i; i < words.size() && words[i] != "--confirm"; ++i) evidence += (evidence.empty() ? "" : " ") + words[i];
+            if (i < words.size()) --i;
+        } else {
+            return "unknown reconcile argument: " + words[i];
+        }
+    }
+    if (!confirm) {
+        return "Issue " + std::to_string(issue) + " was written by an earlier version that charged an execution on entry, "
+               "so its count of " + std::to_string(k) + " may or may not include a run that was dispatched. "
+               "Default: keep " + std::to_string(k) + " (assumes it ran; never refunds). Only if you can show it was never "
+               "dispatched, use --never-dispatched <evidence> to lower it to " + std::to_string(k - 1) + ". "
+               "Nothing changed; re-run with --confirm. " + describe(issue, *saved);
+    }
+    if (never_dispatched && evidence.empty()) {
+        return "--never-dispatched needs evidence text (for example the events.log line or a git check). Nothing changed.";
+    }
+
+    std::unique_ptr<RoleExecutor> owned = make_executor(issue);
+    Orchestrator orchestrator(issue, saved->facts, owned ? *owned : *executor_, store_, Policy{});
+    orchestrator.attach_event_log(log_);
+    orchestrator.reconcile(never_dispatched, evidence);
+    return std::string("reconciled (") + (never_dispatched ? "k-1" : "k") + "). " + describe(issue, orchestrator.job()) +
            log_warning(orchestrator);
 }
 
@@ -315,6 +363,8 @@ std::string JobCommands::show(const std::string& arguments) const {
         << " reviewed_head_sha=" << (job->reviewed_head_sha.empty() ? "-" : job->reviewed_head_sha) << '\n'
         << "  execution_in_flight=" << yn(job->execution_in_flight)
         << (job->execution_in_flight ? " (run job recover)" : "") << '\n'
+        << "  accounting_unreconciled=" << yn(job->accounting_unreconciled)
+        << (job->accounting_unreconciled ? " (run job reconcile)" : "") << '\n'
         << "events:\n" << log(std::to_string(issue));
     return out.str();
 }
