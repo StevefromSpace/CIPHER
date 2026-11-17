@@ -17,7 +17,7 @@ const std::set<std::string> kKeys = {
     "blocked_count", "reevaluation_used", "reevaluation_pending", "pull_request_open", "qa_approved",
     "ci_passed", "review_approved", "head_sha", "reviewed_head_sha", "implementation_family",
     "execution_in_flight", "facts_research", "facts_needs_design", "facts_security_sensitive", "run_id",
-    "accounting_unreconciled"};
+    "accounting_unreconciled", "pr_number"};
 
 void require_plain(const std::string& value) {
     if (value.find('\n') != std::string::npos || value.find('\r') != std::string::npos) {
@@ -118,7 +118,8 @@ std::string serialize_job(const JobRecord& job) {
         << "facts_needs_design=" << flag(job.facts.needs_design) << '\n'
         << "facts_security_sensitive=" << flag(job.facts.security_sensitive) << '\n'
         << "run_id=" << job.run_id << '\n'
-        << "accounting_unreconciled=" << flag(job.accounting_unreconciled) << '\n';
+        << "accounting_unreconciled=" << flag(job.accounting_unreconciled) << '\n'
+        << "pr_number=" << job.pr_number << '\n';
     return out.str();
 }
 
@@ -147,7 +148,12 @@ JobRecord parse_job(const std::string& text) {
     if (schema < 3 && values.count("accounting_unreconciled")) {
         throw std::runtime_error("job store: accounting_unreconciled in a schema " + std::to_string(schema) + " record");
     }
+    // pr_number is a schema 4 key; older records must not carry it and load with 0 (PR not recorded).
+    if (schema < 4 && values.count("pr_number")) {
+        throw std::runtime_error("job store: pr_number in a schema " + std::to_string(schema) + " record");
+    }
     for (const auto& key : kKeys) {
+        if (schema < 4 && key == "pr_number") continue;
         if (schema == 1 && key == "run_id") continue;
         if (schema < 3 && key == "accounting_unreconciled") continue;
         if (!values.count(key)) throw std::runtime_error("job store: missing key " + key);
@@ -174,6 +180,7 @@ JobRecord parse_job(const std::string& text) {
     job.facts.research = parse_bool(values.at("facts_research"), "facts_research");
     job.facts.needs_design = parse_bool(values.at("facts_needs_design"), "facts_needs_design");
     job.facts.security_sensitive = parse_bool(values.at("facts_security_sensitive"), "facts_security_sensitive");
+    if (schema >= 4) job.pr_number = parse_int(values.at("pr_number"), "pr_number");
     if (schema >= 3) {
         job.accounting_unreconciled = parse_bool(values.at("accounting_unreconciled"), "accounting_unreconciled");
     } else {

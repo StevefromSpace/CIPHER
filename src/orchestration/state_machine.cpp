@@ -210,6 +210,7 @@ TransitionResult transition(const JobRecord& job, const Event& event, const Poli
             if (job.state != State::PullRequest) return reject(job, "PR opened outside PullRequest");
             JobRecord next = job;
             next.pull_request_open = true;
+            next.pr_number = event.pr_number;
             next.state = State::Qa;
             return accept(std::move(next));
         }

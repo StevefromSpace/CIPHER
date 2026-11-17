@@ -32,6 +32,7 @@ bool same_durable(const JobRecord& a, const JobRecord& b) {
     return a.state == b.state && a.resume_state == b.resume_state && a.escalation == b.escalation &&
            a.implementation_executions == b.implementation_executions && a.review_rounds == b.review_rounds &&
            a.blocked_count == b.blocked_count && a.pull_request_open == b.pull_request_open &&
+           a.pr_number == b.pr_number &&
            a.ci_passed == b.ci_passed && a.review_approved == b.review_approved && a.run_id == b.run_id &&
            a.implementation_family == b.implementation_family && a.execution_in_flight == b.execution_in_flight &&
            a.accounting_unreconciled == b.accounting_unreconciled;

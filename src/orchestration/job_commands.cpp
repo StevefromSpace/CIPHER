@@ -348,7 +348,8 @@ std::string JobCommands::show(const std::string& arguments) const {
         out << "{\"issue\":" << issue << ",\"run_id\":\"" << job->run_id << "\",\"state\":\"" << to_string(job->state) << "\",\"escalation\":\""
             << to_string(job->escalation) << "\",\"implementation_executions\":" << job->implementation_executions
             << ",\"review_rounds\":" << job->review_rounds << ",\"blocked_count\":" << job->blocked_count
-            << ",\"pull_request_open\":" << yn(job->pull_request_open) << ",\"qa_approved\":"
+            << ",\"pull_request_open\":" << yn(job->pull_request_open) << ",\"pr_number\":" << job->pr_number
+            << ",\"qa_approved\":"
             << yn(job->qa_approved) << ",\"ci_passed\":" << yn(job->ci_passed) << ",\"review_approved\":"
             << yn(job->review_approved) << ",\"head_sha\":\"" << job->head_sha << "\",\"reviewed_head_sha\":\""
             << job->reviewed_head_sha << "\",\"execution_in_flight\":" << yn(job->execution_in_flight) << "}";
@@ -357,6 +358,7 @@ std::string JobCommands::show(const std::string& arguments) const {
     out << describe(issue, *job) << '\n'
         << "  run_id=" << (job->run_id.empty() ? "-" : job->run_id) << '\n'
         << "  blocked_count=" << job->blocked_count << " pull_request_open=" << yn(job->pull_request_open)
+        << " pr_number=" << job->pr_number
         << " qa_approved=" << yn(job->qa_approved) << " ci_passed=" << yn(job->ci_passed)
         << " review_approved=" << yn(job->review_approved) << '\n'
         << "  head_sha=" << (job->head_sha.empty() ? "-" : job->head_sha)

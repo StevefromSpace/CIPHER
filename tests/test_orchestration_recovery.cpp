@@ -482,7 +482,7 @@ void write_legacy_waiting_record(const fs::path& dir, int count) {
     job.implementation_executions = count;
     job.run_id = "run-42-20261101T000000Z";
     std::string text = serialize_job(job);
-    text.replace(text.find("schema=3"), 8, "schema=2");
+    text.replace(text.find("schema=4"), 8, "schema=2");
     text.erase(text.find("accounting_unreconciled="));
     write_text(FileJobStore(dir).path_for(kIssue), text);
 }

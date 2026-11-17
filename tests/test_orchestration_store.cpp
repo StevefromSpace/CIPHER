@@ -46,6 +46,7 @@ JobRecord sample_job() {
     job.reevaluation_used = true;
     job.reevaluation_pending = false;
     job.pull_request_open = true;
+    job.pr_number = 57;
     job.qa_approved = true;
     job.ci_passed = true;
     job.review_approved = false;
@@ -124,7 +125,7 @@ void test_wrong_schema_is_refused() {
     FileJobStore store(dir);
     store.save(5, sample_job());
     std::string text = serialize_job(sample_job());
-    text.replace(text.find("schema=3"), 8, "schema=0");
+    text.replace(text.find("schema=4"), 8, "schema=0");
     write_text(store.path_for(5), text);
     bool threw = false;
     try {
@@ -230,12 +231,12 @@ void test_orchestrator_resumes_from_disk() {
     check(second.job().implementation_executions == 0, "resume: recovery with nothing in flight leaves the counter alone");
 }
 
-// Builds a legacy (schema 1 or 2) text from the current serializer by stripping the schema 3 key
-// (and, for schema 1, run_id). Both keys are written last, in this order: run_id, accounting_unreconciled.
+// Builds a legacy (schema 1 to 3) text from the current serializer by stripping the newer keys.
+// They are written last, in this order: run_id (v2), accounting_unreconciled (v3), pr_number (v4).
 std::string legacy_text(const JobRecord& job, int schema) {
     std::string text = serialize_job(job);
-    text.replace(text.find("schema=3"), 8, "schema=" + std::to_string(schema));
-    text.erase(text.find("accounting_unreconciled="));
+    text.replace(text.find("schema=4"), 8, "schema=" + std::to_string(schema));
+    text.erase(text.find(schema < 3 ? "accounting_unreconciled=" : "pr_number="));
     if (schema == 1) text.erase(text.find("run_id="));
     return text;
 }
@@ -253,7 +254,7 @@ void test_schema_1_records_load_without_run_id() {
     const JobRecord loaded = parse_job(legacy_text(sample_job(), 1));
     check(loaded.run_id.empty(), "schema 1 record loads with an empty run_id");
     check(loaded.review_rounds == 1 && loaded.head_sha == sample_job().head_sha, "schema 1 fields still read");
-    check(serialize_job(loaded).find("schema=3") == 0, "a loaded v1 record is rewritten as schema 3");
+    check(serialize_job(loaded).find("schema=4") == 0, "a loaded v1 record is rewritten as schema 4");
 
     check(parse_throws(legacy_text(sample_job(), 2).replace(0, 8, "schema=1")),
           "schema 1 record carrying run_id is refused");
@@ -311,9 +312,32 @@ void test_legacy_records_migrate_accounting_conservatively() {
           "the migrated marker survives a save and reload");
 }
 
+// Schema 4 adds pr_number. Older records must stay readable: that is the migration risk.
+void test_pr_number_round_trip_and_migration() {
+    check(parse_job(serialize_job(sample_job())).pr_number == 57, "pr_number round trips");
+    for (int schema = 1; schema <= 3; ++schema) {
+        const JobRecord old = parse_job(legacy_text(sample_job(), schema));
+        check(old.pr_number == 0 && old.pull_request_open && old.head_sha == sample_job().head_sha,
+              "schema " + std::to_string(schema) + " record with an open PR loads, pr_number 0");
+        check(serialize_job(old).find("schema=4") == 0 && parse_job(serialize_job(old)).pr_number == 0,
+              "schema " + std::to_string(schema) + " record is rewritten as schema 4 and reloads");
+    }
+    check(parse_throws(legacy_text(sample_job(), 3) + "pr_number=57\n"),
+          "schema 3 record carrying pr_number is refused");
+    std::string no_number = serialize_job(sample_job());
+    no_number.erase(no_number.find("pr_number="));
+    check(parse_throws(no_number), "schema 4 record without pr_number is refused");
+    for (const char* bad : {"-1", "abc", "", "5.0", "9999999999"}) {
+        std::string text = serialize_job(sample_job());
+        text.replace(text.find("pr_number=57"), 12, std::string("pr_number=") + bad);
+        check(parse_throws(text), std::string("bad pr_number is refused: '") + bad + "'");
+    }
+}
+
 }  // namespace
 
 int main() {
+    test_pr_number_round_trip_and_migration();
     test_schema_1_records_load_without_run_id();
     test_legacy_records_migrate_accounting_conservatively();
     test_round_trip_and_reload();

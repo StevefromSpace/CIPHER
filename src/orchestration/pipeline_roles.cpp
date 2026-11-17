@@ -92,7 +92,10 @@ RoleResult PipelineExecutor::open_pull_request(const JobRecord& job) {
             return blocked;
         }
         const std::string branch = settings_.branch_prefix + std::to_string(settings_.issue_number);
-        const std::vector<int> existing = gh_.find_open_pull_requests(branch, settings_.base_branch);
+        // A recorded PR is read directly; the lookup runs only when the job has none recorded.
+        const std::vector<int> existing = job.pr_number != 0
+            ? std::vector<int>{job.pr_number}
+            : gh_.find_open_pull_requests(branch, settings_.base_branch);
         if (existing.size() > 1) {
             note("PR: BLOCKED several open PRs for " + branch);
             return blocked;
@@ -132,6 +135,7 @@ RoleResult PipelineExecutor::open_pull_request(const JobRecord& job) {
         Event event;
         event.kind = EventKind::PullRequestOpened;
         event.head_sha = pr.head_sha;
+        event.pr_number = number;
         return {event, kMechanicalFamily};
     } catch (const std::exception& error) {
         note(std::string("PR: BLOCKED ") + error.what());

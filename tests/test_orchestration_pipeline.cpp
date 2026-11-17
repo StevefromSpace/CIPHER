@@ -198,6 +198,19 @@ void test_pr_creation() {
     check(argv_rig.gh_runner.list_argvs.size() == 1 && argv_rig.gh_runner.list_argvs[0] == expected_list,
           "PR lookup argv is exact and scoped by head and base");
 
+    Rig fresh("pr-number-fresh");
+    fresh.job.state = State::PullRequest;
+    r = fresh.exec->run(Role::Implementation, fresh.job);
+    check(is(r, EventKind::PullRequestOpened) && r.event.pr_number == 7, "the opened PR number is reported");
+    check(transition(fresh.job, r.event, Policy{}).next.pr_number == 7, "the PR number is recorded on the job");
+
+    Rig known("pr-number-known");
+    known.job.state = State::PullRequest;
+    known.job.pr_number = 7;
+    r = known.exec->run(Role::Implementation, known.job);
+    check(is(r, EventKind::PullRequestOpened) && known.gh_runner.list_argvs.empty() && known.gh_runner.creates == 0,
+          "a recorded PR is read directly: no lookup, no create");
+
     Rig other_base("pr-other-base");
     other_base.job.state = State::PullRequest;
     other_base.gh_runner.list_output = "7\n";

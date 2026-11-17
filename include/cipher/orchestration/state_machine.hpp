@@ -82,6 +82,7 @@ struct Event {
     bool ci_passed = false;                            // CiResult
     MergeEvidence evidence;                            // MergeRequest
     EscalationReason reason = EscalationReason::None;  // Escalate
+    int pr_number = 0;                                 // PullRequestOpened: the PR that was opened or reused
 };
 
 // Limits from the contract. Defaults are the contract values; tests may lower or raise them.
@@ -103,6 +104,7 @@ struct JobRecord {
     bool reevaluation_used = false;          // one higher-tier re-evaluation per job (section 5.3)
     bool reevaluation_pending = false;
     bool pull_request_open = false;          // retries push to the existing PR, never open a second one
+    int pr_number = 0;                       // the job's PR; 0 = not recorded (records older than schema 4)
     bool qa_approved = false;                // per attempt; cleared when a retry starts
     bool ci_passed = false;
     bool review_approved = false;
