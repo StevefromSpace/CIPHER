@@ -1,6 +1,6 @@
 // Manual live validation of GhAdapter PR creation (NOT in CTest; talks to real GitHub).
 //   cipher_gh_pr_validation <gh> <head-branch> <base-branch> <title> <body-file> <expected-head-sha>
-// Refuses to create a PR if one is already open for the head branch. Never merges.
+// Refuses to create a PR if one is already open from the head branch into the base branch. Never merges.
 
 #include "cipher/orchestration/gh_process_runner.hpp"
 #include "cipher/orchestration/github_adapter.hpp"
@@ -14,7 +14,7 @@ int main(int argc, char** argv) {
         SystemProcessRunner sys;
         GhProcessRunner runner(sys, argv[1], 60000);
         GhAdapter gh(runner);
-        const auto existing = gh.find_open_pull_requests(argv[2]);
+        const auto existing = gh.find_open_pull_requests(argv[2], argv[3]);
         if (!existing.empty()) { std::cerr << "STOP: open PR already exists for " << argv[2] << "\n"; return 3; }
         const int number = gh.create_pull_request(argv[2], argv[3], argv[4], argv[5]);
         std::cout << "created PR number " << number << "\n";

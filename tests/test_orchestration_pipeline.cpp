@@ -67,14 +67,19 @@ public:
 
 class FakeGh final : public GhRunner {
 public:
-    std::string list_output;     // existing PR numbers
+    std::string list_output;     // existing PR numbers, all targeting list_base
+    std::string list_base = "main";
+    std::vector<std::vector<std::string>> list_argvs;
     std::string view_output = pr_json(kHead, "SUCCESS");
     int create_exit = 0;
     bool pr_exists_after_failed_create = false;  // models a timeout after GitHub already made the PR
     int creates = 0;
     std::string create_output = "https://github.com/o/r/pull/7\n";
     GhResult run(const std::vector<std::string>& argv) override {
-        if (argv[1] == "pr" && argv[2] == "list") return {0, list_output};
+        if (argv[1] == "pr" && argv[2] == "list") {
+            list_argvs.push_back(argv);
+            return {0, argv[6] == list_base ? list_output : std::string()};  // argv[5..6] = --base <branch>
+        }
         if (argv[2] == "create") {
             ++creates;
             if (create_exit != 0 && pr_exists_after_failed_create) list_output = "7\n";
@@ -185,9 +190,29 @@ void test_pr_creation() {
     other.exec->run(Role::Implementation, other.job);
     check(other.next.calls == 1, "implementation state delegated to next");
 
-    GhRunner* none = nullptr;
-    (void)none;
+    Rig argv_rig("pr-argv");
+    argv_rig.job.state = State::PullRequest;
+    argv_rig.exec->run(Role::Implementation, argv_rig.job);
+    const std::vector<std::string> expected_list{"gh", "pr", "list", "--head", "cipher/job-5", "--base", "main",
+                                                 "--state", "open", "--json", "number", "--jq", ".[].number"};
+    check(argv_rig.gh_runner.list_argvs.size() == 1 && argv_rig.gh_runner.list_argvs[0] == expected_list,
+          "PR lookup argv is exact and scoped by head and base");
+
+    Rig other_base("pr-other-base");
+    other_base.job.state = State::PullRequest;
+    other_base.gh_runner.list_output = "7\n";
+    other_base.gh_runner.list_base = "release";
+    r = other_base.exec->run(Role::Implementation, other_base.job);
+    check(is(r, EventKind::PullRequestOpened) && other_base.gh_runner.creates == 1,
+          "an open PR from the same head into another base is not matched");
+
     bool threw = false;
+    try { Rig(std::string("pr-unsafe-head")).gh.find_open_pull_requests("--evil", "main"); } catch (const GhRequestError&) { threw = true; }
+    check(threw, "lookup: unsafe head branch rejected");
+    threw = false;
+    try { Rig(std::string("pr-unsafe-base")).gh.find_open_pull_requests("cipher/job-5", "../main"); } catch (const GhRequestError&) { threw = true; }
+    check(threw, "lookup: unsafe base branch rejected");
+    threw = false;
     try { Rig(std::string("pr9")).gh.create_pull_request("--evil", "main", "t", "f"); } catch (const GhRequestError&) { threw = true; }
     check(threw, "unsafe branch rejected");
     threw = false;

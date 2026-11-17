@@ -92,7 +92,7 @@ RoleResult PipelineExecutor::open_pull_request(const JobRecord& job) {
             return blocked;
         }
         const std::string branch = settings_.branch_prefix + std::to_string(settings_.issue_number);
-        const std::vector<int> existing = gh_.find_open_pull_requests(branch);
+        const std::vector<int> existing = gh_.find_open_pull_requests(branch, settings_.base_branch);
         if (existing.size() > 1) {
             note("PR: BLOCKED several open PRs for " + branch);
             return blocked;
@@ -117,7 +117,7 @@ RoleResult PipelineExecutor::open_pull_request(const JobRecord& job) {
             } catch (const std::exception&) {
                 // A timeout or non-zero exit can still have created the PR on GitHub: look before giving up,
                 // so a retry never reports failure for a PR that exists. Exactly one match is reused.
-                const std::vector<int> created = gh_.find_open_pull_requests(branch);
+                const std::vector<int> created = gh_.find_open_pull_requests(branch, settings_.base_branch);
                 if (created.size() != 1) throw;
                 number = created.front();
                 note("PR: create reported failure but PR #" + std::to_string(number) + " exists; reusing it");

@@ -280,9 +280,10 @@ void require_branch(const std::string& name, const char* what) {
 
 }  // namespace
 
-std::vector<int> GhAdapter::find_open_pull_requests(const std::string& head_branch) {
+std::vector<int> GhAdapter::find_open_pull_requests(const std::string& head_branch, const std::string& base_branch) {
     require_branch(head_branch, "head");
-    const GhResult result = runner_.run({"gh", "pr", "list", "--head", head_branch, "--state", "open",
+    require_branch(base_branch, "base");
+    const GhResult result = runner_.run({"gh", "pr", "list", "--head", head_branch, "--base", base_branch, "--state", "open",
                                          "--json", "number", "--jq", ".[].number"});
     if (result.exit_code != 0) throw std::runtime_error("gh pr list failed (exit " + std::to_string(result.exit_code) + ")");
     std::vector<int> numbers;
