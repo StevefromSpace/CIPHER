@@ -1,5 +1,7 @@
 // PR creation, QA, mechanical review and CI observation. All fakes: scripted git/test runner and scripted gh runner.
 
+#include "cipher/orchestration/job_store_file.hpp"
+#include "cipher/orchestration/orchestrator.hpp"
 #include "cipher/orchestration/pipeline_roles.hpp"
 #include "cipher/orchestration/qa_profile.hpp"
 
@@ -65,8 +67,12 @@ public:
     }
 };
 
+// Thrown to model a killed process: it is not a std::exception, so no role or adapter handler swallows it.
+struct Killed {};
+
 class FakeGh final : public GhRunner {
 public:
+    int kill_at_create = 0;      // 1 = die before GitHub makes the PR, 2 = die after it exists
     std::string list_output;     // existing PR numbers, all targeting list_base
     std::string list_base = "main";
     std::vector<std::vector<std::string>> list_argvs;
@@ -81,7 +87,9 @@ public:
             return {0, argv[6] == list_base ? list_output : std::string()};  // argv[5..6] = --base <branch>
         }
         if (argv[2] == "create") {
+            if (kill_at_create == 1) throw Killed{};
             ++creates;
+            if (kill_at_create == 2) { list_output = "7\n"; throw Killed{}; }
             if (create_exit != 0 && pr_exists_after_failed_create) list_output = "7\n";
             return {create_exit, create_output};
         }
@@ -263,6 +271,79 @@ void test_recorded_pr_unusable() {
     check(after.pr_number == 7 && after.pull_request_open, "blocking keeps the recorded PR on the job");
 }
 
+// A save that lands on disk and then throws: the process died after the job save, before it moved on.
+class WriteThenDieStore final : public JobStore {
+public:
+    explicit WriteThenDieStore(const fs::path& dir) : inner_(dir) {}
+    bool die = false;
+    void save(int issue, const JobRecord& job) override {
+        inner_.save(issue, job);
+        if (die) throw Killed{};
+    }
+    std::optional<JobRecord> load(int issue) const override { return inner_.load(issue); }
+
+private:
+    FileJobStore inner_;
+};
+
+// Crash matrix for the PR step. The implementation-dispatch windows (before save, after save, after dispatch
+// before report) are covered in test_orchestration_recovery.cpp; these are the windows around push and create.
+// A "restart" is a new Orchestrator over the same store directory.
+void test_pr_step_crash_matrix() {
+    auto seed = [](Rig& rig) {
+        JobRecord job;
+        job.state = State::PullRequest;
+        job.head_sha = kHead;
+        job.implementation_executions = 1;
+        job.run_id = "run-pr-crash";
+        FileJobStore(rig.base / "jobs").save(5, job);
+    };
+    auto unchanged = [](const JobRecord& job) {
+        return job.state == State::PullRequest && job.pr_number == 0 && !job.pull_request_open &&
+               job.implementation_executions == 1 && job.run_id == "run-pr-crash";
+    };
+    auto opened = [](const JobRecord& job) {
+        return job.state == State::Qa && job.pr_number == 7 && job.pull_request_open &&
+               job.implementation_executions == 1 && job.run_id == "run-pr-crash";
+    };
+
+    for (int window = 1; window <= 2; ++window) {
+        const std::string label = window == 1 ? "killed after push, before create: " : "killed after create, before job save: ";
+        Rig rig("pr-crash" + std::to_string(window));
+        seed(rig);
+        rig.gh_runner.kill_at_create = window;
+        bool killed = false;
+        {
+            FileJobStore store(rig.base / "jobs");
+            Orchestrator orch(5, IssueFacts{}, *rig.exec, store, Policy{});
+            try { orch.advance(); } catch (const Killed&) { killed = true; }
+        }
+        check(killed && rig.runner.push_calls == 1 && unchanged(*FileJobStore(rig.base / "jobs").load(5)),
+              (label + "the saved record is untouched").c_str());
+        rig.gh_runner.kill_at_create = 0;
+        FileJobStore store(rig.base / "jobs");
+        Orchestrator restarted(5, IssueFacts{}, *rig.exec, store, Policy{});
+        restarted.advance();
+        check(rig.gh_runner.creates == 1 && opened(*store.load(5)),
+              (label + "the retry ends with exactly one PR, recorded, and no extra charge").c_str());
+    }
+
+    Rig rig("pr-crash3");
+    seed(rig);
+    {
+        WriteThenDieStore store(rig.base / "jobs");
+        Orchestrator orch(5, IssueFacts{}, *rig.exec, store, Policy{});
+        store.die = true;
+        try { orch.advance(); } catch (const Killed&) {}
+    }
+    FileJobStore store(rig.base / "jobs");
+    check(rig.gh_runner.creates == 1 && opened(*store.load(5)),
+          "killed after job save, before state advance: the PR is recorded on disk");
+    Orchestrator restarted(5, IssueFacts{}, *rig.exec, store, Policy{});
+    check(opened(restarted.job()) && rig.gh_runner.creates == 1,
+          "killed after job save: the restart resumes after the PR step, so no second PR and no step back");
+}
+
 void test_qa() {
     Rig a("qa1");
     a.runner.names = "src/a.cpp\ntests/a_test.cpp\n";
@@ -382,6 +463,7 @@ void test_ci() {
 int main() {
     test_pr_creation();
     test_recorded_pr_unusable();
+    test_pr_step_crash_matrix();
     test_qa();
     test_qa_dirty_and_profiles();
     test_review();
