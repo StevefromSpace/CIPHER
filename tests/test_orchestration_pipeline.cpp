@@ -233,6 +233,36 @@ void test_pr_creation() {
     check(threw, "head == base rejected");
 }
 
+// Pins what a retry does today when the job's recorded PR is no longer usable. No recovery is attempted:
+// reopening, replacing or abandoning the PR is an owner decision. Note the push runs BEFORE the PR is read,
+// so the job branch still receives the commit even though the job then blocks.
+void test_recorded_pr_unusable() {
+    auto run = [](const std::string& name, const std::string& state, const std::string& pr_head) {
+        Rig rig(name);
+        rig.job.state = State::PullRequest;
+        rig.job.pr_number = 7;
+        std::string view = pr_json(pr_head, "SUCCESS");
+        view.replace(view.find("OPEN"), 4, state);
+        rig.gh_runner.view_output = view;
+        const RoleResult r = rig.exec->run(Role::Implementation, rig.job);
+        std::ifstream in(rig.settings.evidence_file);
+        const std::string evidence((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        return is(r, EventKind::Blocked) && rig.gh_runner.creates == 0 && rig.gh_runner.list_argvs.empty() &&
+               rig.runner.push_calls == 1 &&
+               evidence.find("PR: BLOCKED PR #7 is closed or its head differs from the job head") != std::string::npos;
+    };
+    check(run("pr-closed", "CLOSED", kHead), "recorded PR closed outside the pipeline: blocked, no second PR, no lookup");
+    check(run("pr-merged", "MERGED", kHead), "recorded PR already merged: blocked, no second PR, no lookup");
+    check(run("pr-head", "OPEN", std::string(40, 'c')), "recorded PR head differs from the job head: blocked, no second PR");
+
+    Rig blocked("pr-closed-state");
+    blocked.job.state = State::PullRequest;
+    blocked.job.pr_number = 7;
+    blocked.job.pull_request_open = true;
+    const JobRecord after = transition(blocked.job, Event{EventKind::Blocked}, Policy{}).next;
+    check(after.pr_number == 7 && after.pull_request_open, "blocking keeps the recorded PR on the job");
+}
+
 void test_qa() {
     Rig a("qa1");
     a.runner.names = "src/a.cpp\ntests/a_test.cpp\n";
@@ -351,6 +381,7 @@ void test_ci() {
 
 int main() {
     test_pr_creation();
+    test_recorded_pr_unusable();
     test_qa();
     test_qa_dirty_and_profiles();
     test_review();
