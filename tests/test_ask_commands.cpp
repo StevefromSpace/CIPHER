@@ -265,6 +265,50 @@ void test_memory_share_bypasses_tool_loop() {
           "share: no tools are offered or run with shared memory", "text was: " + result.text);
 }
 
+// ---------------------------------------------------------------------------
+// runtime_status: one line for the REPL `status` output
+// ---------------------------------------------------------------------------
+
+void test_runtime_status_without_backend() {
+    cipher::AskCommands ask(nullptr);
+    check(ask.runtime_status() == "Ask backend for this session: none configured (ask is disabled)",
+          "runtime status: null backend says ask is disabled", "text was: " + ask.runtime_status());
+}
+
+void test_runtime_status_backend_without_loop_or_memory() {
+    ScriptedBackend backend;
+    cipher::AskCommands ask(&backend);
+    check(ask.runtime_status() ==
+              "Ask backend for this session: scripted_backend (model tool calls: off, memory sharing: off)",
+          "runtime status: backend id only, tool calls and memory sharing off",
+          "text was: " + ask.runtime_status());
+}
+
+void test_runtime_status_with_tool_loop_and_memory() {
+    ScriptedBackend backend;
+    cipher::ToolRegistry registry;
+    cipher::ModelToolLoop loop(backend, registry,
+                               [](const std::string&, const std::string&, const std::string&) { return true; },
+                               30.0, cipher::model_offered_tool_ids());
+    const auto memory = memory_with_canary("runtime");
+    cipher::AskCommands ask(&backend, 30.0, &loop, &memory);
+
+    const std::string status = ask.runtime_status();
+    check(status == "Ask backend for this session: scripted_backend (model tool calls: on, memory sharing: on)",
+          "runtime status: tool calls and memory sharing on", "text was: " + status);
+    check(status.find('\n') == std::string::npos, "runtime status: exactly one line",
+          "text contained a newline: " + status);
+}
+
+void test_runtime_status_memory_disabled_without_file() {
+    ScriptedBackend backend;
+    const cipher::MemoryCommands memory("", cipher::PermissionPolicy{});
+    cipher::AskCommands ask(&backend, 30.0, nullptr, &memory);
+    check(ask.runtime_status() ==
+              "Ask backend for this session: scripted_backend (model tool calls: off, memory sharing: off)",
+          "runtime status: memory object without a file reports sharing off", "text was: " + ask.runtime_status());
+}
+
 } // namespace
 
 int main() {
@@ -281,6 +325,10 @@ int main() {
     test_memory_share_respects_policy();
     test_memory_share_fails_closed_on_non_local_route();
     test_memory_share_bypasses_tool_loop();
+    test_runtime_status_without_backend();
+    test_runtime_status_backend_without_loop_or_memory();
+    test_runtime_status_with_tool_loop_and_memory();
+    test_runtime_status_memory_disabled_without_file();
 
     std::cout << "\n" << g_passes << " passed, " << g_failures << " failed\n";
     return g_failures == 0 ? 0 : 1;
