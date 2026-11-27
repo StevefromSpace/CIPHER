@@ -308,3 +308,7 @@ Observed: the `events.log` line for the schema 1 record has no `run=` and no `ts
 record has no run_id and the timestamp is only written with one (`src/orchestration/event_log.cpp:60`).
 Not verified: a record written by a real older binary (the legacy files were made by editing a current record),
 and Linux.
+
+## Local executor real-model check (2026-11-28)
+
+Phase C slices C1-C4 are merged (#76, #78, #79, #80). C5 ran the manual validator `cipher_local_executor_validation` (not in CTest) against local Ollama `qwen2.5:3b`: 3 of 3 runs failed with `ImplementationFailed` (non-JSON replies, rejected `fs.edit`). A full `orchestration_agent=local` job on a real repo was not run. Details: `docs/ORCHESTRATION_STATUS.md`, ADR 25.

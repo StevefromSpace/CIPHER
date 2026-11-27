@@ -73,6 +73,13 @@ The `cipher` executable links `cipher_orchestration`. With `orchestration_dir=<f
 - **Not verified:** `ClaudeToolAgent` has only been tested with a fake runner; no live Claude call has been made. It is paid per step.
 - **Not implemented:** independent review, autonomous merge. Security-sensitive jobs stay `NEEDS_HUMAN`.
 
+## Local executor (Phase C, C1-C4 merged, C5 recorded)
+
+- `orchestration_agent=local` runs `ImplementationRig` with `LocalToolAgent` over the configured Ollama/llama/OpenClaw backend (PRs #76, #78, #79, #80; design in `docs/PHASE_C_LOCAL_EXECUTOR.md`). Writes are docs-only; prompt cap 3900 chars; 120 s per request.
+- **Verified:** scripted-backend tests (CTest) only.
+- **Real-model check (2026-11-28, free, local, not CI):** `cipher_local_executor_validation` (`tests/local_executor_real_validation.cpp`, manual, not in CTest) drove the rig against Ollama `qwen2.5:3b` in a throwaway git repo on one task (append one line to `docs/NOTES.md`). Three runs, **all FAIL** (`ImplementationFailed`): one reply was not valid JSON before any tool call; two runs made `fs.edit` calls that were rejected (`old_text not found` / `ambiguous`) before a non-JSON reply. No file change committed. Each run took ~30 s or less. Prompt size never reached the 3900-char cap (the tiny repo and short transcript; budget behavior on a real repo is still unmeasured). No tuning was attempted.
+- **Conclusion:** with `qwen2.5:3b` the local executor is not shown to complete even a one-line docs edit. Full job on a real repo (issue, PR) was not run. Larger model not tried.
+
 ## Pipeline roles (Milestone C) - fake-tested only
 
 `PipelineExecutor` (src/orchestration/pipeline_roles.cpp) plugs into the existing state machine as the fallback of `ImplementationExecutor`; there is no second engine.
