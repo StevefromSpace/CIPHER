@@ -281,14 +281,6 @@ Historical milestone order was v0.2 → v0.3 → v0.4 → v0.5 → v1. All of th
 3. **v0.5 tool architecture (merged):** shipped in PRs #19–#22 per `docs/V05_TOOL_ARCHITECTURE.md`. PR #12 was closed unmerged and superseded by that rewrite.
 4. **Future milestones (deferred):** issues #6, #7 and #8 stay open (see `docs/RESET_RECOVERY.md`). PR #3 is closed and must not be revived. Any new subprocess or hosted-provider work starts a new milestone from `main`.
 
-## OpenClaw backend (C++)
-
-`openclaw_path` in `cipher.conf` (absolute path to the OpenClaw CLI) makes `ask` use `OpenClawBackend`
-(`src/openclaw_backend.cpp`). It runs the CLI through `ProcessRunner` (no shell), accepts only `ollama/` models,
-refuses tool requests, and refuses to run if `tools list --json` is non-empty or unreadable. It is mutually
-exclusive with `ollama_port` and `llama_model_path`. Verified with a scripted runner only (32/32 CTest on Windows);
-no real OpenClaw CLI is installed here, so live behavior and the exact CLI flags are UNVERIFIED.
-
 ## `job reconcile` run with the real binary (2026-11-17)
 
 `cipher.exe` built from this branch (schema 4) was run against disposable records in a temp directory; no real

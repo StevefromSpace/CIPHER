@@ -181,13 +181,6 @@ ConfigResult parse_lines(std::istream& stream) {
         } else if (key == "orchestration_qa") {
             result.config.orchestration_qa = value;
 
-        } else if (key == "openclaw_path") {
-            if (!std::filesystem::path(value).is_absolute()) {
-                result.errors.push_back({line_number, "Invalid openclaw_path '" + value + "'. Use an absolute path."});
-            } else {
-                result.config.openclaw_path = value;
-            }
-
         } else if (key == "ollama_port") {
             int port = 0;
             if (!parse_port(value, port)) {
@@ -249,8 +242,8 @@ ConfigResult parse_lines(std::istream& stream) {
     }
 
     // One backend serves `ask`. Choosing between two silently would hide which one sees the owner's prompts.
-    if ((result.config.ollama_port != 0) + !result.config.llama.model_path.empty() + !result.config.openclaw_path.empty() > 1) {
-        result.errors.push_back({0, "Set only one of ollama_port, llama_model_path or openclaw_path. `ask` uses one backend."});
+    if (result.config.ollama_port != 0 && !result.config.llama.model_path.empty()) {
+        result.errors.push_back({0, "Set either ollama_port or llama_model_path, not both. `ask` uses one local backend."});
     }
 
     // If any errors occurred, reset the config to safe defaults so the caller
