@@ -390,6 +390,74 @@ void test_failures() {
     }
 }
 
+void test_docs_policy() {
+    const fs::path base = fresh_base("docs-policy");
+    const fs::path root = base / "wt";
+    fs::create_directories(root / "docs");
+    std::ofstream(root / "docs" / "a.md", std::ios::binary) << "hello\n";
+    std::ofstream(root / "README.md", std::ios::binary) << "readme\n";
+    FakeRunner runner;
+    WorktreeTools tools(root, runner, "git", {}, default_docs_only_policy());
+
+    ToolCall write = call("fs.write", "docs/new/b.md");
+    write.content = "created";
+    check(tools.call(write).ok && fs::exists(root / "docs" / "new" / "b.md"), "docs-only: docs write allowed");
+    write.path = "README.md";
+    check(tools.call(write).ok, "docs-only: top-level markdown write allowed");
+    ToolCall edit = call("fs.edit", "docs/a.md");
+    edit.old_text = "hello";
+    edit.new_text = "bye";
+    check(tools.call(edit).ok && has(slurp(root / "docs" / "a.md"), "bye"), "docs-only: docs edit allowed");
+    check(tools.call(call("fs.read", "docs/a.md")).ok, "docs-only: reads still allowed");
+
+    for (const char* denied : {"src/x.cpp", "tests/x.cpp", "Tests/x.cpp", ".github/workflows/ci.yml", "docs/agent_role_contract.md",
+                               "docs/AGENT_ROLE_CONTRACT.md", "LICENSE", "license.md", "docs/RELEASE.md", "docs/release.md",
+                               "CMakeLists.txt", "cmakelists.txt", ".git/x", ".GIT/x", "tools/x.py", "../x.md", "docs/../../x.md"}) {
+        write.path = denied;
+        edit.path = denied;
+        check(!tools.call(write).ok && !fs::exists(root / denied), "docs-only: write denied");
+        check(!tools.call(edit).ok, "docs-only: edit denied");
+    }
+
+    // The default policy is unchanged and still allows src/ (existing behavior).
+    WorktreeTools normal(root, runner, "git", {}, default_worktree_policy());
+    write.path = "src/ok.cpp";
+    check(normal.call(write).ok, "docs-only: default policy still allows src write");
+    fs::remove_all(base);
+
+    // Executor wiring: docs-only completes a docs change, rejects a src change.
+    {
+        Fixture f("docs-only-ok");
+        Escalator fallback;
+        ScriptedAgent agent = doc_agent();
+        ImplementationSettings s = settings(f, 31);
+        s.write_policy = WritePolicy::DocsOnly;
+        ImplementationExecutor executor(s, *f.allocator, f.runner, agent, fallback);
+        JobRecord record;
+        record.state = State::Implementation;
+        check(executor.run(Role::Implementation, record).event.kind == EventKind::ImplementationComplete,
+              "docs-only: executor completes a docs change");
+        fs::remove_all(f.base);
+    }
+    {
+        Fixture f("docs-only-src");
+        Escalator fallback;
+        ScriptedAgent agent;
+        ToolCall src = call("fs.write", "src/evil.cpp");
+        src.content = "int x;\n";
+        agent.script = {{false, src, ""}, {true, {}, "wrote src"}};
+        ImplementationSettings s = settings(f, 32);
+        s.write_policy = WritePolicy::DocsOnly;
+        ImplementationExecutor executor(s, *f.allocator, f.runner, agent, fallback);
+        JobRecord record;
+        record.state = State::Implementation;
+        check(executor.run(Role::Implementation, record).event.kind == EventKind::ImplementationFailed &&
+                  !fs::exists(f.base / "worktrees" / "job-32" / "src" / "evil.cpp"),
+              "docs-only: executor refuses a src change");
+        fs::remove_all(f.base);
+    }
+}
+
 void test_readonly() {
     Fixture f("readonly");
     Escalator fallback;
@@ -451,6 +519,7 @@ int main() {
     test_claude_agent();
     test_end_to_end();
     test_failures();
+    test_docs_policy();
     std::cout << (failures == 0 ? "ALL PASSED\n" : "FAILURES\n");
     return failures == 0 ? 0 : 1;
 }

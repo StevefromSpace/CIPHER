@@ -117,7 +117,9 @@ RoleResult ImplementationExecutor::execute_implementation() {
     if (allocator_.allocate(settings_.issue_number) == WorktreeOutcome::Conflict)
         return {Event{EventKind::Blocked}, family};
     const std::filesystem::path root = allocator_.path_for(settings_.issue_number);
-    WorktreeTools tools(root, runner_, settings_.git_executable, settings_.commands, default_worktree_policy());
+    WorktreeTools tools(root, runner_, settings_.git_executable, settings_.commands,
+                       settings_.write_policy == WritePolicy::DocsOnly ? default_docs_only_policy()
+                                                                       : default_worktree_policy());
 
     std::vector<ToolTurn> transcript;
     std::string summary;

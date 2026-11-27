@@ -54,6 +54,8 @@ private:
 // Parses one agent reply (pure, throws std::runtime_error on anything malformed).
 AgentStep parse_agent_reply(const std::string& text);
 
+enum class WritePolicy { Default, DocsOnly };
+
 struct ImplementationSettings {
     int issue_number = 0;
     std::string task;                                   // structured task text from the owner
@@ -62,6 +64,7 @@ struct ImplementationSettings {
     std::string verify_command_id;                      // optional: must exit 0 before commit
     std::string model_family;                           // reported to the orchestrator (reviewer independence)
     int max_steps = 20;
+    WritePolicy write_policy = WritePolicy::Default;    // DocsOnly = Phase C scope 1 (docs/* and *.md writes only)
     std::filesystem::path evidence_file;                // optional; written after every execution
 };
 
