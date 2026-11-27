@@ -43,6 +43,10 @@ public:
 
     AskCommandResult execute(const std::string& input);
 
+    /// One line for `status`: the backend id, whether model tool calls and memory sharing are on.
+    /// Never prints paths, ports or keys.
+    std::string runtime_status() const;
+
 private:
     /// ok_prefix is prepended only when the backend answered.
     std::string submit(const std::string& prompt, const std::string& ok_prefix = "");

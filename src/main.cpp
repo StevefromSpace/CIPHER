@@ -14,6 +14,7 @@
 #include "cipher/orchestration/process_runner.hpp"
 #include "cipher/orchestration/job_commands.hpp"
 #include "cipher/ollama_backend.hpp"
+#include "cipher/openclaw_backend.hpp"
 #include "cipher/tool_commands.hpp"
 #include "cipher/tool_registry.hpp"
 
@@ -116,7 +117,11 @@ int main() {
 
     // The local backends are opt-in; config allows at most one. With neither set, `ask` reports that it is disabled.
     std::unique_ptr<cipher::IAssistantBackend> backend;
-    if (cfg.ollama_port != 0) {
+    if (!cfg.openclaw_path.empty()) {
+        cipher::OpenClawConfig openclaw_config;
+        openclaw_config.cli_path = cfg.openclaw_path;
+        backend = std::make_unique<cipher::OpenClawBackend>(openclaw_config);
+    } else if (cfg.ollama_port != 0) {
         cipher::OllamaConfig ollama_config;
         ollama_config.port = cfg.ollama_port;
         backend = std::make_unique<cipher::OllamaBackend>(ollama_config);
@@ -239,6 +244,11 @@ int main() {
         const cipher::CommandResponse response = core.execute(input);
         if (!response.text.empty()) {
             std::cout << response.text << '\n';
+        }
+        // Same leading-whitespace trim as CipherCore, so the runtime line appears only for a bare `status`.
+        const std::size_t status_start = input.find_first_not_of(" \t\r\n");
+        if (status_start != std::string::npos && input.substr(status_start) == "status") {
+            std::cout << ask.runtime_status() << '\n';
         }
         if (!memory_reply.text.empty()) {
             std::cout << memory_reply.text << '\n';
