@@ -276,10 +276,10 @@ To prevent confusion or hallucination by future AI agents, the following capabil
 
 Historical milestone order was v0.2 → v0.3 → v0.4 → v0.5 → v1. All of these are now merged; the list below replaces the old "next" items. See the Milestone Status table in `docs/ROADMAP.md`.
 
-1. **v1.0.0 release (DONE):** tag `v1.0.0` and GitHub release published 2026-10-29. License intentionally deferred per owner (ADR 23); no `LICENSE` file. On 2026-11-27 the owner delegated decisions on remaining items (PR #12, Stage 10B and the rest) to the lead developer agent. PR #12 is CLOSED (draft, closed 2026-10-29), superseded by PRs #19-#22. Orchestration PRs #51-#57 (stages 11-16) are open and will be reviewed in order by the lead. The v0.1/v0.2/v0.3/v0.5 owner review boxes are unchanged.
+1. **v1.0.0 release (DONE):** tag `v1.0.0` and GitHub release published 2026-10-29. License intentionally deferred per owner (ADR 23); no `LICENSE` file. On 2026-11-27 the owner delegated decisions on remaining items (PR #12, Stage 10B and the rest) to the lead developer agent. PR #12 is CLOSED (draft, closed 2026-10-29), superseded by PRs #19-#22. Orchestration stages 11-16 are merged (PRs #51-#54, #56, #57); PR #55 was closed as validation-only. Also merged: #62 (recall gate, exact `yes`), #63 (owner review ticks), #64 (QA write blacklist), #65 (POSIX process-tree kill, Issue #6), #66 (memory file 16 MiB cap on load), #67 (filesystem error message hardening, Windows junction test), #68 (v1 loop gate hardening). The v0.1/v0.2/v0.3/v0.5 owner review boxes are unchanged.
 2. **Historical gates (superseded):** the v0.2 and v0.3 owner review gates, the v0.3 memory permission gate (`remember`/`forget` through `PermissionPolicy`), and the v0.4 no-model check are merged. Their record is in `docs/ROADMAP.md`.
 3. **v0.5 tool architecture (merged):** shipped in PRs #19–#22 per `docs/V05_TOOL_ARCHITECTURE.md`. PR #12 was closed unmerged and superseded by that rewrite.
-4. **Future milestones (deferred):** issues #6, #7 and #8 stay open (see `docs/RESET_RECOVERY.md`). PR #3 is closed and must not be revived. Any new subprocess or hosted-provider work starts a new milestone from `main`.
+4. **Future milestones (deferred):** issues #7 and #8 stay open (see `docs/RESET_RECOVERY.md`). PR #3 is closed and must not be revived. Any new subprocess or hosted-provider work starts a new milestone from `main`.
 
 ## OpenClaw backend (C++)
 

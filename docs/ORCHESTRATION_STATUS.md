@@ -13,6 +13,7 @@ It does not change the contract.
 | 6-8 | Claude executor and role executor, process runner, recovery, event log | Implemented and tested |
 | 9 | Executable resolver, `gh` process runner | Implemented and tested with fakes |
 | 10A | Real git worktree backend, strict JSON GitHub read, Claude executor hardening | Implemented and tested (this PR) |
+| 11-16 | REPL job commands, implementation executor, PR/QA/CI observer, configurable QA profiles, read-only Research/Architecture roles | Merged (#51-#54, #56); #55 closed as validation-only; #57 (stage 16) merged. #64 added the QA write blacklist for build/test definitions and case-insensitive protected paths |
 
 ## Components
 
@@ -89,7 +90,7 @@ The `cipher` executable links `cipher_orchestration`. With `orchestration_dir=<f
 - QA verdicts: PASS (Approve), FAIL (ChangesRequested), BLOCKED. Blocked if HEAD differs from the job head before or after, a command times out/overflows, or `git status --untracked-files=no` shows tracked files modified by QA.
 - Evidence lines record command id, exact head SHA and exit code in the job evidence log.
 - Fake-tested: `tests/test_orchestration_pipeline.cpp`. **Locally verified (Windows, real processes):** `build-stage10a\cipher_qa_real_validation.exe <git> <cmake> <ctest> <empty dir>` (manual, not in CTest; needs MSVC env) runs `check,build,ctest` through `SystemProcessRunner` in a disposable git repo: PASS on exact head with per-command SHA evidence and out-of-tree build; failing ctest -> FAIL; 1.5 s timeout kills a 30 s sleep -> BLOCKED in ~1 s; 64-byte output cap -> BLOCKED; QA overwriting a tracked file -> BLOCKED; head mismatch -> BLOCKED (13/13 checks). `qa_timeout_ms` is now a `PipelineSettings` field. Not externally verified: Linux real run, `python` profile. Locally on Windows, `tools/pipeline/tests` shows 6 failures (FAILED_VERIFICATION in orchestrator tests) while CI on Linux passes; the `python` profile is therefore unproven on Windows.
-- Pilot readiness: still not ready. Independent security review is unavailable, #51/#52/#53 are unmerged, Claude tool use is unverified live.
+- Pilot readiness: still not ready. Independent security review is unavailable, #51-#54 and #56 are merged (#57 stage 16 is merged), Claude tool use is unverified live.
 
 ## Antigravity / Gemini investigation
 
