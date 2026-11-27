@@ -288,3 +288,23 @@ Historical milestone order was v0.2 → v0.3 → v0.4 → v0.5 → v1. All of th
 refuses tool requests, and refuses to run if `tools list --json` is non-empty or unreadable. It is mutually
 exclusive with `ollama_port` and `llama_model_path`. Verified with a scripted runner only (32/32 CTest on Windows);
 no real OpenClaw CLI is installed here, so live behavior and the exact CLI flags are UNVERIFIED.
+
+## `job reconcile` run with the real binary (2026-11-17)
+
+`cipher.exe` built from this branch (schema 4) was run against disposable records in a temp directory; no real
+`.agents/pipeline` record was touched. All records were in IMPLEMENTATION with no in-flight flag.
+
+| Record | Command | Output | Record afterwards |
+|---|---|---|---|
+| schema 1, count 1 | `job step 2` | `issue 2 has legacy execution accounting that must be settled first ... No step taken.` | unchanged |
+| schema 1, count 1 | `job reconcile 2` | explains keep 1 or lower to 0, `Nothing changed; re-run with --confirm.` | unchanged |
+| schema 1, count 1 | `job reconcile 2 --confirm` | `reconciled (k). job 2: IMPLEMENTATION implementation_executions=1` | schema 4, count 1, `accounting_unreconciled=0`, `pr_number=0` |
+| schema 2, count 2 | `job reconcile 3 --confirm --never-dispatched` | `--never-dispatched needs evidence text ... Nothing changed.` | unchanged |
+| schema 2, count 2 | `job reconcile 3 --confirm --never-dispatched <evidence>` | `reconciled (k-1). job 3: IMPLEMENTATION implementation_executions=1` | schema 4, count 1, evidence text in `events.log` |
+| schema 3, `accounting_unreconciled=0` | `job reconcile 4 --confirm` | `nothing to reconcile.` | not rewritten (still schema 3) |
+| schema 3, `accounting_unreconciled=1` | `job reconcile 5 --confirm`, then again | `reconciled (k).` then `nothing to reconcile.` | schema 4, count 1 |
+
+Observed: the `events.log` line for the schema 1 record has no `run=` and no `ts=` field, because a schema 1
+record has no run_id and the timestamp is only written with one (`src/orchestration/event_log.cpp:60`).
+Not verified: a record written by a real older binary (the legacy files were made by editing a current record),
+and Linux.

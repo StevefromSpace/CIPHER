@@ -1,5 +1,7 @@
 // PR creation, QA, mechanical review and CI observation. All fakes: scripted git/test runner and scripted gh runner.
 
+#include "cipher/orchestration/job_store_file.hpp"
+#include "cipher/orchestration/orchestrator.hpp"
 #include "cipher/orchestration/pipeline_roles.hpp"
 #include "cipher/orchestration/qa_profile.hpp"
 
@@ -65,16 +67,32 @@ public:
     }
 };
 
+// Thrown to model a killed process: it is not a std::exception, so no role or adapter handler swallows it.
+struct Killed {};
+
 class FakeGh final : public GhRunner {
 public:
-    std::string list_output;     // existing PR numbers
+    int kill_at_create = 0;      // 1 = die before GitHub makes the PR, 2 = die after it exists
+    std::string list_output;     // existing PR numbers, all targeting list_base
+    std::string list_base = "main";
+    std::vector<std::vector<std::string>> list_argvs;
     std::string view_output = pr_json(kHead, "SUCCESS");
     int create_exit = 0;
+    bool pr_exists_after_failed_create = false;  // models a timeout after GitHub already made the PR
     int creates = 0;
     std::string create_output = "https://github.com/o/r/pull/7\n";
     GhResult run(const std::vector<std::string>& argv) override {
-        if (argv[1] == "pr" && argv[2] == "list") return {0, list_output};
-        if (argv[2] == "create") { ++creates; return {create_exit, create_output}; }
+        if (argv[1] == "pr" && argv[2] == "list") {
+            list_argvs.push_back(argv);
+            return {0, argv[6] == list_base ? list_output : std::string()};  // argv[5..6] = --base <branch>
+        }
+        if (argv[2] == "create") {
+            if (kill_at_create == 1) throw Killed{};
+            ++creates;
+            if (kill_at_create == 2) { list_output = "7\n"; throw Killed{}; }
+            if (create_exit != 0 && pr_exists_after_failed_create) list_output = "7\n";
+            return {create_exit, create_output};
+        }
         return {0, view_output};
     }
 };
@@ -130,6 +148,23 @@ void test_pr_creation() {
     r = dup.exec->run(Role::Implementation, dup.job);
     check(is(r, EventKind::PullRequestOpened) && dup.gh_runner.creates == 0, "existing PR reused, no duplicate");
 
+    Rig timed("pr-timeout");
+    timed.job.state = State::PullRequest;
+    timed.gh_runner.create_exit = 1;
+    timed.gh_runner.pr_exists_after_failed_create = true;
+    r = timed.exec->run(Role::Implementation, timed.job);
+    check(is(r, EventKind::PullRequestOpened) && timed.gh_runner.creates == 1,
+          "create failed after GitHub made the PR: the PR is found and reused, not blocked");
+    r = timed.exec->run(Role::Implementation, timed.job);
+    check(is(r, EventKind::PullRequestOpened) && timed.gh_runner.creates == 1,
+          "a retry after that reuses the PR and never creates a second one");
+
+    Rig failed("pr-failed");
+    failed.job.state = State::PullRequest;
+    failed.gh_runner.create_exit = 1;
+    check(is(failed.exec->run(Role::Implementation, failed.job), EventKind::Blocked),
+          "create failed and no PR exists: blocked");
+
     Rig two("pr3");
     two.job.state = State::PullRequest;
     two.gh_runner.list_output = "7\n8\n";
@@ -163,14 +198,150 @@ void test_pr_creation() {
     other.exec->run(Role::Implementation, other.job);
     check(other.next.calls == 1, "implementation state delegated to next");
 
-    GhRunner* none = nullptr;
-    (void)none;
+    Rig argv_rig("pr-argv");
+    argv_rig.job.state = State::PullRequest;
+    argv_rig.exec->run(Role::Implementation, argv_rig.job);
+    const std::vector<std::string> expected_list{"gh", "pr", "list", "--head", "cipher/job-5", "--base", "main",
+                                                 "--state", "open", "--json", "number", "--jq", ".[].number"};
+    check(argv_rig.gh_runner.list_argvs.size() == 1 && argv_rig.gh_runner.list_argvs[0] == expected_list,
+          "PR lookup argv is exact and scoped by head and base");
+
+    Rig fresh("pr-number-fresh");
+    fresh.job.state = State::PullRequest;
+    r = fresh.exec->run(Role::Implementation, fresh.job);
+    check(is(r, EventKind::PullRequestOpened) && r.event.pr_number == 7, "the opened PR number is reported");
+    check(transition(fresh.job, r.event, Policy{}).next.pr_number == 7, "the PR number is recorded on the job");
+
+    Rig known("pr-number-known");
+    known.job.state = State::PullRequest;
+    known.job.pr_number = 7;
+    r = known.exec->run(Role::Implementation, known.job);
+    check(is(r, EventKind::PullRequestOpened) && known.gh_runner.list_argvs.empty() && known.gh_runner.creates == 0,
+          "a recorded PR is read directly: no lookup, no create");
+
+    Rig other_base("pr-other-base");
+    other_base.job.state = State::PullRequest;
+    other_base.gh_runner.list_output = "7\n";
+    other_base.gh_runner.list_base = "release";
+    r = other_base.exec->run(Role::Implementation, other_base.job);
+    check(is(r, EventKind::PullRequestOpened) && other_base.gh_runner.creates == 1,
+          "an open PR from the same head into another base is not matched");
+
     bool threw = false;
+    try { Rig(std::string("pr-unsafe-head")).gh.find_open_pull_requests("--evil", "main"); } catch (const GhRequestError&) { threw = true; }
+    check(threw, "lookup: unsafe head branch rejected");
+    threw = false;
+    try { Rig(std::string("pr-unsafe-base")).gh.find_open_pull_requests("cipher/job-5", "../main"); } catch (const GhRequestError&) { threw = true; }
+    check(threw, "lookup: unsafe base branch rejected");
+    threw = false;
     try { Rig(std::string("pr9")).gh.create_pull_request("--evil", "main", "t", "f"); } catch (const GhRequestError&) { threw = true; }
     check(threw, "unsafe branch rejected");
     threw = false;
     try { Rig(std::string("pr10")).gh.create_pull_request("a", "a", "t", "f"); } catch (const GhRequestError&) { threw = true; }
     check(threw, "head == base rejected");
+}
+
+// Pins what a retry does today when the job's recorded PR is no longer usable. No recovery is attempted:
+// reopening, replacing or abandoning the PR is an owner decision. Note the push runs BEFORE the PR is read,
+// so the job branch still receives the commit even though the job then blocks.
+void test_recorded_pr_unusable() {
+    auto run = [](const std::string& name, const std::string& state, const std::string& pr_head) {
+        Rig rig(name);
+        rig.job.state = State::PullRequest;
+        rig.job.pr_number = 7;
+        std::string view = pr_json(pr_head, "SUCCESS");
+        view.replace(view.find("OPEN"), 4, state);
+        rig.gh_runner.view_output = view;
+        const RoleResult r = rig.exec->run(Role::Implementation, rig.job);
+        std::ifstream in(rig.settings.evidence_file);
+        const std::string evidence((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        return is(r, EventKind::Blocked) && rig.gh_runner.creates == 0 && rig.gh_runner.list_argvs.empty() &&
+               rig.runner.push_calls == 1 &&
+               evidence.find("PR: BLOCKED PR #7 is closed or its head differs from the job head") != std::string::npos;
+    };
+    check(run("pr-closed", "CLOSED", kHead), "recorded PR closed outside the pipeline: blocked, no second PR, no lookup");
+    check(run("pr-merged", "MERGED", kHead), "recorded PR already merged: blocked, no second PR, no lookup");
+    check(run("pr-head", "OPEN", std::string(40, 'c')), "recorded PR head differs from the job head: blocked, no second PR");
+
+    Rig blocked("pr-closed-state");
+    blocked.job.state = State::PullRequest;
+    blocked.job.pr_number = 7;
+    blocked.job.pull_request_open = true;
+    const JobRecord after = transition(blocked.job, Event{EventKind::Blocked}, Policy{}).next;
+    check(after.pr_number == 7 && after.pull_request_open, "blocking keeps the recorded PR on the job");
+}
+
+// A save that lands on disk and then throws: the process died after the job save, before it moved on.
+class WriteThenDieStore final : public JobStore {
+public:
+    explicit WriteThenDieStore(const fs::path& dir) : inner_(dir) {}
+    bool die = false;
+    void save(int issue, const JobRecord& job) override {
+        inner_.save(issue, job);
+        if (die) throw Killed{};
+    }
+    std::optional<JobRecord> load(int issue) const override { return inner_.load(issue); }
+
+private:
+    FileJobStore inner_;
+};
+
+// Crash matrix for the PR step. The implementation-dispatch windows (before save, after save, after dispatch
+// before report) are covered in test_orchestration_recovery.cpp; these are the windows around push and create.
+// A "restart" is a new Orchestrator over the same store directory.
+void test_pr_step_crash_matrix() {
+    auto seed = [](Rig& rig) {
+        JobRecord job;
+        job.state = State::PullRequest;
+        job.head_sha = kHead;
+        job.implementation_executions = 1;
+        job.run_id = "run-pr-crash";
+        FileJobStore(rig.base / "jobs").save(5, job);
+    };
+    auto unchanged = [](const JobRecord& job) {
+        return job.state == State::PullRequest && job.pr_number == 0 && !job.pull_request_open &&
+               job.implementation_executions == 1 && job.run_id == "run-pr-crash";
+    };
+    auto opened = [](const JobRecord& job) {
+        return job.state == State::Qa && job.pr_number == 7 && job.pull_request_open &&
+               job.implementation_executions == 1 && job.run_id == "run-pr-crash";
+    };
+
+    for (int window = 1; window <= 2; ++window) {
+        const std::string label = window == 1 ? "killed after push, before create: " : "killed after create, before job save: ";
+        Rig rig("pr-crash" + std::to_string(window));
+        seed(rig);
+        rig.gh_runner.kill_at_create = window;
+        bool killed = false;
+        {
+            FileJobStore store(rig.base / "jobs");
+            Orchestrator orch(5, IssueFacts{}, *rig.exec, store, Policy{});
+            try { orch.advance(); } catch (const Killed&) { killed = true; }
+        }
+        check(killed && rig.runner.push_calls == 1 && unchanged(*FileJobStore(rig.base / "jobs").load(5)),
+              (label + "the saved record is untouched").c_str());
+        rig.gh_runner.kill_at_create = 0;
+        FileJobStore store(rig.base / "jobs");
+        Orchestrator restarted(5, IssueFacts{}, *rig.exec, store, Policy{});
+        restarted.advance();
+        check(rig.gh_runner.creates == 1 && opened(*store.load(5)),
+              (label + "the retry ends with exactly one PR, recorded, and no extra charge").c_str());
+    }
+
+    Rig rig("pr-crash3");
+    seed(rig);
+    {
+        WriteThenDieStore store(rig.base / "jobs");
+        Orchestrator orch(5, IssueFacts{}, *rig.exec, store, Policy{});
+        store.die = true;
+        try { orch.advance(); } catch (const Killed&) {}
+    }
+    FileJobStore store(rig.base / "jobs");
+    check(rig.gh_runner.creates == 1 && opened(*store.load(5)),
+          "killed after job save, before state advance: the PR is recorded on disk");
+    Orchestrator restarted(5, IssueFacts{}, *rig.exec, store, Policy{});
+    check(opened(restarted.job()) && rig.gh_runner.creates == 1,
+          "killed after job save: the restart resumes after the PR step, so no second PR and no step back");
 }
 
 void test_qa() {
@@ -292,6 +463,8 @@ void test_ci() {
 
 int main() {
     test_pr_creation();
+    test_recorded_pr_unusable();
+    test_pr_step_crash_matrix();
     test_qa();
     test_qa_dirty_and_profiles();
     test_review();
