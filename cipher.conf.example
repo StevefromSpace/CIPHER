@@ -160,6 +160,8 @@ log_level = info
 # A pattern that refuses memory commands. Repeat the line for more patterns.
 # A pattern is matched against "<action> <id>", the action alone, or "memory".
 # Actions: remember, recall, forget, share (share = ask --memory).
+# `memories` lists ids only (no content), so it is not gated; a deny applies
+# to remember, recall, forget, and share on that id.
 # `*` works only at the start or end of a pattern.
 #   memory_deny = share *     never send any memory to a model
 #   memory_deny = *secret     refuse every action on the id "secret"
