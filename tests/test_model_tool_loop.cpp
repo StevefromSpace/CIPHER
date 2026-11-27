@@ -644,7 +644,7 @@ void test_v1_question_name_match_ignores_case() {
     FsHarness h;
     h.backend.replies = {"TOOL_CALL: filesystem.list", "It says hello.", "TOOL_CALL: filesystem.read note.txt", "It says hello."};
     cipher::ModelToolLoop loop = h.loop();
-    const std::string text = loop.run("List the folder, then tell me what \xC3\x89T\xC3\x89.TXT says.");
+    const std::string text = loop.run("What is in the folder? Then tell me what NOTE.TXT says.");
     check(starts_with(text, "It says hello.") && h.confirmations == 2 && h.backend.prompts.size() == 4,
           "v1 verify: a named file in different case still waits for a read", "text was: " + text);
 }
