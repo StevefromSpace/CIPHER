@@ -8,13 +8,13 @@ Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → 
 
 | Milestone | Status | Remaining work |
 |-----------|--------|----------------|
-| v0.1 foundation | COMPLETE (owner review open) | Owner review of source files (WAITING_FOR_OWNER) |
+| v0.1 foundation | COMPLETE | Owner review delegated to lead dev agent 2026-11-27; source review PASS (`src/logger.cpp`, `src/cipher_core.cpp` not read) |
 | v0.1.1 hardening | COMPLETE | None |
 | v0.2 configuration and diagnostics | COMPLETE | Owner-cleared. PR #13 merged to `main` (merge `dde6bc1`, from `7a27130`). Unreadable `cipher.conf` is a startup error; missing file uses defaults. |
 | v0.2.1 version consistency | COMPLETE | None |
-| v0.3 persistent memory foundation | IMPLEMENTED, OWNER REVIEW OPEN | Permission gate implemented on PR #14 (merged to `main`, `e1aac64`). `remember`/`forget` default to `Monitor`; denied operations leave the memory file byte-identical. Owner review (WAITING_FOR_OWNER). |
+| v0.3 persistent memory foundation | IMPLEMENTED, REVIEWED | Permission gate implemented on PR #14 (merged to `main`, `e1aac64`). `remember`/`forget` default to `Monitor`; denied operations leave the memory file byte-identical. Lead-agent review 2026-11-27 (owner-delegated): PASS; recall gating defect fixed in PR #62. |
 | v0.4 replaceable AI runtime interface | SUPERSEDED (historical; later milestones delivered the runtime) | No-model verification suite on PR #15 (`9047f13`, Draft, base PR #14 branch): core, memory and provider layer with no provider attached. The in-process `llama.cpp` runtime was approved by the owner (2026-10-28) and is delivered under v0.6 (DECISIONS §21). |
-| v0.5 permissioned tools | DESIGN SCOPE COMPLETE, OWNER REVIEW OPEN | Design `docs/V05_TOOL_ARCHITECTURE.md` (ADR 18 Accepted). All five documented phases merged (PR #19 registry and built-in tools, PR #20 owner `tool` commands, PR #21 `filesystem.read`, PR #22 owner confirmation for Ask tier). No later phase is documented. PR #12 is CLOSED (superseded by PRs #19-#22); no open decision. |
+| v0.5 permissioned tools | DESIGN SCOPE COMPLETE, REVIEWED | Design `docs/V05_TOOL_ARCHITECTURE.md` (ADR 18 Accepted). All five documented phases merged (PR #19 registry and built-in tools, PR #20 owner `tool` commands, PR #21 `filesystem.read`, PR #22 owner confirmation for Ask tier). No later phase is documented. PR #12 is CLOSED (superseded by PRs #19-#22); no open decision. Lead-agent review 2026-11-27 (owner-delegated): PASS; exact-`yes` confirmation fixed in PR #62; Windows junction behaviour not tested. |
 | v1.0.0 assistant loop | MERGED (PRs #34–#43); tag `v1.0.0` and GitHub release DONE (published 2026-10-29, Latest) | Model tool loop with governed tools, verification gate and bounded rounds; limits in `docs/V1_ASSISTANT_LOOP.md`. License intentionally deferred per owner (DECISIONS ADR 23); no `LICENSE` file. |
 
 ### Milestone dependencies
