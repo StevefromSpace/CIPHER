@@ -122,7 +122,7 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
 - [ ] Review the v0.3 source files and understand the memory subsystem and pipeline tools.
       *(The owner must do this step.)*
 - [x] Integrate persistent memory into command REPL (`remember`, `recall`, `forget`, `memories`; opt-in via `memory_file`; `cipher_memory_commands` library, 29 assertions).
-- [ ] Integrate persistent memory into the permission gate (not started). Decision: `remember` and `forget` default to `Monitor`; blacklist and override rules stay authoritative; denied operations must leave the memory file unchanged.
+- [x] Integrate persistent memory into the permission gate (merged: PR #14, `e1aac64` on `main`). Decision: `remember` and `forget` default to `Monitor`; blacklist and override rules stay authoritative; denied operations must leave the memory file unchanged.
 
 ## Next milestones
 

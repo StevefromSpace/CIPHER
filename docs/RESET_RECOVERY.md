@@ -32,7 +32,7 @@ git log --oneline -1   # expect 5b2b583 or a later main commit
 
 ## 3. Build and test (verified commands)
 
-Use a Developer shell (or run `vcvars64.bat` first). With Ninja:
+`scripts/verify.ps1` runs the Windows Release build and tests in one step (see `docs/DEVELOPMENT.md`). Manually, use a Developer shell (or run `vcvars64.bat` first). With Ninja:
 
 ```bat
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
