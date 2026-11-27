@@ -52,16 +52,18 @@ std::string describe(int issue, const JobRecord& job) {
 
 constexpr const char* kUsage =
     "Usage: job new <issue> [research] [design] [security] | job status <issue> | job list | "
-    "job task <issue> <text> | job step <issue> | job recover <issue> | job log";
+    "job task <issue> <text> | job step <issue> | job recover <issue> | job ci <issue> <pr> | job log";
 
 }  // namespace
 
-JobCommands::JobCommands(std::filesystem::path directory, RoleExecutor* executor, ExecutorFactory factory)
+JobCommands::JobCommands(std::filesystem::path directory, RoleExecutor* executor, ExecutorFactory factory,
+                         CiObserver ci)
     : directory_(directory),
       store_(directory),
       log_(directory / "events.log"),
       executor_(executor != nullptr ? executor : &default_executor()),
-      factory_(std::move(factory)) {}
+      factory_(std::move(factory)),
+      ci_(std::move(ci)) {}
 
 JobCommandResult JobCommands::execute(const std::string& input) {
     const std::vector<std::string> words = split(input);
@@ -81,6 +83,7 @@ JobCommandResult JobCommands::execute(const std::string& input) {
         if (verb == "step") return {true, step(rest)};
         if (verb == "recover") return {true, recover(rest)};
         if (verb == "log") return {true, log()};
+        if (verb == "ci") return {true, ci(rest)};
         if (verb == "task") return {true, task(rest)};
     } catch (const std::exception& error) {
         return {true, std::string("job error: ") + error.what()};
@@ -193,6 +196,28 @@ std::string JobCommands::task(const std::string& arguments) {
     out << text;
     if (!out) return "Could not save the task.";
     return "task saved for job " + std::to_string(issue) + "; run job step " + std::to_string(issue) + ".";
+}
+
+// Stateless and idempotent: the job record is the only state, so an interrupted `job ci` is simply run again.
+// The state machine rejects a CI result whose head differs from the job head (stale CI); that rejection is logged.
+std::string JobCommands::ci(const std::string& arguments) {
+    if (!ci_) return "job ci is unavailable: gh was not found on PATH.";
+    const std::vector<std::string> words = split(arguments);
+    const int issue = words.size() == 2 ? parse_issue(words[0]) : 0;
+    const int pr = words.size() == 2 ? parse_issue(words[1]) : 0;
+    if (issue == 0 || pr == 0) return "Usage: job ci <issue> <pr-number>";
+    const auto saved = store_.load(issue);
+    if (!saved) return "No job for issue " + std::to_string(issue) + ".";
+    if (saved->state != State::Ci) return "job is not waiting for CI. " + describe(issue, *saved);
+
+    const std::optional<Event> event = ci_(*saved, pr);
+    if (!event) return "CI still pending for PR " + std::to_string(pr) + ". " + describe(issue, *saved);
+
+    Orchestrator orchestrator(issue, saved->facts, *executor_, store_, Policy{});
+    orchestrator.attach_event_log(log_);
+    const bool accepted = orchestrator.apply(*event);
+    return std::string(accepted ? "CI recorded. " : "CI result rejected (stale or invalid). ") +
+           describe(issue, orchestrator.job());
 }
 
 std::string JobCommands::log() const {

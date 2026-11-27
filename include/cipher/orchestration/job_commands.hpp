@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace cipher {
@@ -34,9 +35,12 @@ public:
     using ExecutorFactory =
         std::function<std::unique_ptr<orchestration::RoleExecutor>(int issue, const std::string& task)>;
 
+    /// Reads PR @p pr for @p job and returns the CI event; nullopt while checks are pending. May throw.
+    using CiObserver = std::function<std::optional<orchestration::Event>(const orchestration::JobRecord& job, int pr)>;
+
     /// @p executor must outlive this object; null selects the escalating default.
     explicit JobCommands(std::filesystem::path directory, orchestration::RoleExecutor* executor = nullptr,
-                         ExecutorFactory factory = nullptr);
+                         ExecutorFactory factory = nullptr, CiObserver ci = nullptr);
 
     JobCommands(const JobCommands&) = delete;
     JobCommands& operator=(const JobCommands&) = delete;
@@ -50,6 +54,7 @@ private:
     std::string step(const std::string& arguments);
     std::string recover(const std::string& arguments);
     std::string log() const;
+    std::string ci(const std::string& arguments);
     std::string task(const std::string& arguments);
     std::string load_task(int issue) const;
     std::unique_ptr<orchestration::RoleExecutor> make_executor(int issue) const;
@@ -59,6 +64,7 @@ private:
     orchestration::EventLog log_;
     orchestration::RoleExecutor* executor_;
     ExecutorFactory factory_;
+    CiObserver ci_;
 };
 
 }  // namespace cipher

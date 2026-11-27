@@ -101,6 +101,46 @@ int main() {
         check(built == 1 && seen == "write docs", "factory built once with the saved task");
     }
 
+    {
+        // `job ci`: result is tied to the job head; pending changes nothing; a stale head is rejected.
+        using namespace cipher::orchestration;
+        const std::string head(40, 'a');
+        const std::string other(40, 'b');
+        const fs::path cdir = fresh_dir();
+        FileJobStore store(cdir);
+        JobRecord record;
+        record.state = State::Ci;
+        record.head_sha = head;
+        record.qa_approved = true;
+        store.save(21, record);
+        JobRecord idle;
+        store.save(22, idle);
+
+        std::optional<Event> next;
+        int polled = 0;
+        JobCommands jobs(cdir, nullptr, nullptr, [&](const JobRecord&, int) {
+            ++polled;
+            return next;
+        });
+        check(contains(JobCommands(cdir).execute("job ci 21 5").text, "unavailable"), "ci unavailable without observer");
+        check(contains(jobs.execute("job ci 21").text, "Usage"), "ci needs a pr number");
+        check(contains(jobs.execute("job ci 99 5").text, "No job"), "ci for missing job rejected");
+        check(contains(jobs.execute("job ci 22 5").text, "not waiting for CI") && polled == 0, "ci outside CI state");
+        check(contains(jobs.execute("job ci 21 5").text, "still pending"), "pending reported");
+        check(contains(jobs.execute("job status 21").text, "CI"), "pending leaves state");
+
+        next = Event{EventKind::CiResult, other, Verdict::None, Verdict::None, true};
+        check(contains(jobs.execute("job ci 21 5").text, "rejected"), "stale head rejected");
+        check(!store.load(21)->ci_passed, "stale CI not recorded");
+
+        next = Event{EventKind::CiResult, head, Verdict::None, Verdict::None, true};
+        check(contains(jobs.execute("job ci 21 5").text, "CI recorded"), "matching head accepted");
+        check(store.load(21)->ci_passed && store.load(21)->state != State::Ci, "CI passed moves on");
+        check(contains(jobs.execute("job log").text, "21"), "ci evidence in event log");
+        std::error_code cec;
+        fs::remove_all(cdir, cec);
+    }
+
     std::error_code ec;
     fs::remove_all(dir, ec);
     std::cout << (failures == 0 ? "ALL PASSED\n" : "FAILURES\n");
