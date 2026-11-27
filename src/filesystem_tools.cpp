@@ -132,7 +132,10 @@ std::string list_directory(const fs::path& directory, const std::vector<std::str
         const bool is_dir = entry.is_directory(error);
         if (error || (!is_dir && !entry.is_regular_file(error)) || error) continue;
         if (!is_dir && is_private(entry.path(), private_files)) continue;
-        names.push_back(entry.path().filename().string() + (is_dir ? "/" : ""));
+        std::string name = entry.path().filename().string();
+        // Control characters (including newline) must not reach the model prompt or split a listing line.
+        for (char& c : name) if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) c = '?';
+        names.push_back(name + (is_dir ? "/" : ""));
     }
     std::sort(names.begin(), names.end());
     if (names.empty()) return "(empty directory)";
