@@ -2,6 +2,7 @@
 #include "cipher/tool_registry.hpp"
 
 #include <filesystem>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -189,6 +190,39 @@ void test_symlink_is_rejected(const Sandbox& sandbox) {
           "Expected Denied for a path through a symlink");
 }
 
+#ifdef _WIN32
+void test_junction_is_rejected(const Sandbox& sandbox) {
+    const std::string command = "cmd /c mklink /J \"" + (sandbox.root / "junction-dir").string() + "\" \"" +
+                                sandbox.outside.string() + "\" >nul 2>&1";
+    if (std::system(command.c_str()) != 0) {
+        std::cout << "SKIP: junction rejection (mklink /J failed)\n";
+        return;
+    }
+    cipher::ToolRegistry registry;
+    cipher::register_filesystem_tools(registry, sandbox.root.string());
+
+    const cipher::ToolResult result = call(registry, "junction-dir/secret.txt");
+    check(result.outcome == cipher::ToolOutcome::Denied && !result.executed &&
+              result.output.find("SECRET-OUTSIDE") == std::string::npos,
+          "filesystem.read: junction pointing outside the root is rejected",
+          "Expected Denied for a path through a junction");
+}
+#endif
+
+void test_errors_do_not_leak_absolute_paths(const Sandbox& sandbox) {
+    cipher::ToolRegistry registry;
+    cipher::register_filesystem_tools(registry, sandbox.root.string());
+
+    const std::string too_long(40000, 'a');
+    for (const std::string& path : {std::string("bad<name.txt"), std::string("con/x"), too_long}) {
+        const cipher::ToolResult result = call(registry, path);
+        check(result.output.find(sandbox.base.string()) == std::string::npos &&
+                  result.output.find("cipher_fs_tools_test") == std::string::npos,
+              "filesystem.read: error output has no absolute path: " + path.substr(0, 12),
+              "Output leaked a path: " + result.output);
+    }
+}
+
 void test_private_files_are_refused(const Sandbox& sandbox) {
     write_text(sandbox.root / "cipher_memory.txt", "PRIVATE-MEMORY");
     write_text(sandbox.root / "logs" / "cipher.log", "PRIVATE-LOG");
@@ -262,6 +296,10 @@ int main() {
     test_missing_root_denies_instead_of_crashing(sandbox);
     test_size_bound_fails_after_permission(sandbox);
     test_symlink_is_rejected(sandbox);
+#ifdef _WIN32
+    test_junction_is_rejected(sandbox);
+#endif
+    test_errors_do_not_leak_absolute_paths(sandbox);
     test_private_files_are_refused(sandbox);
 
     std::cout << "\nResults: " << g_passes << " passed, " << g_failures << " failed\n";
