@@ -175,6 +175,11 @@ int main() {
                 rig.model = cfg.orchestration_model;
                 rig.max_budget_usd = cfg.orchestration_budget;
                 rig.qa_profiles = cfg.orchestration_qa;
+                if (cfg.orchestration_agent == "local") {
+                    rig.agent = "local";
+                    rig.local_backend = backend.get();
+                    rig.local_family = cfg.ollama_port != 0 ? "ollama" : !cfg.llama.model_path.empty() ? "llama" : "openclaw";
+                }
                 factory = [rig](int issue, const std::string& task) {
                     return std::make_unique<cipher::orchestration::ImplementationRig>(rig, issue, task);
                 };

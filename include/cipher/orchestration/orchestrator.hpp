@@ -26,6 +26,8 @@ class RoleExecutor {
 public:
     virtual ~RoleExecutor() = default;
     virtual RoleResult run(Role role, const JobRecord& job) = 0;
+    // Checked before an implementation execution is charged; false = environment not ready, job pauses BLOCKED.
+    virtual bool dispatchable(Role, const JobRecord&) { return true; }
 };
 
 // Persistence seam (Stage 3). A durable store can replace the in-memory one without changing policy.

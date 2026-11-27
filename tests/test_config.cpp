@@ -211,6 +211,16 @@ static void test_ollama_port_defaults_to_disabled_and_parses_valid_ports() {
           "Expected ollama_port 65535");
 }
 
+static void test_orchestration_agent_local_needs_a_backend() {
+    check(cipher::ConfigParser::defaults().orchestration_agent == "claude", "orchestration_agent: default claude", "default");
+    check(cipher::ConfigParser::load_from_string("orchestration_agent = local\nollama_port = 11434\n").ok(),
+          "orchestration_agent: local with a backend ok", "rejected");
+    check(!cipher::ConfigParser::load_from_string("orchestration_agent = local\n").ok(),
+          "orchestration_agent: local without a backend fails closed", "accepted");
+    check(!cipher::ConfigParser::load_from_string("orchestration_agent = gpt\n").ok(),
+          "orchestration_agent: unknown value rejected", "accepted");
+}
+
 static void test_ollama_port_rejects_invalid_values() {
     const char* bad[] = {"ollama_port = 0\n", "ollama_port = 65536\n", "ollama_port = +80\n",
                          "ollama_port = 80x\n", "ollama_port = abc\n", "ollama_port =\n"};
@@ -527,6 +537,7 @@ int main() {
     test_memory_file_defaults_to_disabled();
     test_filesystem_read_root_defaults_to_unavailable();
     test_ollama_port_defaults_to_disabled_and_parses_valid_ports();
+    test_orchestration_agent_local_needs_a_backend();
     test_ollama_port_rejects_invalid_values();
     test_llama_model_path_parses_and_excludes_ollama_port();
     test_llama_settings_default_to_previous_fixed_values();

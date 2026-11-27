@@ -26,6 +26,7 @@
 //   orchestration_dir — folder for persistent `job` state and events (default: empty = job commands disabled)
 //   orchestration_repo / orchestration_base_sha / orchestration_worktree_root — enable `job task` (paid Claude agent)
 //   orchestration_model, orchestration_budget — Claude model and per-call USD cap for that agent
+//   orchestration_agent — claude or local; local needs ollama_port, llama_model_path or openclaw_path (default: claude)
 //   orchestration_qa — comma list of QA profiles for jobs: check, build, ctest, python (default: check)
 //   openclaw_path — absolute path of the OpenClaw CLI for `ask`; local ollama/ models, no tools (default: empty = off)
 //   ollama_port — 127.0.0.1 port of a local Ollama server for the `ask` command (default: 0 = disabled)
@@ -95,6 +96,7 @@ struct Config {
     std::string orchestration_worktree_root; // Folder of job-<n> worktrees (repo+sha+root enable `job task`)
     std::string orchestration_model = "haiku";  // Claude model for the implementation agent
     std::string orchestration_budget = "0.25";  // Max USD per Claude call
+    std::string orchestration_agent = "claude"; // implementation agent: claude or local
     std::string orchestration_qa = "check"; // QA profiles run by the job pipeline
     std::string openclaw_path;               // absolute path of the OpenClaw CLI; empty = off
     int         ollama_port = 0;             // 0 = `ask` disabled; otherwise 1-65535

@@ -41,6 +41,8 @@ const std::string kGemini = "gemini";
 class ScriptedExecutor final : public RoleExecutor {
 public:
     void queue(Role role, const RoleResult& result) { scripts_[role].push_back(result); }
+    bool ready = true;  // false: dispatchable() refuses, like a local backend that is down
+    bool dispatchable(Role, const JobRecord&) override { return ready; }
 
     RoleResult run(Role role, const JobRecord&) override {
         ++calls_[role];
@@ -265,6 +267,41 @@ void test_blocked_pause_does_not_consume_budget() {
           "blocked: repeated BLOCKED escalates to NeedsHuman", "repeated BLOCKED not escalated");
 }
 
+// Phase C slice C4: two failing local executions end in NEEDS_HUMAN with no third dispatch.
+void test_two_failed_executions_end_needs_human() {
+    ScriptedExecutor executor;
+    InMemoryJobStore store;
+    for (int i = 0; i < 3; ++i) executor.queue(Role::Implementation, role_result(EventKind::ImplementationFailed, "", "ollama"));
+    Orchestrator orch(30, IssueFacts{}, executor, store, Policy{});
+    orch.start();
+    orch.advance();
+    orch.advance();
+    check(orch.job().state == State::NeedsHuman && executor.calls(Role::Implementation) == 2,
+          "local budget: two failures escalate", "not NeedsHuman after two failed executions");
+    check(!orch.advance() && executor.calls(Role::Implementation) == 2, "local budget: no third dispatch",
+          "third dispatch");
+}
+
+// Backend unavailable: BLOCKED before dispatch, no charge; the second one escalates.
+void test_unavailable_backend_blocks_without_charge() {
+    ScriptedExecutor executor;
+    executor.ready = false;
+    InMemoryJobStore store;
+    Orchestrator orch(31, IssueFacts{}, executor, store, Policy{});
+    orch.start();
+    orch.advance();
+    check(orch.job().state == State::Blocked && orch.job().implementation_executions == 0 &&
+              executor.calls(Role::Implementation) == 0,
+          "unavailable: BLOCKED, no charge, no dispatch", "charged or dispatched");
+    Event resumed;
+    resumed.kind = EventKind::BlockedResumed;
+    orch.apply(resumed);
+    orch.advance();
+    check(orch.job().state == State::NeedsHuman && orch.job().escalation == EscalationReason::BlockedRepeated &&
+              orch.job().implementation_executions == 0,
+          "unavailable: second BLOCKED escalates", "no escalation");
+}
+
 void test_protected_operation_escalates_and_stops() {
     ScriptedExecutor executor;
     InMemoryJobStore store;
@@ -441,6 +478,8 @@ int main() {
     test_stale_ci_head_is_rejected();
     test_retry_is_bounded_to_two_executions();
     test_blocked_pause_does_not_consume_budget();
+    test_two_failed_executions_end_needs_human();
+    test_unavailable_backend_blocks_without_charge();
     test_protected_operation_escalates_and_stops();
     test_security_review_requires_independent_family();
     test_merge_gates_fail_closed();
