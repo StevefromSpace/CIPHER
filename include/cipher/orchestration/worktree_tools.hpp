@@ -42,6 +42,10 @@ struct ToolLimits {
 // owner here and is therefore denied.
 PermissionPolicy default_worktree_policy();
 
+// Narrower policy for Phase C scope 1: fs.write/fs.edit only for docs/* and *.md; contract, release docs, LICENSE,
+// CMakeLists.txt, tests/, tools/, .git and .github stay blocked.
+PermissionPolicy default_docs_only_policy();
+
 // Executes tool calls inside one worktree. The model proposes; this class validates, asks the PermissionPolicy,
 // runs, bounds the output and appends one audit line per call. It holds no shell: process.run only launches a
 // pre-registered argv chosen by id, so the model supplies no executable or arguments.

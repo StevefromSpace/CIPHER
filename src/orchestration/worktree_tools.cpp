@@ -77,6 +77,23 @@ PermissionPolicy default_worktree_policy() {
     return policy;
 }
 
+PermissionPolicy default_docs_only_policy() {
+    // Same base as default_worktree_policy(), but fs.write/fs.edit only reach docs/* and *.md. The blacklist wins over
+    // the whitelist, so protected docs stay blocked. Matching is prefix/suffix only (PermissionPolicy), hence the
+    // root-level release*/license* entries; the executor's diff post-check (slice C3) is the second line of defense.
+    PermissionPolicy policy;
+    policy.set_default_tier(RiskTier::Ask);
+    for (const char* tool : {"fs.write", "fs.edit"})
+        for (const char* blocked : {".git", ".github", "tools/", "tests/", "cmakelists.txt", "docs/agent_role_contract.md",
+                                    "docs/release", "release", "license", "docs/license"})
+            policy.add_blacklist_pattern(std::string(tool) + " " + blocked + "*");
+    for (const char* pattern : {"fs.read*", "fs.list*", "fs.search*", "fs.write docs/*", "fs.edit docs/*", "process.run*",
+                                "git.status*", "git.diff*", "git.log*"})
+        policy.add_whitelist_pattern(pattern);
+    policy.add_whitelist_pattern("*.md");  // suffix match: any fs.write/fs.edit target ending in .md
+    return policy;
+}
+
 WorktreeTools::WorktreeTools(fs::path root, ProcessRunner& runner, std::string git_executable,
                              std::map<std::string, std::vector<std::string>> commands, PermissionPolicy policy,
                              ToolLimits limits)
