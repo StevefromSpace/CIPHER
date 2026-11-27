@@ -192,3 +192,11 @@ C2 and C3 are independent of C1 and may land in any order; C4 needs C1-C3.
    edit's `old_text` exact? Needs a measured answer from the optional real-model check.
 5. **Tests scope.** When, if ever, may the `tests/` blacklist be relaxed for a local model, given it guards the checks
    that judge the agent's own work?
+
+### Lead decisions (2026-11-28, under the owner's delegation)
+
+1. **Backend unavailable:** environmental `BLOCKED` raised before dispatch, so no charge (5.1.6). It consumes the single BLOCKED unit (5.5); a second one escalates to `NEEDS_HUMAN`.
+2. **Write authorization:** policy mode. Starting the job is the authorization, limited to the docs-only whitelist inside the isolated worktree. No merge, tag or LICENSE change is reachable. Per-write exact-`yes` stays for any path outside the whitelist.
+3. **Tier-up:** out of scope for C1-C4. Attempt 2 reuses the same local model.
+4. **Prompt budget:** to be measured in the optional real-model check; until then keep edits small (one file per round).
+5. **Tests scope:** the `tests/` blacklist is kept. Relax only by a later owner-visible decision.
