@@ -76,4 +76,12 @@ std::string resolve_executable_on_path(const std::string& name) {
 #endif
 }
 
+std::string find_executable_on_path(const std::string& name) {
+    try {
+        return resolve_executable_on_path(name);
+    } catch (const std::runtime_error&) {
+        return std::string();
+    }
+}
+
 }  // namespace cipher::orchestration

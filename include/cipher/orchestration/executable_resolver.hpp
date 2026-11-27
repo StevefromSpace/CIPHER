@@ -13,4 +13,7 @@ std::string resolve_executable(const std::string& name, const std::string& path_
 // Same as resolve_executable, reading the PATH environment variable.
 std::string resolve_executable_on_path(const std::string& name);
 
+// Like resolve_executable_on_path but returns "" when the tool is absent, for tools only some configs need.
+std::string find_executable_on_path(const std::string& name);
+
 }  // namespace cipher::orchestration
