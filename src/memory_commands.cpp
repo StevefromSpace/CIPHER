@@ -121,6 +121,10 @@ std::string MemoryCommands::remember(const std::string& id, const std::string& c
 }
 
 std::string MemoryCommands::recall(const std::string& id) const {
+    const std::string denial = check_permission("recall", id);
+    if (!denial.empty()) {
+        return denial;
+    }
     const auto entry = store_.get(id);
     if (!entry) {
         return "No memory with id '" + id + "'.";
