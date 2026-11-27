@@ -183,7 +183,7 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
 - Merged: PR #28 adds owner-typed `ask --memory <id> <question>`. It is the only path from memory to a model: one entry, permission action `share`, local route only, no tool loop, and the id is logged but not the content. See DECISIONS §20.
 - Operation v1 PR 2: the model may propose `filesystem.read <path>` through the existing text `TOOL_CALL` protocol on Ollama and llama.cpp. CIPHER validates the path, shows the resolved file, requires the exact `yes` per call, caps output at 4096 bytes and keeps it on the VerifiedLocal route. No writes, no multi-step execution.
 - Next candidates:
-  - Merged: `memory_deny` patterns in `cipher.conf` (blacklist for remember/recall/forget/share).
+  - Merged: `memory_deny` patterns in `cipher.conf` (blacklist for remember/recall/forget/share; `memories` lists ids only and is not gated).
   - Merged: in-process llama.cpp backend (below).
 - In-process llama.cpp runtime: `LlamaCppBackend` behind `IAssistantBackend`, opt-in build `-DCIPHER_WITH_LLAMA=ON`, pinned llama.cpp v0.7.0 (SHA-256 checked), `llama_model_path` in `cipher.conf`. Text only, CPU, one model loaded at startup, empty context per request, no fallback between backends. Verified by real inference on a pinned tiny GGUF in the `llama-runtime` CI job (Ubuntu and Windows). See DECISIONS §21.
 - Configurable generation settings: `llama_context_tokens`, `llama_max_output_tokens` and `llama_temperature` in `cipher.conf` (defaults 4096 / 512 / 0.8, unchanged when omitted). Validated at parse time; real-inference tests check each value changes llama.cpp's behavior. See DECISIONS §21.
