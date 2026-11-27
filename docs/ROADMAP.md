@@ -166,7 +166,7 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
   * Complete Test Coverage: 5 CTest targets (75 cases, 264 assertions, 100%), 144 adapter unit tests (100%), 49 pipeline unit tests (100%).
 - [x] Configure dedicated CI test job for assistant integrations and developer pipeline.
 - [x] Direct in-process local runtime adapter: `llama.cpp` backend, delivered in v0.6 (DECISIONS §21).
-- [ ] Keep the core useful when no model or assistant is available (verification not yet done; see Milestone Status).
+- [x] Keep the core useful when no model or assistant is available (verified by `cipher_no_model_tests`: core commands, memory and clean Unavailable failure with no provider).
 
 ### v0.5: Permissioned tools (DESIGN SCOPE COMPLETE, OWNER REVIEW OPEN)
 
