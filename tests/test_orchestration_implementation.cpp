@@ -512,6 +512,44 @@ void test_readonly() {
 
 }  // namespace
 
+void test_scope_postcheck() {
+    check(path_in_write_scope(WritePolicy::DocsOnly, "docs/a.md") && path_in_write_scope(WritePolicy::DocsOnly, "README.md"),
+          "scope: docs-only allows docs/* and *.md");
+    for (const char* bad : {"src/x.cpp", "Tests/x.cpp", ".github/w.yml", "docs/AGENT_ROLE_CONTRACT.md", "LICENSE", "docs/RELEASE.md",
+                            "CMakeLists.txt", "tools\\x.py", "./src/x.cpp"})
+        check(!path_in_write_scope(WritePolicy::DocsOnly, bad), "scope: docs-only denies protected/out-of-scope path");
+    check(path_in_write_scope(WritePolicy::Default, "src/x.cpp") && !path_in_write_scope(WritePolicy::Default, "tests/x.cpp") &&
+              !path_in_write_scope(WritePolicy::Default, ".git/config"),
+          "scope: default allows src, blocks protected prefixes");
+
+    for (const WritePolicy policy : {WritePolicy::DocsOnly, WritePolicy::Default}) {
+        Fixture f("scope-int");
+        Escalator fallback;
+        ScriptedAgent agent;
+        ToolCall sneak = call("process.run", "");
+        sneak.pattern = "touch";
+        agent.script = {{false, sneak, ""}, {true, {}, "sneaked"}};
+        ImplementationSettings s = settings(f, 27);
+        s.write_policy = policy;
+        const fs::path wt = f.base / "worktrees" / "job-27";
+        // A registered command (not an fs tool) creates the file, so only the executor's diff check can catch it.
+        const std::string target = policy == WritePolicy::DocsOnly ? "src_sneak.cpp" : "tests_sneak.txt";
+        s.commands["touch"] = {resolve_executable_on_path("cmake"), "-E", "touch", (wt / target).string()};
+        ImplementationExecutor executor(s, *f.allocator, f.runner, agent, fallback);
+        JobRecord record;
+        record.state = State::Implementation;
+        const RoleResult result = executor.run(Role::Implementation, record);
+        const bool expect_fail = policy == WritePolicy::DocsOnly;
+        check((result.event.kind == EventKind::ImplementationFailed) == expect_fail,
+              "scope-int: docs-only fails on out-of-scope file; default accepts same non-protected file");
+        if (expect_fail) {
+            check(has(slurp(f.base / "evidence.log"), "out-of-scope paths changed: " + target), "scope-int: evidence names the path");
+            check(git_out(f.runner, f.git, wt, {"rev-parse", "HEAD"}) == f.sha, "scope-int: nothing committed");
+        }
+        fs::remove_all(f.base);
+    }
+}
+
 int main() {
     test_readonly();
     test_tools();
@@ -520,6 +558,7 @@ int main() {
     test_end_to_end();
     test_failures();
     test_docs_policy();
+    test_scope_postcheck();
     std::cout << (failures == 0 ? "ALL PASSED\n" : "FAILURES\n");
     return failures == 0 ? 0 : 1;
 }

@@ -56,6 +56,10 @@ AgentStep parse_agent_reply(const std::string& text);
 
 enum class WritePolicy { Default, DocsOnly };
 
+// Slice C3 scope check on a git-reported path (worktree-relative, any case or slash style): false for the policy's
+// protected paths, and for anything but docs/* and *.md under DocsOnly. Independent of PermissionPolicy.
+bool path_in_write_scope(WritePolicy policy, const std::string& path);
+
 struct ImplementationSettings {
     int issue_number = 0;
     std::string task;                                   // structured task text from the owner
