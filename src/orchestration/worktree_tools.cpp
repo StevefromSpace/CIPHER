@@ -69,7 +69,7 @@ PermissionPolicy default_worktree_policy() {
     PermissionPolicy policy;
     policy.set_default_tier(RiskTier::Ask);
     for (const char* tool : {"fs.write", "fs.edit"})
-        for (const char* protected_prefix : {".git", ".github", "tools/pipeline", "docs/agent_role_contract.md"})
+        for (const char* protected_prefix : {".git", ".github", "tools/", "tests/", "cmakelists.txt", "docs/agent_role_contract.md"})
             policy.add_blacklist_pattern(std::string(tool) + " " + protected_prefix + "*");
     for (const char* pattern : {"fs.read*", "fs.list*", "fs.search*", "fs.write*", "fs.edit*", "process.run*",
                                 "git.status*", "git.diff*", "git.log*"})

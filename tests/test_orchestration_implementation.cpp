@@ -103,10 +103,13 @@ void test_tools() {
     check(!tools.call(write).ok, "tools: write into .git refused");
     write.path = ".GIT/config";
     check(!tools.call(write).ok, "tools: case-variant .git refused");
-    for (const char* protected_path : {".github/workflows/ci.yml", "tools/pipeline/x.py", "docs/AGENT_ROLE_CONTRACT.md"}) {
+    for (const char* protected_path : {".github/workflows/ci.yml", "tools/pipeline/x.py", "docs/AGENT_ROLE_CONTRACT.md",
+                                      "CMakeLists.txt", "cmakelists.txt", "tests/x.cpp", "Tests/x.cpp", "tools/x.py"}) {
         write.path = protected_path;
         check(!tools.call(write).ok && !fs::exists(root / protected_path), "tools: protected path write refused");
     }
+    write.path = "src/ok.cpp";
+    check(tools.call(write).ok && fs::exists(root / "src" / "ok.cpp"), "tools: normal src write still allowed");
     ToolCall big = call("fs.write", "big.txt");
     big.content.assign(300 * 1024, 'x');
     check(!tools.call(big).ok, "tools: oversized write refused");
