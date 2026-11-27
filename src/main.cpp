@@ -183,9 +183,9 @@ int main() {
             cipher::JobCommands::CiObserver ci;
             try {
                 const std::string gh = cipher::orchestration::resolve_executable_on_path("gh");
-                ci = [gh](const cipher::orchestration::JobRecord& job, int pr) {
+                ci = [gh, repo = cfg.orchestration_repo](const cipher::orchestration::JobRecord& job, int pr) {
                     cipher::orchestration::SystemProcessRunner runner(1 << 20);
-                    cipher::orchestration::GhProcessRunner gh_runner(runner, gh, 60000);
+                    cipher::orchestration::GhProcessRunner gh_runner(runner, gh, 60000, repo);
                     cipher::orchestration::GhAdapter adapter(gh_runner);
                     return cipher::orchestration::observe_ci(job, adapter, pr);
                 };
@@ -211,6 +211,8 @@ int main() {
             log.info("CIPHER session ended (input stream closed)");
             break;
         }
+
+        input = cipher::strip_utf8_bom(input);
 
         const cipher::MemoryCommandResult memory_reply = memory.execute(input);
         if (memory_reply.handled) {
