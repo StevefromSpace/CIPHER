@@ -14,8 +14,8 @@ Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → 
 | v0.2.1 version consistency | COMPLETE | None |
 | v0.3 persistent memory foundation | IMPLEMENTED, OWNER REVIEW OPEN | Permission gate implemented on PR #14 (merged to `main`, `e1aac64`). `remember`/`forget` default to `Monitor`; denied operations leave the memory file byte-identical. Owner review (WAITING_FOR_OWNER). |
 | v0.4 replaceable AI runtime interface | SUPERSEDED (historical; later milestones delivered the runtime) | No-model verification suite on PR #15 (`9047f13`, Draft, base PR #14 branch): core, memory and provider layer with no provider attached. The in-process `llama.cpp` runtime was approved by the owner (2026-10-28) and is delivered under v0.6 (DECISIONS §21). |
-| v0.5 permissioned tools | DESIGN SCOPE COMPLETE, OWNER REVIEW OPEN | Design `docs/V05_TOOL_ARCHITECTURE.md` (ADR 18 Accepted). All five documented phases merged (PR #19 registry and built-in tools, PR #20 owner `tool` commands, PR #21 `filesystem.read`, PR #22 owner confirmation for Ask tier). No later phase is documented. PR #12 not merged; owner decides its disposition. |
-| v1.0.0 assistant loop | MERGED (PRs #34–#43); release tag and GitHub release are owner actions, not created here | Model tool loop with governed tools, verification gate and bounded rounds; limits in `docs/V1_ASSISTANT_LOOP.md`. License deferred (DECISIONS ADR 23). |
+| v0.5 permissioned tools | DESIGN SCOPE COMPLETE, OWNER REVIEW OPEN | Design `docs/V05_TOOL_ARCHITECTURE.md` (ADR 18 Accepted). All five documented phases merged (PR #19 registry and built-in tools, PR #20 owner `tool` commands, PR #21 `filesystem.read`, PR #22 owner confirmation for Ask tier). No later phase is documented. PR #12 is CLOSED (superseded by PRs #19-#22); no open decision. |
+| v1.0.0 assistant loop | MERGED (PRs #34–#43); tag `v1.0.0` and GitHub release DONE (published 2026-10-29, Latest) | Model tool loop with governed tools, verification gate and bounded rounds; limits in `docs/V1_ASSISTANT_LOOP.md`. License intentionally deferred per owner (DECISIONS ADR 23); no `LICENSE` file. |
 
 ### Milestone dependencies
 
@@ -41,7 +41,7 @@ Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → 
 - The in-process llama.cpp backend is CPU-only, returns whole answers, uses the same text `TOOL_CALL` protocol as Ollama (no native tool calling) (no streaming); it is opt-in at build time. Provider adapters are not runtime-verified for live use.
 - Persistent memory is explicit and human-readable only; no semantic search or automatic extraction.
 - Process-tree termination on POSIX does not cover descendants that call `setsid` (Issue #6).
-- Open-source license not yet chosen.
+- Open-source license intentionally deferred per owner (ADR 23); no `LICENSE` file for now.
 
 ### External research track (non-blocking)
 
@@ -174,7 +174,7 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
 - Begin with safe read-only tools before allowing changes.
 - Merged: Phases 1–3 (PR #19 registry, `time.now`, `system.info`, `memory.list`; PR #20 owner `tool list`, `tool <id>`, `tool log`). Phase 4 read-only `filesystem.read` under `filesystem_read_root` (PR #21).
 - Merged: Phase 5 owner confirmation for the Ask tier (PR #22). Only an exact `yes` runs an Ask-tier tool. No production Ask tool exists yet, so the path is exercised by tests only.
-- Later phases: none documented in `docs/V05_TOOL_ARCHITECTURE.md` §8. PR #12 is not merged and is untouched; the owner decides its disposition.
+- Later phases: none documented in `docs/V05_TOOL_ARCHITECTURE.md` §8. PR #12 is CLOSED (draft, closed 2026-10-29), superseded by PRs #19-#22; not an open decision.
 - Note: this milestone started before the v0.3 and v0.4 owner-review gates closed. That was an explicit owner direction (2026-10-27).
 
 ### v0.6: Reuse before build, owner-shared memory (MERGED)
