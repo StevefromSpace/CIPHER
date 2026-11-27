@@ -163,6 +163,7 @@ bool Orchestrator::advance() {
     // and the in-flight flag are saved together before dispatch, so a crash during the run is visible on restart.
     const bool counted = *role == Role::Implementation && job_.state == State::Implementation;
     const std::string previous_family = job_.implementation_family;
+    if (counted && !executor_.dispatchable(*role, job_)) return apply(Event{EventKind::Blocked});  // no charge
     if (counted) {
         if (job_.implementation_executions >= policy_.max_implementation_executions) {
             return apply(escalation_event(EscalationReason::RetryBudgetExhausted));  // defensive: no dispatch

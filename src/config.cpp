@@ -178,6 +178,12 @@ ConfigResult parse_lines(std::istream& stream) {
         } else if (key == "orchestration_budget") {
             result.config.orchestration_budget = value;
 
+        } else if (key == "orchestration_agent") {
+            if (value != "claude" && value != "local") {
+                result.errors.push_back({line_number, "Invalid orchestration_agent '" + value + "'. Use claude or local."});
+            } else {
+                result.config.orchestration_agent = value;
+            }
         } else if (key == "orchestration_qa") {
             result.config.orchestration_qa = value;
 
@@ -251,6 +257,11 @@ ConfigResult parse_lines(std::istream& stream) {
     // One backend serves `ask`. Choosing between two silently would hide which one sees the owner's prompts.
     if ((result.config.ollama_port != 0) + !result.config.llama.model_path.empty() + !result.config.openclaw_path.empty() > 1) {
         result.errors.push_back({0, "Set only one of ollama_port, llama_model_path or openclaw_path. `ask` uses one backend."});
+    }
+
+    if (result.config.orchestration_agent == "local" && result.config.ollama_port == 0 &&
+        result.config.llama.model_path.empty() && result.config.openclaw_path.empty()) {
+        result.errors.push_back({0, "orchestration_agent=local needs ollama_port, llama_model_path or openclaw_path."});
     }
 
     // If any errors occurred, reset the config to safe defaults so the caller

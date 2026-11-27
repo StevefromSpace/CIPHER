@@ -3,6 +3,7 @@
 #include "cipher/orchestration/executable_resolver.hpp"
 #include "cipher/orchestration/git_worktree_backend.hpp"
 #include "cipher/orchestration/implementation_executor.hpp"
+#include "cipher/orchestration/implementation_rig.hpp"
 #include "cipher/orchestration/local_tool_agent.hpp"
 
 #include <chrono>
@@ -237,6 +238,44 @@ void test_executor() {
     }
 }
 
+// C4: the production rig in local mode over a scripted backend (docs-only writes, family, retry history, availability).
+void test_rig_local_mode() {
+    Fixture f;
+    FakeBackend b;
+    RigConfig config;
+    config.repository = f.base / "repo";
+    config.base_sha = git_out(f.runner, f.git, f.base / "repo", {"rev-parse", "HEAD"});
+    config.worktree_root = f.base / "worktrees";
+    config.agent = "local";
+    config.local_backend = &b;
+    config.local_family = "ollama";
+
+    b.say("{\"tool\":\"fs.write\",\"path\":\"src/x.cpp\",\"content\":\"x\"}");
+    {
+        ImplementationRig rig(config, 41, "add a docs note");
+        JobRecord record;
+        record.state = State::Implementation;
+        const RoleResult failed = rig.run(Role::Implementation, record);
+        check(failed.event.kind == EventKind::ImplementationFailed && failed.model_family == "ollama",
+              "rig: non-docs write is denied; family comes from config");
+        b.available = false;
+        check(!rig.dispatchable(Role::Implementation, record), "rig: unavailable backend is not dispatchable");
+        b.available = true;
+        check(rig.dispatchable(Role::Implementation, record), "rig: available backend is dispatchable");
+    }
+    b.say("{\"tool\":\"fs.write\",\"path\":\"docs/NOTE.md\",\"content\":\"hi\\n\"}");
+    b.say("{\"done\":true,\"summary\":\"ok\"}");
+    const std::size_t first_retry_prompt = b.prompts.size();
+    ImplementationRig retry(config, 41, "add a docs note");
+    JobRecord record;
+    record.state = State::Implementation;
+    check(retry.run(Role::Implementation, record).event.kind == EventKind::ImplementationComplete,
+          "rig: scripted docs-only run completes");
+    check(has(b.prompts[first_retry_prompt], "PREVIOUS ATTEMPT") && has(b.prompts[first_retry_prompt], "FAILED"),
+          "rig: retry prompt carries the prior evidence");
+    fs::remove_all(f.base);
+}
+
 }  // namespace
 
 int main() {
@@ -244,6 +283,7 @@ int main() {
     test_backend_failures();
     test_budget_and_repeat();
     test_executor();
+    test_rig_local_mode();
     std::cout << (failures == 0 ? "ALL PASSED\n" : "FAILURES\n");
     return failures == 0 ? 0 : 1;
 }
