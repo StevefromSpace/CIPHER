@@ -144,6 +144,7 @@ add_library(cipher_orchestration
     src/orchestration/job_lock.cpp
     src/orchestration/worktree_tools.cpp
     src/orchestration/implementation_executor.cpp
+    src/orchestration/local_tool_agent.cpp
     src/orchestration/readonly_executor.cpp
     src/orchestration/implementation_rig.cpp
     src/orchestration/qa_profile.cpp
@@ -370,6 +371,9 @@ if(BUILD_TESTING)
     add_executable(cipher_orchestration_implementation_tests tests/test_orchestration_implementation.cpp)
     target_link_libraries(cipher_orchestration_implementation_tests PRIVATE cipher_orchestration)
     add_test(NAME cipher_orchestration_implementation_tests COMMAND cipher_orchestration_implementation_tests)
+    add_executable(cipher_orchestration_local_agent_tests tests/test_orchestration_local_agent.cpp)
+    target_link_libraries(cipher_orchestration_local_agent_tests PRIVATE cipher_orchestration)
+    add_test(NAME cipher_orchestration_local_agent_tests COMMAND cipher_orchestration_local_agent_tests)
     add_executable(cipher_orchestration_worktree_tests tests/test_orchestration_worktree.cpp)
     target_link_libraries(cipher_orchestration_worktree_tests PRIVATE cipher_orchestration)
     add_test(NAME cipher_orchestration_worktree_tests COMMAND cipher_orchestration_worktree_tests)
