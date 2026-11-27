@@ -135,7 +135,7 @@ bool ToolCommands::confirm(const ToolDefinition& definition, const std::string& 
     if (!std::getline(answers_, answer)) {
         return false;
     }
-    if (!answer.empty() && answer.back() == '') {
+    if (!answer.empty() && answer.back() == '\r') {
         answer.pop_back();
     }
     return answer == "yes";
