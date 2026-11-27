@@ -56,6 +56,12 @@ public:
     // Returns true only when gh exits 0. The caller must re-read and re-gate before calling.
     bool merge_pull_request(int number, const std::string& head_sha);
 
+    // PR creation (never merges). Open PRs whose head branch is `head_branch` (empty = none; >1 is the caller's problem).
+    std::vector<int> find_open_pull_requests(const std::string& head_branch);
+    // Creates a PR and returns its number, parsed from the URL gh prints. Throws on failure or an unparsable URL.
+    int create_pull_request(const std::string& head_branch, const std::string& base_branch,
+                            const std::string& title, const std::string& body_file);
+
 private:
     GhRunner& runner_;
 };

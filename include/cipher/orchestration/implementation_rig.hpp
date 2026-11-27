@@ -2,7 +2,9 @@
 #define CIPHER_ORCHESTRATION_IMPLEMENTATION_RIG_HPP
 
 #include "cipher/orchestration/git_worktree_backend.hpp"
+#include "cipher/orchestration/gh_process_runner.hpp"
 #include "cipher/orchestration/implementation_executor.hpp"
+#include "cipher/orchestration/pipeline_roles.hpp"
 
 #include <filesystem>
 #include <memory>
@@ -35,6 +37,9 @@ private:
     std::unique_ptr<GitWorktreeBackend> backend_;
     std::unique_ptr<WorktreeAllocator> allocator_;
     std::unique_ptr<ClaudeToolAgent> agent_;
+    std::unique_ptr<GhProcessRunner> gh_runner_;
+    std::unique_ptr<GhAdapter> gh_;
+    std::unique_ptr<PipelineExecutor> pipeline_;  // PR creation, QA, mechanical review; falls back to escalator_
     std::unique_ptr<ImplementationExecutor> executor_;
 };
 

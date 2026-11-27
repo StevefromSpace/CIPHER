@@ -266,4 +266,54 @@ bool GhAdapter::merge_pull_request(int number, const std::string& head_sha) {
     return result.exit_code == 0;
 }
 
+namespace {
+
+// Branch names go into argv; reject flags, traversal and anything outside a conservative alphabet.
+void require_branch(const std::string& name, const char* what) {
+    bool ok = !name.empty() && name.size() <= 200 && name.front() != '-' && name.front() != '/' &&
+              name.back() != '/' && name.find("..") == std::string::npos;
+    for (const char c : name) {
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '/' || c == '-' || c == '_' || c == '.')) ok = false;
+    }
+    if (!ok) throw GhRequestError(std::string(what) + " branch name is unsafe");
+}
+
+}  // namespace
+
+std::vector<int> GhAdapter::find_open_pull_requests(const std::string& head_branch) {
+    require_branch(head_branch, "head");
+    const GhResult result = runner_.run({"gh", "pr", "list", "--head", head_branch, "--state", "open",
+                                         "--json", "number", "--jq", ".[].number"});
+    if (result.exit_code != 0) throw std::runtime_error("gh pr list failed (exit " + std::to_string(result.exit_code) + ")");
+    std::vector<int> numbers;
+    std::string line;
+    for (const char c : result.output + "\n") {
+        if (c == '\n' || c == '\r') {
+            if (!line.empty()) numbers.push_back(parse_positive_int(line));
+            line.clear();
+        } else {
+            line.push_back(c);
+        }
+    }
+    return numbers;
+}
+
+int GhAdapter::create_pull_request(const std::string& head_branch, const std::string& base_branch,
+                                   const std::string& title, const std::string& body_file) {
+    require_branch(head_branch, "head");
+    require_branch(base_branch, "base");
+    if (head_branch == base_branch) throw GhRequestError("head and base branch are the same");
+    if (title.empty() || title.size() > 200 || title.front() == '-' || title.find_first_of("\r\n") != std::string::npos)
+        throw GhRequestError("PR title is unsafe");
+    if (!is_safe_path_argument(body_file)) throw GhRequestError("PR body file path is unsafe");
+    const GhResult result = runner_.run({"gh", "pr", "create", "--head", head_branch, "--base", base_branch,
+                                         "--title", title, "--body-file", body_file});
+    if (result.exit_code != 0) throw std::runtime_error("gh pr create failed (exit " + std::to_string(result.exit_code) + ")");
+    std::string url = result.output;
+    while (!url.empty() && std::isspace(static_cast<unsigned char>(url.back()))) url.pop_back();
+    const std::size_t slash = url.rfind("/pull/");
+    if (slash == std::string::npos) throw std::runtime_error("gh pr create: unexpected output");
+    return parse_positive_int(url.substr(slash + 6));
+}
+
 }  // namespace cipher::orchestration
