@@ -77,23 +77,21 @@ Required: a C++17 compiler and CMake 3.16 or newer. No third-party libraries or 
 
 ### Windows (PowerShell)
 
-```powershell
-cmake -S . -B build
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
-```
-
-Run the program (with Ninja generator the executable is directly in `build`):
+Configure, build, and test out of source in one step (the same steps CI runs):
 
 ```powershell
-.\build\cipher.exe
+powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 ```
 
-With a Visual Studio generator it may be under `build\Release\`:
+The script builds Release with Ninja into `%LOCALAPPDATA%\cipher-build-ninja` (pass `-BuildDir` to change). If `cl.exe` is not on `PATH` it loads `vcvars64.bat` from VS 2022 Build Tools; it needs `cmake` and `ctest` on `PATH`. See `docs/RESET_RECOVERY.md` section 3.
+
+Run the program from the build directory:
 
 ```powershell
-.\build\Release\cipher.exe
+%LOCALAPPDATA%\cipher-build-ninja\cipher.exe
 ```
+
+See `docs/DEVELOPMENT.md` for the full development workflow.
 
 ### Linux / macOS
 

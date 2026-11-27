@@ -417,7 +417,8 @@ void test_review() {
     check(sec.exec->run(Role::Reviewer, sec.job).event.verdict == Verdict::NeedsHuman, "security-sensitive -> NEEDS_HUMAN");
 
     for (const char* path : {"tools/pipeline/x.py", ".github/workflows/ci.yml", "docs/AGENT_ROLE_CONTRACT.md",
-                             "CMakeLists.txt", "src/secret_store.cpp"}) {
+                             "CMakeLists.txt", "src/secret_store.cpp", ".GitHub/workflows/ci.yml", "Agents.md",
+                             "THIRD_PARTY/x.c"}) {
         Rig p("rv3");
         p.runner.names = std::string(path) + "\ntests/a.cpp\n";
         check(p.exec->run(Role::Reviewer, p.job).event.verdict == Verdict::NeedsHuman, path);

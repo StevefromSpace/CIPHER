@@ -72,6 +72,8 @@ class MemoryStore {
 public:
     static constexpr int CURRENT_SCHEMA_VERSION = 1;
     static constexpr int LEGACY_SCHEMA_VERSION = 0;
+    // Max memory file size accepted by load(); larger files are rejected unread.
+    static constexpr std::uintmax_t MAX_FILE_BYTES = 16u * 1024u * 1024u;
 
     MemoryStore() = default;
 

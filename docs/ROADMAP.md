@@ -8,14 +8,14 @@ Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → 
 
 | Milestone | Status | Remaining work |
 |-----------|--------|----------------|
-| v0.1 foundation | COMPLETE (owner review open) | Owner review of source files (WAITING_FOR_OWNER) |
+| v0.1 foundation | COMPLETE | Owner review delegated to lead dev agent 2026-11-27; source review PASS (`src/logger.cpp`, `src/cipher_core.cpp` not read) |
 | v0.1.1 hardening | COMPLETE | None |
 | v0.2 configuration and diagnostics | COMPLETE | Owner-cleared. PR #13 merged to `main` (merge `dde6bc1`, from `7a27130`). Unreadable `cipher.conf` is a startup error; missing file uses defaults. |
 | v0.2.1 version consistency | COMPLETE | None |
-| v0.3 persistent memory foundation | IMPLEMENTED, OWNER REVIEW OPEN | Permission gate implemented on PR #14 (`69e2ee6`, Draft, base `feat/repl-memory-commands`). `remember`/`forget` default to `Monitor`; denied operations leave the memory file byte-identical. Not merged; owner review (WAITING_FOR_OWNER). |
+| v0.3 persistent memory foundation | IMPLEMENTED, REVIEWED | Permission gate implemented on PR #14 (merged to `main`, `e1aac64`). `remember`/`forget` default to `Monitor`; denied operations leave the memory file byte-identical. Lead-agent review 2026-11-27 (owner-delegated): PASS; recall gating defect fixed in PR #62. |
 | v0.4 replaceable AI runtime interface | SUPERSEDED (historical; later milestones delivered the runtime) | No-model verification suite on PR #15 (`9047f13`, Draft, base PR #14 branch): core, memory and provider layer with no provider attached. The in-process `llama.cpp` runtime was approved by the owner (2026-10-28) and is delivered under v0.6 (DECISIONS §21). |
-| v0.5 permissioned tools | DESIGN SCOPE COMPLETE, OWNER REVIEW OPEN | Design `docs/V05_TOOL_ARCHITECTURE.md` (ADR 18 Accepted). All five documented phases merged (PR #19 registry and built-in tools, PR #20 owner `tool` commands, PR #21 `filesystem.read`, PR #22 owner confirmation for Ask tier). No later phase is documented. PR #12 not merged; owner decides its disposition. |
-| v1.0.0 assistant loop | MERGED (PRs #34–#43); release tag and GitHub release are owner actions, not created here | Model tool loop with governed tools, verification gate and bounded rounds; limits in `docs/V1_ASSISTANT_LOOP.md`. License deferred (DECISIONS ADR 23). |
+| v0.5 permissioned tools | DESIGN SCOPE COMPLETE, REVIEWED | Design `docs/V05_TOOL_ARCHITECTURE.md` (ADR 18 Accepted). All five documented phases merged (PR #19 registry and built-in tools, PR #20 owner `tool` commands, PR #21 `filesystem.read`, PR #22 owner confirmation for Ask tier). No later phase is documented. PR #12 is CLOSED (superseded by PRs #19-#22); no open decision. Lead-agent review 2026-11-27 (owner-delegated): PASS; exact-`yes` confirmation fixed in PR #62; Windows junction behaviour not tested. |
+| v1.0.0 assistant loop | MERGED (PRs #34–#43); tag `v1.0.0` and GitHub release DONE (published 2026-10-29, Latest) | Model tool loop with governed tools, verification gate and bounded rounds; limits in `docs/V1_ASSISTANT_LOOP.md`. License intentionally deferred per owner (DECISIONS ADR 23); no `LICENSE` file. |
 
 ### Milestone dependencies
 
@@ -41,7 +41,7 @@ Execution order is an explicit project constraint: **v0.2 → v0.3 → v0.4 → 
 - The in-process llama.cpp backend is CPU-only, returns whole answers, uses the same text `TOOL_CALL` protocol as Ollama (no native tool calling) (no streaming); it is opt-in at build time. Provider adapters are not runtime-verified for live use.
 - Persistent memory is explicit and human-readable only; no semantic search or automatic extraction.
 - Process-tree termination on POSIX does not cover descendants that call `setsid` (Issue #6).
-- Open-source license not yet chosen.
+- Open-source license intentionally deferred per owner (ADR 23); no `LICENSE` file for now.
 
 ### External research track (non-blocking)
 
@@ -122,7 +122,7 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
 - [ ] Review the v0.3 source files and understand the memory subsystem and pipeline tools.
       *(The owner must do this step.)*
 - [x] Integrate persistent memory into command REPL (`remember`, `recall`, `forget`, `memories`; opt-in via `memory_file`; `cipher_memory_commands` library, 29 assertions).
-- [ ] Integrate persistent memory into the permission gate (not started). Decision: `remember` and `forget` default to `Monitor`; blacklist and override rules stay authoritative; denied operations must leave the memory file unchanged.
+- [x] Integrate persistent memory into the permission gate (merged: PR #14, `e1aac64` on `main`). Decision: `remember` and `forget` default to `Monitor`; blacklist and override rules stay authoritative; denied operations must leave the memory file unchanged.
 
 ## Next milestones
 
@@ -166,7 +166,7 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
   * Complete Test Coverage: 5 CTest targets (75 cases, 264 assertions, 100%), 144 adapter unit tests (100%), 49 pipeline unit tests (100%).
 - [x] Configure dedicated CI test job for assistant integrations and developer pipeline.
 - [x] Direct in-process local runtime adapter: `llama.cpp` backend, delivered in v0.6 (DECISIONS §21).
-- [ ] Keep the core useful when no model or assistant is available (verification not yet done; see Milestone Status).
+- [x] Keep the core useful when no model or assistant is available (verified by `cipher_no_model_tests`: core commands, memory and clean Unavailable failure with no provider).
 
 ### v0.5: Permissioned tools (DESIGN SCOPE COMPLETE, OWNER REVIEW OPEN)
 
@@ -174,7 +174,7 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
 - Begin with safe read-only tools before allowing changes.
 - Merged: Phases 1–3 (PR #19 registry, `time.now`, `system.info`, `memory.list`; PR #20 owner `tool list`, `tool <id>`, `tool log`). Phase 4 read-only `filesystem.read` under `filesystem_read_root` (PR #21).
 - Merged: Phase 5 owner confirmation for the Ask tier (PR #22). Only an exact `yes` runs an Ask-tier tool. No production Ask tool exists yet, so the path is exercised by tests only.
-- Later phases: none documented in `docs/V05_TOOL_ARCHITECTURE.md` §8. PR #12 is not merged and is untouched; the owner decides its disposition.
+- Later phases: none documented in `docs/V05_TOOL_ARCHITECTURE.md` §8. PR #12 is CLOSED (draft, closed 2026-10-29), superseded by PRs #19-#22; not an open decision.
 - Note: this milestone started before the v0.3 and v0.4 owner-review gates closed. That was an explicit owner direction (2026-10-27).
 
 ### v0.6: Reuse before build, owner-shared memory (MERGED)
@@ -183,7 +183,7 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
 - Merged: PR #28 adds owner-typed `ask --memory <id> <question>`. It is the only path from memory to a model: one entry, permission action `share`, local route only, no tool loop, and the id is logged but not the content. See DECISIONS §20.
 - Operation v1 PR 2: the model may propose `filesystem.read <path>` through the existing text `TOOL_CALL` protocol on Ollama and llama.cpp. CIPHER validates the path, shows the resolved file, requires the exact `yes` per call, caps output at 4096 bytes and keeps it on the VerifiedLocal route. No writes, no multi-step execution.
 - Next candidates:
-  - Merged: `memory_deny` patterns in `cipher.conf` (blacklist for remember/recall/forget/share).
+  - Merged: `memory_deny` patterns in `cipher.conf` (blacklist for remember/recall/forget/share; `memories` lists ids only and is not gated).
   - Merged: in-process llama.cpp backend (below).
 - In-process llama.cpp runtime: `LlamaCppBackend` behind `IAssistantBackend`, opt-in build `-DCIPHER_WITH_LLAMA=ON`, pinned llama.cpp v0.7.0 (SHA-256 checked), `llama_model_path` in `cipher.conf`. Text only, CPU, one model loaded at startup, empty context per request, no fallback between backends. Verified by real inference on a pinned tiny GGUF in the `llama-runtime` CI job (Ubuntu and Windows). See DECISIONS §21.
 - Configurable generation settings: `llama_context_tokens`, `llama_max_output_tokens` and `llama_temperature` in `cipher.conf` (defaults 4096 / 512 / 0.8, unchanged when omitted). Validated at parse time; real-inference tests check each value changes llama.cpp's behavior. See DECISIONS §21.

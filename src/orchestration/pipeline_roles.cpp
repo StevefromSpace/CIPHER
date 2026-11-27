@@ -2,6 +2,8 @@
 
 #include "cipher/orchestration/commit_sha.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -25,10 +27,12 @@ bool is_code_path(const std::string& p) { return starts_with(p, "src/") || start
 bool is_test_path(const std::string& p) { return starts_with(p, "tests/"); }
 
 // Paths an implementation job must never touch without the owner: governance, CI, pipeline tooling, dependencies, secrets.
-bool is_protected_path(const std::string& p) {
+bool is_protected_path(const std::string& path) {
+    std::string p = path;  // Windows paths are case-insensitive
+    std::transform(p.begin(), p.end(), p.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return starts_with(p, "tools/pipeline/") || starts_with(p, ".github/") || starts_with(p, "third_party/") ||
-           starts_with(p, ".claude/") || p == "AGENTS.md" || p == "docs/AGENT_ROLE_CONTRACT.md" ||
-           p == "CMakeLists.txt" || p.find(".env") != std::string::npos || p.find("secret") != std::string::npos ||
+           starts_with(p, ".claude/") || p == "agents.md" || p == "docs/agent_role_contract.md" ||
+           p == "cmakelists.txt" || p.find(".env") != std::string::npos || p.find("secret") != std::string::npos ||
            p.find("credential") != std::string::npos;
 }
 

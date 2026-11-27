@@ -132,7 +132,10 @@ std::string list_directory(const fs::path& directory, const std::vector<std::str
         const bool is_dir = entry.is_directory(error);
         if (error || (!is_dir && !entry.is_regular_file(error)) || error) continue;
         if (!is_dir && is_private(entry.path(), private_files)) continue;
-        names.push_back(entry.path().filename().string() + (is_dir ? "/" : ""));
+        std::string name = entry.path().filename().string();
+        // Control characters (including newline) must not reach the model prompt or split a listing line.
+        for (char& c : name) if (static_cast<unsigned char>(c) < 0x20 || c == 0x7f) c = '?';
+        names.push_back(name + (is_dir ? "/" : ""));
     }
     std::sort(names.begin(), names.end());
     if (names.empty()) return "(empty directory)";
@@ -152,6 +155,16 @@ fs::path canonical_root_or_throw(const std::string& root) {
     return canonical;
 }
 
+// filesystem_error::what() embeds absolute paths; the model and user get a fixed message instead.
+template <typename Body>
+std::string without_path_leaks(const std::string& tool, Body body) {
+    try {
+        return body();
+    } catch (const fs::filesystem_error&) {
+        throw std::runtime_error(tool + ": the path could not be accessed.");
+    }
+}
+
 } // namespace
 
 void register_filesystem_tools(ToolRegistry& registry, const std::string& root,
@@ -167,6 +180,7 @@ void register_filesystem_tools(ToolRegistry& registry, const std::string& root,
         RiskTier::Monitor,
         SideEffect::ReadLocal,
         [root, private_files](const std::string& arguments) {
+            return without_path_leaks("filesystem.read", [&] {
             const fs::path file = resolve_under_root(canonical_root_or_throw(root), arguments, private_files);
             if (fs::file_size(file) > MAX_READ_BYTES) {
                 throw std::runtime_error("filesystem.read: file is larger than the 64 KiB limit.");
@@ -176,9 +190,12 @@ void register_filesystem_tools(ToolRegistry& registry, const std::string& root,
                 throw std::runtime_error("filesystem.read: file could not be opened.");
             }
             return std::string(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+            });
         },
         [root, private_files](const std::string& arguments) {
-            return resolve_under_root(canonical_root_or_throw(root), arguments, private_files).string();
+            return without_path_leaks("filesystem.read", [&] {
+                return resolve_under_root(canonical_root_or_throw(root), arguments, private_files).string();
+            });
         }});
     registry.register_tool(ToolDefinition{
         "filesystem.list",
@@ -187,13 +204,17 @@ void register_filesystem_tools(ToolRegistry& registry, const std::string& root,
         RiskTier::Monitor,
         SideEffect::ReadLocal,
         [root, private_files](const std::string& arguments) {
-            const fs::path dir = resolve_under_root(canonical_root_or_throw(root), arguments, private_files,
-                                                    "filesystem.list", true);
-            return list_directory(dir, private_files);
+            return without_path_leaks("filesystem.list", [&] {
+                const fs::path dir = resolve_under_root(canonical_root_or_throw(root), arguments, private_files,
+                                                        "filesystem.list", true);
+                return list_directory(dir, private_files);
+            });
         },
         [root, private_files](const std::string& arguments) {
-            return resolve_under_root(canonical_root_or_throw(root), arguments, private_files,
-                                      "filesystem.list", true).string();
+            return without_path_leaks("filesystem.list", [&] {
+                return resolve_under_root(canonical_root_or_throw(root), arguments, private_files,
+                                          "filesystem.list", true).string();
+            });
         }});
 }
 

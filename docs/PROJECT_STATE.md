@@ -7,8 +7,8 @@ This document is the authoritative summary of CIPHER's verified state. It provid
 ## 1. Verified Code Baseline & Repository State
 
 * **Repository:** [https://github.com/StevefromSpace/CIPHER](https://github.com/StevefromSpace/CIPHER)
-* **Active Branch:** `research/assistant-source-intelligence` (Dedicated research and selective extraction branch branched from `1c6d3e4`)
-* **Current Hardening Head:** Commit `75ebfd5531bff4c72f0e6cfdc6b64952a983dab5` (`75ebfd5`, `fix(integrations): enforce strict isolation gates and response schemas`). PR #1 is open, Draft, and unmerged.
+* **Active Branch:** `main`. Baseline: commit `659454e` (v1.0.0 per `docs/ROADMAP.md`; tag `v1.0.0` and GitHub release published 2026-10-29).
+* **Historical Hardening Head:** Commit `75ebfd5531bff4c72f0e6cfdc6b64952a983dab5` (`75ebfd5`, `fix(integrations): enforce strict isolation gates and response schemas`), delivered by PR #1 (merged 2026-10-25 per `docs/ROADMAP.md`).
 * **Historical Core Baseline:** Commit `677e8455bd51f760288c122aed97c7cea88ec22b` (`677e845`)
   * **Subject:** `fix: centralize application version reporting`
   * **Scope:** Full C++17 core, configuration parser, leveled diagnostic logger, CMake centralized versioning (`version.hpp`), and comprehensive test suites.
@@ -22,7 +22,7 @@ This document is the authoritative summary of CIPHER's verified state. It provid
   - Clarified and documented `verified_local` across all contracts and adapters as an operator configuration assertion of loopback hostname compliance (`127.0.0.1`, `localhost`, `::1`), not hardware airgap proof.
   - Developer pipeline reproducibility via `requirements-dev.txt` (`mcp>=1.0.0`) in CI.
   - Published remote rollback tag `rollback-hardening-gate-2.1-baseline` at `ccc33273cdf3e36851b2b5b40847b90676362269`.
-* **Repository Scope:** This record describes the checked-out hardening branch. Its final isolation changes are source changes from `75ebfd5`; subsequent synchronization work is documentation-only.
+* **Repository Scope:** This record describes `main` at `659454e`. The hardening items above are historical; the CI run in section 2 covers `75ebfd5` only.
 
 ---
 
@@ -31,7 +31,7 @@ This document is the authoritative summary of CIPHER's verified state. It provid
 * **Continuous Integration Provider:** GitHub Actions
 * **Workflow Configuration:** [.github/workflows/ci.yml](../.github/workflows/ci.yml)
 * **Triggers:** Push to `main`, Pull Requests targeting `main`.
-* **Final Isolation Verification Head Tested:** Commit `75ebfd5`.
+* **Historical Isolation Verification Head Tested:** Commit `75ebfd5` (not re-run for `659454e`).
 * **Workflow Run:** [Run #12 (ID: 39381571550)](https://github.com/StevefromSpace/CIPHER/actions/runs/39381571550)
 * **Status:** **Success**.
 * **Jobs:**
@@ -57,7 +57,7 @@ CIPHER is an independent, local-first assistant platform built incrementally in 
 
 ---
 
-## 4. Current Implemented Capabilities (v0.2 Baseline, plus later milestones)
+## 4. Current Implemented Capabilities (historical v0.2 baseline, plus later milestones through v1.0.0)
 
 This section lists the v0.2 baseline. Later additions (v0.3 memory library and REPL commands, v0.4 assistant adapters) are tracked in `docs/ROADMAP.md`, and their current branch state is on the PR stack listed there.
 
@@ -215,6 +215,8 @@ Neither `cipher_config`, `cipher_logger`, nor `cipher_memory` depends on `cipher
 * No external third-party package managers or dependencies required.
 
 ### Build Commands
+One-step Windows verification (Ninja, Release, out of source): `powershell -ExecutionPolicy Bypass -File scripts/verify.ps1`. See `docs/DEVELOPMENT.md` and `docs/RELEASE.md`.
+
 ```bash
 # Configure
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -230,7 +232,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## 7. Current Test Suites & Counts
 
-CTest registers 6 distinct test binaries, covering 95 test functions/cases and 297 individual assertions (294 on POSIX due to platform-specific Win32 locking checks) with a 100% pass rate:
+**Current verified result:** on `main` `659454e`, a Windows Release build with Ninja (no `CIPHER_WITH_LLAMA`) passed 27/27 CTest tests in about 16.5 s on 2026-11-27. CMake registers 28 tests; the 28th (`cipher_llama_tests`) exists only with `CIPHER_WITH_LLAMA`. The per-target table below is the historical v0.2-era baseline (6 test binaries, 95 cases, 297 assertions, 294 on POSIX due to Win32 locking checks) and was not updated per target:
 
 | Test Target | Source File | Functions / Cases | Assertions / Checks | Purpose |
 | :--- | :--- | :--- | :--- | :--- |
@@ -240,7 +242,7 @@ CTest registers 6 distinct test binaries, covering 95 test functions/cases and 2
 | `cipher_memory_tests` | `tests/test_memory.cpp` | 14 functions | 97 (94 on POSIX) | Missing/empty storage, CRUD round-trips, unicode/multilingual, validation/duplicate handling, corrupt storage line reporting, unsupported schema versions, v0->v1 migration, atomic write failure recovery, repeatable save/load, Windows existing file replacement & locked destination preservation, lossless whitespace, category validation, entry count mismatch, stoi overflow safety |
 | `cipher_memory_commands_tests` | `tests/test_memory_commands.cpp` | 14 functions | 29 | REPL remember/recall/forget/memories routing, opt-in disabled state, usage errors, cross-session persistence, invalid id rejection, corrupt-file write guard, failed-save rollback |
 | `cipher_assistant_tests` | `tests/test_assistant_backend.cpp` | 14 functions | 62 | Replaceable assistant interface, central request validation, blank prompt rejection, timeout bounds, non-finite float rejection, tool execution lockdown, local route verification, zero budget rejection, RiskTier, PermissionPolicy priority, ContextBudget prompt byte bounding, EventMessage wire envelope, mock backend |
-| **Total (CTest)** | | **95 cases/functions** | **297 assertions (97 memory, 62 assistant, 29 memory commands)** | **All 6 test targets pass (100%)** |
+| **Total (CTest)** | | **95 cases/functions** | **297 assertions (97 memory, 62 assistant, 29 memory commands)** | **All 6 historical test targets passed (100%)** |
 | `pipeline_unit_tests` | `tools/pipeline/tests/` | 49 test cases | 49 passing (100% pass rate; reproducible dev dependency via `requirements-dev.txt`) | Verifier, Git manager, Job store, MCP server, Orchestrator, Reviewer adapter |
 | `assistant_integrations_tests` | `integrations/` | 144 test cases | 144 passing (100%) | Contract (22), OpenClaw (48), Dodaios (24), Leon (25), OpenVoiceOS (25) |
 
@@ -250,7 +252,7 @@ CTest registers 6 distinct test binaries, covering 95 test functions/cases and 2
 ## 8. Explicitly Unimplemented or Disabled Capabilities
 
 To prevent confusion or hallucination by future AI agents, the following capabilities have **NOT** been implemented:
-* **No AI Inference Engine:** No language models or direct local runtime (e.g., llama.cpp/ONNX) are integrated into the C++ application. The repository contains adapter code, but live external execution remains disabled by default and was not exercised as part of the final hardening gate.
+* **AI inference is opt-in:** the `llama.cpp` runtime exists only behind `CIPHER_WITH_LLAMA` (off by default; the 2026-11-27 build above did not enable it), and an Ollama backend exists. Per `docs/V1_ASSISTANT_LOOP.md` the llama.cpp tool path is covered by scripted tests and CI only; the Ollama path was run with a real model during development. Live external execution of the Python integration adapters remains disabled by default and was not exercised as part of the hardening gate.
 * **No Vector Search or Embeddings:** Persistent memory stores explicit, human-readable entries in local files; no vector database, semantic embeddings, or autonomous background memory extraction.
 * **No Voice / Audio:** No speech-to-text, text-to-speech, or audio capture.
 * **No Operating System Automation:** No arbitrary shell execution, browser control, or GUI manipulation.
@@ -261,7 +263,7 @@ To prevent confusion or hallucination by future AI agents, the following capabil
 
 ## 9. Known Limitations & Unresolved Decisions
 
-1. **Open-Source Licensing:** An official open-source license (e.g., MIT, Apache-2.0, MPL-2.0, AGPL) has **not yet been chosen**.
+1. **Open-Source Licensing:** An official open-source license (e.g., MIT, Apache-2.0, MPL-2.0, AGPL) is **intentionally deferred per owner** (ADR 23); no `LICENSE` file for now.
 2. **Single-Threaded Execution:** The logger and core assume single-threaded execution; no mutex locking is implemented yet.
 3. **Log Rotation:** The logger appends continuously to `log_file` without size limits or rotation.
 4. **Config File Path:** `cipher.conf` is loaded exclusively from the current working directory.
@@ -274,7 +276,7 @@ To prevent confusion or hallucination by future AI agents, the following capabil
 
 Historical milestone order was v0.2 → v0.3 → v0.4 → v0.5 → v1. All of these are now merged; the list below replaces the old "next" items. See the Milestone Status table in `docs/ROADMAP.md`.
 
-1. **Owner release actions for v1.0.0:** choose a software license (owner or legal decision; none is in the repository). Create the tag and GitHub release only after the release-docs PR is reviewed and merged. The agent does not tag or release.
+1. **v1.0.0 release (DONE):** tag `v1.0.0` and GitHub release published 2026-10-29. License intentionally deferred per owner (ADR 23); no `LICENSE` file. On 2026-11-27 the owner delegated decisions on remaining items (PR #12, Stage 10B and the rest) to the lead developer agent. PR #12 is CLOSED (draft, closed 2026-10-29), superseded by PRs #19-#22. Orchestration PRs #51-#57 (stages 11-16) are open and will be reviewed in order by the lead. The v0.1/v0.2/v0.3/v0.5 owner review boxes are unchanged.
 2. **Historical gates (superseded):** the v0.2 and v0.3 owner review gates, the v0.3 memory permission gate (`remember`/`forget` through `PermissionPolicy`), and the v0.4 no-model check are merged. Their record is in `docs/ROADMAP.md`.
 3. **v0.5 tool architecture (merged):** shipped in PRs #19–#22 per `docs/V05_TOOL_ARCHITECTURE.md`. PR #12 was closed unmerged and superseded by that rewrite.
 4. **Future milestones (deferred):** issues #6, #7 and #8 stay open (see `docs/RESET_RECOVERY.md`). PR #3 is closed and must not be revived. Any new subprocess or hosted-provider work starts a new milestone from `main`.

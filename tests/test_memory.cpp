@@ -619,6 +619,22 @@ void test_inspection_failure_is_not_missing_file() {
 
 } // anonymous namespace
 
+// Oversized memory file is rejected (fail closed) and existing store is preserved
+void test_oversized_file_rejected() {
+    std::filesystem::create_directories(TEMP_TEST_DIR);
+    const std::string path = TEMP_TEST_DIR + "/oversize.mem";
+    {
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        f << std::string(cipher::MemoryStore::MAX_FILE_BYTES + 1, 'x');
+    }
+    cipher::MemoryStore store;
+    auto res = store.load(path);
+    check(!res.is_ok(), "oversize: load fails", "Expected failure for oversized file");
+    check(!res.errors.empty() && res.errors[0].message.find("exceeds maximum size") != std::string::npos,
+          "oversize: clear error", "Expected 'exceeds maximum size' error");
+    std::filesystem::remove(path);
+}
+
 int main() {
     std::cout << "Running CIPHER Memory Subsystem Test Suite...\n\n";
 
@@ -636,6 +652,7 @@ int main() {
     test_repeatable_save_load();
     test_existing_file_replacement_and_lock_failure();
     test_whitespace_category_and_entry_count_validation();
+    test_oversized_file_rejected();
 #if !defined(_WIN32)
     test_inspection_failure_is_not_missing_file();
 #endif
