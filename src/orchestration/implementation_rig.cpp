@@ -34,7 +34,8 @@ ImplementationRig::ImplementationRig(const RigConfig& config, int issue, const s
     settings.commands["check"] = {git, "-C", worktree.string(), "diff", "--check"};
     settings.verify_command_id = "check";
     settings.evidence_file = config.worktree_root / ("evidence-" + std::to_string(issue) + ".log");
-    gh_runner_ = std::make_unique<GhProcessRunner>(runner_, resolve_executable_on_path("gh"), 60000);
+    gh_runner_ = std::make_unique<GhProcessRunner>(runner_, resolve_executable_on_path("gh"), 60000,
+                                                  config.repository);
     gh_ = std::make_unique<GhAdapter>(*gh_runner_);
 
     PipelineSettings pipeline;
@@ -44,8 +45,8 @@ ImplementationRig::ImplementationRig(const RigConfig& config, int issue, const s
     pipeline.evidence_file = settings.evidence_file;
     pipeline.pr_body_file = config.worktree_root / ("pr-body-" + std::to_string(issue) + ".md");
     // QA commands come only from the owner's qa_profiles config, never from the agent or issue text.
-    QaTools tools{git, resolve_executable_on_path("cmake"), resolve_executable_on_path("ctest"),
-                  resolve_executable_on_path("python")};
+    QaTools tools{git, find_executable_on_path("cmake"), find_executable_on_path("ctest"),
+                  find_executable_on_path("python")};
     const QaPlan plan = build_qa_plan(config.qa_profiles, worktree, config.worktree_root / ("qa-build-" + std::to_string(issue)), tools);
     pipeline.test_commands = plan.commands;
     pipeline.qa_command_ids = plan.ids;

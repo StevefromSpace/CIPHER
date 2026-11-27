@@ -105,6 +105,10 @@ void test_rejects_path_like_name(const fs::path& root) {
     check(threw, "resolver: a name with a directory part is rejected");
 }
 
+void test_find_missing_returns_empty() {
+    check(find_executable_on_path("cipher-no-such-tool-xyz").empty(), "resolver: find_executable_on_path returns empty when absent");
+}
+
 }  // namespace
 
 int main() {
@@ -117,6 +121,7 @@ int main() {
     test_missing_tool_throws(root);
     test_non_executable_is_rejected(root);
     test_rejects_path_like_name(root);
+    test_find_missing_returns_empty();
 
     std::error_code ec;
     fs::remove_all(root, ec);

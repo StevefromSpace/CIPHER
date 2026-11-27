@@ -180,7 +180,7 @@ public:
     ProcessResult run(const std::vector<std::string>&, int) override {
         ++calls;
         ProcessResult r;
-        r.stdout_text = "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":" + reply + "}";
+        r.stdout_text = "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"total_cost_usd\":0.25,\"result\":" + reply + "}";
         return r;
     }
 };
@@ -191,8 +191,10 @@ void test_claude_agent() {
     ClaudeToolAgent agent(runner, "claude", "haiku", "0.50", 1000);
     const AgentStep step = agent.next("task", {});
     check(step.done && step.summary == "fin" && runner.calls == 1, "claude agent: parses reply, one call per step");
+    check(agent.total_cost_usd() == 0.25, "claude agent: total_cost_usd exposed");
     runner.reply = "\"garbage\"";
-    check(throws_runtime([&] { agent.next("task", {}); }), "claude agent: malformed reply throws");
+    check(throws_runtime([&] { agent.next("task", {}); }) && agent.total_cost_usd() == 0.5,
+          "claude agent: malformed reply throws and its cost still accumulates");
     FakeRunner failing;
     failing.next.exit_code = 1;
     ClaudeToolAgent broken(failing, "claude", "haiku", "0.50", 1000);

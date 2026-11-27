@@ -2,6 +2,7 @@
 
 #include "cipher/orchestration/gh_process_runner.hpp"
 
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -28,11 +29,13 @@ public:
     std::vector<std::string> last_argv;
     int last_timeout_ms = 0;
     int calls = 0;
+    std::filesystem::path cwd_during_run;
 
     ProcessResult run(const std::vector<std::string>& argv, int timeout_ms) override {
         last_argv = argv;
         last_timeout_ms = timeout_ms;
         ++calls;
+        cwd_during_run = std::filesystem::current_path();
         return next;
     }
 };
@@ -119,6 +122,17 @@ void test_merge_pins_head_through_runner() {
     check(merged && process.last_argv == expected, "gh runner: merge argv is pinned to the gated head SHA");
 }
 
+void test_working_dir_pins_cwd_and_restores() {
+    namespace fs = std::filesystem;
+    const fs::path before = fs::current_path();
+    const fs::path repo = fs::temp_directory_path();
+    FakeProcessRunner process;
+    GhProcessRunner runner(process, kGhPath, 1000, repo);
+    runner.run({"gh", "pr", "view", "1"});
+    check(fs::equivalent(process.cwd_during_run, repo), "gh runner: child runs with cwd pinned to the repo");
+    check(fs::equivalent(fs::current_path(), before), "gh runner: cwd restored after the call");
+}
+
 }  // namespace
 
 int main() {
@@ -129,6 +143,7 @@ int main() {
     test_output_overflow_is_a_failure();
     test_stderr_is_never_returned();
     test_merge_pins_head_through_runner();
+    test_working_dir_pins_cwd_and_restores();
     std::cout << (failures == 0 ? "ALL PASSED" : "FAILURES") << "\n";
     return failures == 0 ? 0 : 1;
 }

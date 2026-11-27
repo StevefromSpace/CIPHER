@@ -42,11 +42,13 @@ public:
     ClaudeToolAgent(ProcessRunner& runner, std::string claude_executable, std::string model,
                     std::string max_budget_usd, int timeout_ms);
     AgentStep next(const std::string& task, const std::vector<ToolTurn>& transcript) override;
+    double total_cost_usd() const { return total_cost_usd_; }  // sum over all calls, failed ones included
 
 private:
     ProcessRunner& runner_;
     std::string claude_executable_, model_, max_budget_usd_;
     int timeout_ms_;
+    double total_cost_usd_ = 0.0;
 };
 
 // Parses one agent reply (pure, throws std::runtime_error on anything malformed).

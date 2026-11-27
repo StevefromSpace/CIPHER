@@ -4,6 +4,7 @@
 #include "cipher/orchestration/github_adapter.hpp"
 #include "cipher/orchestration/process_runner.hpp"
 
+#include <filesystem>
 #include <string>
 
 namespace cipher::orchestration {
@@ -13,13 +14,17 @@ namespace cipher::orchestration {
 // A timeout or output overflow is reported as a non-zero exit, and only stdout is returned to the adapter.
 class GhProcessRunner final : public GhRunner {
 public:
-    GhProcessRunner(ProcessRunner& runner, std::string gh_executable, int timeout_ms);
+    // A non-empty working_dir pins gh to that repo: the process cwd is switched for the call and restored after.
+    // shortcut: process-wide cwd switch, not thread-safe; upgrade to a cwd-aware ProcessRunner if jobs go concurrent.
+    GhProcessRunner(ProcessRunner& runner, std::string gh_executable, int timeout_ms,
+                    std::filesystem::path working_dir = {});
     GhResult run(const std::vector<std::string>& argv) override;
 
 private:
     ProcessRunner& runner_;
     std::string gh_executable_;
     int timeout_ms_;
+    std::filesystem::path working_dir_;
 };
 
 }  // namespace cipher::orchestration

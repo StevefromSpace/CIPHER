@@ -88,6 +88,7 @@ AgentStep ClaudeToolAgent::next(const std::string& task, const std::vector<ToolT
     const std::string head = std::string(kProtocol) + "TASK: " + task.substr(0, 800) + "\nHISTORY:\n";
     const std::string prompt = head + render_transcript(transcript, kMaxPromptChars - head.size() - 40) + "NEXT:";
     const ClaudeResult result = run_claude(runner_, claude_executable_, model_, max_budget_usd_, prompt, timeout_ms_);
+    total_cost_usd_ += result.total_cost_usd;
     if (result.status != ClaudeStatus::Ok) throw std::runtime_error(std::string("claude: ") + to_string(result.status));
     return parse_agent_reply(result.text);
 }

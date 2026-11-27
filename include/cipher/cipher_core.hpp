@@ -23,6 +23,11 @@ public:
     CommandResponse execute(const std::string& input) const;
 };
 
+// Drops a UTF-8 byte-order mark (editors and PowerShell pipes prepend one to the first line of input).
+inline std::string strip_utf8_bom(const std::string& line) {
+    return line.compare(0, 3, "\xEF\xBB\xBF") == 0 ? line.substr(3) : line;
+}
+
 } // namespace cipher
 
 #endif // CIPHER_CIPHER_CORE_HPP

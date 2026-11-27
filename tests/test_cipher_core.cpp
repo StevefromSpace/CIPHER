@@ -228,6 +228,12 @@ int main() {
         }
     }
 
+    if (cipher::strip_utf8_bom("\xEF\xBB\xBF" "help") != "help" || cipher::strip_utf8_bom("help") != "help" ||
+        cipher::strip_utf8_bom("") != "") {
+        std::cerr << "FAIL: strip_utf8_bom\n";
+        ++failures;
+    }
+
     if (failures != 0) {
         std::cerr << '\n' << failures << " test(s) failed.\n";
         return 1;
