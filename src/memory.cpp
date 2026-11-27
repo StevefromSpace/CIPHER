@@ -486,6 +486,19 @@ MemoryResult MemoryStore::load(const std::string& filepath) {
         return result;
     }
 
+    const auto file_size = std::filesystem::file_size(filepath, ec);
+    if (ec) {
+        result.errors.push_back({0, "Failed to read memory file size: " + filepath + " (" + ec.message() + ")"});
+        result.ok = false;
+        return result;
+    }
+    if (file_size > MAX_FILE_BYTES) {
+        result.errors.push_back({0, "Memory file exceeds maximum size (" + std::to_string(file_size) +
+                                        " > " + std::to_string(MAX_FILE_BYTES) + " bytes): " + filepath});
+        result.ok = false;
+        return result;
+    }
+
     std::ifstream file(filepath, std::ios::in | std::ios::binary);
     if (!file.is_open()) {
         result.errors.push_back({0, "Failed to open memory file for reading: " + filepath});
