@@ -178,7 +178,7 @@ int main() {
               "confirm: log records confirmed run", "log did not show confirmed run");
     }
 
-    const char* const refused_answers[] = {"no\n", "Yes\n", "y\n", "yes please\n", ""};
+    const char* const refused_answers[] = {"no\n", "Yes\n", "YES\n", " yes \n", "y\n", "yes please\n", ""};
     for (const char* answer : refused_answers) {
         int ask_runs = 0;
         int block_runs = 0;

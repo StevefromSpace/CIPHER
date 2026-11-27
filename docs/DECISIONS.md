@@ -369,6 +369,7 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
 
 - **Status:** Accepted (owner decision, 2026-10-29). Owner/legal decision; this record does not choose a license.
 - **Decision:** CIPHER has no selected software license at v1.0.0. No `LICENSE` file is part of the repository. The absence of a license is intentional, not an oversight, and it does not mean CIPHER is released under any open-source license.
+- **Owner statement (2026-11-27):** no license will be added for the time being; decisions on remaining items are delegated to the lead developer agent. Tag `v1.0.0` and the GitHub release exist (published 2026-10-29).
 - **Revisit:** Licensing is to be revisited around the v3.x–v5.x milestones. Until then, do not treat the missing license as an accidental release blocker, and do not add a `LICENSE` file or name a license without a new owner decision.
 - **Rationale:** The owner has not yet decided the terms and wants the choice made later, not guessed now. Recording the deferral keeps the repository honest about its status.
 - **Scope:** `THIRD_PARTY_NOTICES.md` and the clean-room provenance rules in ADR 13 are unchanged by this decision.

@@ -150,6 +150,31 @@ void test_adapter() {
     check(throws([&] { build_gh_argv(GhOperation::ReadPullRequestJson, 0, ""); }), "adapter: bad number rejected");
 }
 
+void test_open_pr_synthetic() {
+    const std::string ctx = "{\"__typename\":\"StatusContext\",\"state\":\"";
+    auto open = [](const std::string& rollup, const std::string& reviews) {
+        return parse_pull_request_json(pr_json("OPEN", "MERGEABLE", rollup, reviews));
+    };
+    // Live checks: a mix of finished and running CheckRuns on an open PR stays pending.
+    PullRequestFacts live = open("[" + run("COMPLETED", "SUCCESS") + "," + run("QUEUED", "") + "]", "[]");
+    check(live.open && !live.merged && live.mergeable && live.checks == CheckState::Pending, "open: live checks pending");
+    // StatusContext states.
+    auto ctx_state = [&](const std::string& s) { return open("[" + ctx + s + "\"}]", "[]").checks; };
+    check(ctx_state("PENDING") == CheckState::Pending, "open: status context pending");
+    check(ctx_state("EXPECTED") == CheckState::Pending, "open: status context expected is pending");
+    check(ctx_state("FAILURE") == CheckState::Failed, "open: status context failure");
+    check(open("[" + run("COMPLETED", "SUCCESS") + "," + ctx + "PENDING\"}]", "[]").checks == CheckState::Pending, "open: passing run + pending context pending");
+    check(open("[" + ctx + "PENDING\"}," + run("COMPLETED", "FAILURE") + "]", "[]").checks == CheckState::Failed, "open: failed run beats pending context");
+    check(throws([&] { ctx_state("BOGUS"); }), "open: unknown status context state rejected");
+    // Requested changes on an open PR, with passing checks and a mergeable state.
+    PullRequestFacts rc = open("[" + run("COMPLETED", "SUCCESS") + "]", "[" + review("bob", "CHANGES_REQUESTED", "COLLABORATOR") + "]");
+    check(rc.open && rc.checks == CheckState::Passed && rc.review == ReviewState::ChangesRequested, "open: requested changes with passing checks");
+    check(rc.reviewed_head_sha.empty(), "open: requested changes names no approved head");
+    check(open("[]", "[" + review("bob", "CHANGES_REQUESTED", "NONE") + "]").review == ReviewState::None, "open: untrusted requested changes ignored");
+    PullRequestFacts both = open("[]", "[" + review("alice", "APPROVED", "OWNER") + "," + review("bob", "CHANGES_REQUESTED", "MEMBER") + "]");
+    check(both.review == ReviewState::ChangesRequested && both.reviewed_head_sha.empty(), "open: approval plus changes requested blocks");
+}
+
 }  // namespace
 
 int main() {
@@ -158,6 +183,7 @@ int main() {
     test_reviews();
     test_rejections();
     test_adapter();
+    test_open_pr_synthetic();
     std::cout << g_passes << " passed, " << g_failures << " failed\n";
     return g_failures == 0 ? 0 : 1;
 }

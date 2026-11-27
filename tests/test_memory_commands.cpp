@@ -327,6 +327,25 @@ void test_gate_denied_forget_leaves_file_byte_identical() {
           "entry was removed despite the denial");
 }
 
+void test_gate_denied_recall_returns_no_content() {
+    const std::string path = fresh_path("gate_denied_recall");
+    {
+        cipher::MemoryCommands seed(path);
+        seed.open();
+        seed.execute("remember secret_key protected");
+        seed.execute("remember keep_me original text");
+    }
+    cipher::PermissionPolicy policy;
+    policy.add_blacklist_pattern("recall secret*");
+    cipher::MemoryCommands session(path, policy);
+    session.open();
+    const auto denied = session.execute("recall secret_key");
+    check(contains(denied.text, "Denied by permission policy") && !contains(denied.text, "protected"),
+          "gate: denied recall returns the denial and no content", "got: " + denied.text);
+    check(contains(session.execute("recall keep_me").text, "original text"),
+          "gate: allowed recall still works", "allowed recall failed");
+}
+
 void test_usage_and_routing_do_not_need_disk() {
     cipher::MemoryCommands session("");
     session.open();
@@ -341,6 +360,7 @@ int main() {
     test_disabled_when_no_path();
     test_help_addendum_only_when_enabled();
     test_non_memory_input_is_not_handled();
+    test_gate_denied_recall_returns_no_content();
     test_remember_recall_across_sessions();
     test_update_keeps_existing_category();
     test_forget_persists_across_sessions();
