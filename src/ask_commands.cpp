@@ -53,14 +53,6 @@ AskCommandResult AskCommands::execute(const std::string& input) {
     return result;
 }
 
-std::string AskCommands::runtime_status() const {
-    if (backend_ == nullptr) {
-        return "Ask backend for this session: none configured (ask is disabled)";
-    }
-    return "Ask backend for this session: " + backend_->backend_id() + " (model tool calls: " + (tool_loop_ != nullptr ? "on" : "off") +
-           ", memory sharing: " + (memory_ != nullptr && memory_->sharing_available() ? "on" : "off") + ")";
-}
-
 std::string AskCommands::ask_with_memory(const std::string& arguments, std::string& shared_id) {
     const std::size_t split = arguments.find_first_of(" \t");
     const std::string id = arguments.substr(0, split);

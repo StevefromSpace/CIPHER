@@ -245,11 +245,6 @@ int main() {
         if (!response.text.empty()) {
             std::cout << response.text << '\n';
         }
-        // Same leading-whitespace trim as CipherCore, so the runtime line appears only for a bare `status`.
-        const std::size_t status_start = input.find_first_not_of(" \t\r\n");
-        if (status_start != std::string::npos && input.substr(status_start) == "status") {
-            std::cout << ask.runtime_status() << '\n';
-        }
         if (!memory_reply.text.empty()) {
             std::cout << memory_reply.text << '\n';
         }

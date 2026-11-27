@@ -50,9 +50,6 @@ public:
     // For `ask --memory <id>`: true with the entry text in `out`, or false with the refusal in `out`.
     bool share(const std::string& id, std::string& out) const;
 
-    // True when a memory file is configured and loaded, so `share` can return entries.
-    bool sharing_available() const noexcept { return enabled() && available_; }
-
 private:
     bool enabled() const noexcept { return !file_path_.empty(); }
     std::string run(const std::string& command, const std::string& arguments);
