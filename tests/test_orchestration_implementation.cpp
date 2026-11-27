@@ -4,6 +4,7 @@
 #include "cipher/orchestration/executable_resolver.hpp"
 #include "cipher/orchestration/git_worktree_backend.hpp"
 #include "cipher/orchestration/implementation_executor.hpp"
+#include "cipher/orchestration/readonly_executor.hpp"
 #include "cipher/orchestration/job_store_file.hpp"
 
 #include <chrono>
@@ -384,9 +385,62 @@ void test_failures() {
     }
 }
 
+void test_readonly() {
+    Fixture f("readonly");
+    Escalator fallback;
+    ReadOnlySettings s;
+    s.issue_number = 31;
+    s.git_executable = f.git;
+    s.model_family = "fake";
+    s.max_steps = 3;
+    s.evidence_file = f.base / "ro.log";
+    JobRecord record;
+    record.state = State::Research;
+    {
+        ScriptedAgent agent;
+        agent.script = {{false, call("fs.read", "README.txt"), ""}, {true, {}, "found readme"}};
+        ReadOnlyExecutor ro(s, *f.allocator, f.runner, agent, fallback);
+        check(ro.run(Role::Research, record).event.kind == EventKind::ResearchComplete && agent.calls == 2,
+              "readonly: research reads then completes");
+        check(has(slurp(f.base / "ro.log"), "found readme"), "readonly: summary recorded");
+        record.state = State::Architecture;
+        ScriptedAgent a2;
+        a2.script = {{true, {}, "design"}};
+        ReadOnlyExecutor ro2(s, *f.allocator, f.runner, a2, fallback);
+        check(ro2.run(Role::Architecture, record).event.kind == EventKind::ArchitectureComplete,
+              "readonly: architecture completes");
+    }
+    record.state = State::Research;
+    for (const char* tool : {"fs.write", "fs.edit", "process.run"}) {
+        ScriptedAgent agent;
+        agent.script = {{false, call(tool, "docs/X.md", "check"), ""}};
+        ReadOnlyExecutor ro(s, *f.allocator, f.runner, agent, fallback);
+        check(ro.run(Role::Research, record).event.kind == EventKind::Blocked, "readonly: refuses write/edit/process tools");
+    }
+    check(!fs::exists(f.base / "worktrees" / "job-31" / "docs" / "X.md"), "readonly: nothing written");
+    {
+        ScriptedAgent agent;
+        agent.loop_forever = true;
+        ReadOnlyExecutor ro(s, *f.allocator, f.runner, agent, fallback);
+        check(ro.run(Role::Research, record).event.kind == EventKind::Blocked && agent.calls == 3,
+              "readonly: step limit blocks with no retry");
+        ScriptedAgent bad;
+        bad.throw_malformed = true;
+        ReadOnlyExecutor ro2(s, *f.allocator, f.runner, bad, fallback);
+        check(ro2.run(Role::Research, record).event.kind == EventKind::Blocked && bad.calls == 1,
+              "readonly: malformed reply blocks");
+        ScriptedAgent idle;
+        ReadOnlyExecutor ro3(s, *f.allocator, f.runner, idle, fallback);
+        check(ro3.run(Role::Qa, record).event.kind == EventKind::Escalate && idle.calls == 0,
+              "readonly: other roles fall through");
+    }
+    fs::remove_all(f.base);
+}
+
 }  // namespace
 
 int main() {
+    test_readonly();
     test_tools();
     test_parse();
     test_claude_agent();

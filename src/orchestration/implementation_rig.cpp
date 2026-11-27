@@ -49,7 +49,14 @@ ImplementationRig::ImplementationRig(const RigConfig& config, int issue, const s
     const QaPlan plan = build_qa_plan(config.qa_profiles, worktree, config.worktree_root / ("qa-build-" + std::to_string(issue)), tools);
     pipeline.test_commands = plan.commands;
     pipeline.qa_command_ids = plan.ids;
-    pipeline_ = std::make_unique<PipelineExecutor>(pipeline, *allocator_, runner_, *gh_, escalator_);
+    ReadOnlySettings readonly;
+    readonly.issue_number = issue;
+    readonly.task = task;
+    readonly.git_executable = git;
+    readonly.model_family = "claude";
+    readonly.evidence_file = settings.evidence_file;
+    readonly_ = std::make_unique<ReadOnlyExecutor>(readonly, *allocator_, runner_, *agent_, escalator_);
+    pipeline_ = std::make_unique<PipelineExecutor>(pipeline, *allocator_, runner_, *gh_, *readonly_);
     executor_ = std::make_unique<ImplementationExecutor>(settings, *allocator_, runner_, *agent_, *pipeline_);
 }
 
