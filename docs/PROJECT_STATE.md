@@ -7,7 +7,7 @@ This document is the authoritative summary of CIPHER's verified state. It provid
 ## 1. Verified Code Baseline & Repository State
 
 * **Repository:** [https://github.com/StevefromSpace/CIPHER](https://github.com/StevefromSpace/CIPHER)
-* **Active Branch:** `main`. Baseline: commit `659454e` (v1.0.0 per `docs/ROADMAP.md`; the tag and release are owner actions).
+* **Active Branch:** `main`. Baseline: commit `659454e` (v1.0.0 per `docs/ROADMAP.md`; tag `v1.0.0` and GitHub release published 2026-10-29).
 * **Historical Hardening Head:** Commit `75ebfd5531bff4c72f0e6cfdc6b64952a983dab5` (`75ebfd5`, `fix(integrations): enforce strict isolation gates and response schemas`), delivered by PR #1 (merged 2026-10-25 per `docs/ROADMAP.md`).
 * **Historical Core Baseline:** Commit `677e8455bd51f760288c122aed97c7cea88ec22b` (`677e845`)
   * **Subject:** `fix: centralize application version reporting`
@@ -263,7 +263,7 @@ To prevent confusion or hallucination by future AI agents, the following capabil
 
 ## 9. Known Limitations & Unresolved Decisions
 
-1. **Open-Source Licensing:** An official open-source license (e.g., MIT, Apache-2.0, MPL-2.0, AGPL) has **not yet been chosen**.
+1. **Open-Source Licensing:** An official open-source license (e.g., MIT, Apache-2.0, MPL-2.0, AGPL) is **intentionally deferred per owner** (ADR 23); no `LICENSE` file for now.
 2. **Single-Threaded Execution:** The logger and core assume single-threaded execution; no mutex locking is implemented yet.
 3. **Log Rotation:** The logger appends continuously to `log_file` without size limits or rotation.
 4. **Config File Path:** `cipher.conf` is loaded exclusively from the current working directory.
@@ -276,7 +276,7 @@ To prevent confusion or hallucination by future AI agents, the following capabil
 
 Historical milestone order was v0.2 → v0.3 → v0.4 → v0.5 → v1. All of these are now merged; the list below replaces the old "next" items. See the Milestone Status table in `docs/ROADMAP.md`.
 
-1. **Owner release actions for v1.0.0:** choose a software license (owner or legal decision; none is in the repository). Create the tag and GitHub release only after the release-docs PR is reviewed and merged. The agent does not tag or release.
+1. **v1.0.0 release (DONE):** tag `v1.0.0` and GitHub release published 2026-10-29. License intentionally deferred per owner (ADR 23); no `LICENSE` file. On 2026-11-27 the owner delegated decisions on remaining items (PR #12, Stage 10B and the rest) to the lead developer agent. PR #12 is CLOSED (draft, closed 2026-10-29), superseded by PRs #19-#22. Orchestration PRs #51-#57 (stages 11-16) are open and will be reviewed in order by the lead. The v0.1/v0.2/v0.3/v0.5 owner review boxes are unchanged.
 2. **Historical gates (superseded):** the v0.2 and v0.3 owner review gates, the v0.3 memory permission gate (`remember`/`forget` through `PermissionPolicy`), and the v0.4 no-model check are merged. Their record is in `docs/ROADMAP.md`.
 3. **v0.5 tool architecture (merged):** shipped in PRs #19–#22 per `docs/V05_TOOL_ARCHITECTURE.md`. PR #12 was closed unmerged and superseded by that rewrite.
 4. **Future milestones (deferred):** issues #6, #7 and #8 stay open (see `docs/RESET_RECOVERY.md`). PR #3 is closed and must not be revived. Any new subprocess or hosted-provider work starts a new milestone from `main`.

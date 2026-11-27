@@ -82,4 +82,4 @@ The Claude call is tool-less. It can answer Research and Architecture roles but 
 
 ## Next checkpoint
 
-Stage 10B, only after the owner approves it: a tool-enabled implementation executor and a disposable-branch exercise of the real `gh` and worktree backends. Pilot requirements stay as before: owner-approved paid-call budget, docs-only and non-security path.
+Stage 10B (not started by lead decision, 2026-11-27; no paid-call budget exists; the owner delegated decisions on remaining items to the lead developer agent on 2026-11-27): a tool-enabled implementation executor and a disposable-branch exercise of the real `gh` and worktree backends. Pilot requirements stay as before: owner-approved paid-call budget, docs-only and non-security path.
