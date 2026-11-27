@@ -28,6 +28,9 @@
 #include <chrono>
 #include <cstring>
 #include <fcntl.h>
+#include <fstream>
+#include <map>
+#include <vector>
 
 // Passed to posix_spawn unchanged, so the child sees the same environment as this process.
 extern char** environ;
@@ -209,6 +212,50 @@ namespace {
 constexpr int kPollSliceMs = 10;      // longest single wait before the deadline and child exit are checked again
 constexpr int kDrainGraceMs = 1000;   // pipes still open after the group is killed count as a failure
 
+constexpr int kTreeKillPasses = 3;    // rescans catch descendants forked while the previous pass was killing
+
+// Parent pid of every process, read from /proc/<pid>/stat. Empty where /proc is missing (non-Linux): best effort only.
+std::map<pid_t, pid_t> read_parent_map() {
+    std::map<pid_t, pid_t> parents;
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator("/proc", ec)) {
+        const std::string name = entry.path().filename().string();
+        if (name.empty() || name.find_first_not_of("0123456789") != std::string::npos) continue;
+        std::ifstream stat(entry.path() / "stat");
+        std::string line;
+        std::getline(stat, line);
+        const std::size_t close = line.rfind(')');   // comm may contain spaces and parentheses
+        if (close == std::string::npos) continue;
+        char state = 0;
+        long ppid = 0;
+        if (std::sscanf(line.c_str() + close + 1, " %c %ld", &state, &ppid) == 2)
+            parents[static_cast<pid_t>(std::stol(name))] = static_cast<pid_t>(ppid);
+    }
+    return parents;
+}
+
+// SIGKILLs every descendant of root by parent links, so a descendant that called setsid/setpgid is still reached.
+// shortcut: a descendant orphaned (reparented away) before the scan, or forked between scan and kill, escapes; upgrade
+// to a subreaper (PR_SET_CHILD_SUBREAPER) or a cgroup if that matters.
+void kill_descendants(pid_t root) {
+    for (int pass = 0; pass < kTreeKillPasses; ++pass) {
+        const std::map<pid_t, pid_t> parents = read_parent_map();
+        std::vector<pid_t> frontier{root};
+        bool found = false;
+        while (!frontier.empty()) {
+            const pid_t parent = frontier.back();
+            frontier.pop_back();
+            for (const auto& [pid, ppid] : parents) {
+                if (ppid != parent) continue;
+                frontier.push_back(pid);
+                kill(pid, SIGKILL);
+                found = true;
+            }
+        }
+        if (!found) return;
+    }
+}
+
 [[noreturn]] void throw_error(const char* what, int code) {
     throw std::runtime_error(std::string(what) + " failed: " + std::strerror(code));
 }
@@ -336,7 +383,11 @@ public:
     pid_t pid() const { return pid_; }
 
     // SIGKILL to the whole group. A zombie leader keeps its pid and group id reserved until it is reaped.
-    void kill_group() const { killpg(pid_, SIGKILL); }   // ESRCH after a normal exit is expected
+    // Descendants are killed first (while the leader is still their parent), then the group.
+    void kill_group() const {
+        kill_descendants(pid_);
+        killpg(pid_, SIGKILL);   // ESRCH after a normal exit is expected
+    }
 
     int wait_status() {
         int status = 0;

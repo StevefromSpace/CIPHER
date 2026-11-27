@@ -19,6 +19,10 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <csignal>
+#include <fstream>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -59,6 +63,19 @@ int run_child(int argc, char** argv) {
         std::this_thread::sleep_for(std::chrono::seconds(30));
         return 0;
     }
+#ifndef _WIN32
+    if (mode == "--child-setsid") {
+        // Leaves a grandchild in its own session (outside the process group) that records its pid, then both sleep.
+        if (fork() == 0) {
+            setsid();
+            std::ofstream(argv[2]) << getpid() << " ";
+            std::this_thread::sleep_for(std::chrono::seconds(30));
+            _exit(0);
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(30));
+        return 0;
+    }
+#endif
     return 2;
 }
 
@@ -132,6 +149,33 @@ void test_output_cap_is_a_failure(const std::string& self) {
     check(r.output_overflow, "runner: output past the cap sets output_overflow");
 }
 
+#ifndef _WIN32
+// Alive means signalable and not a zombie (an unreaped orphan under a non-reaping init is already dead).
+bool process_alive(pid_t pid) {
+    if (kill(pid, 0) != 0) return false;
+    std::ifstream stat("/proc/" + std::to_string(pid) + "/stat");
+    std::string line;
+    std::getline(stat, line);
+    const std::size_t close = line.rfind(')');
+    return close == std::string::npos || close + 2 >= line.size() || line[close + 2] != 'Z';
+}
+
+void test_timeout_kills_setsid_grandchild(const std::string& self) {
+    const std::string pid_file = (std::filesystem::temp_directory_path() / ("cipher_setsid_" + std::to_string(getpid()))).string();
+    std::filesystem::remove(pid_file);
+    SystemProcessRunner runner;
+    const ProcessResult r = runner.run({self, "--child-setsid", pid_file}, 1500);
+    std::ifstream in(pid_file);
+    long pid = 0;
+    in >> pid;
+    std::filesystem::remove(pid_file);
+    check(r.timed_out && pid > 0, "runner: setsid grandchild started and the run timed out");
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    check(pid > 0 && !process_alive(static_cast<pid_t>(pid)), "runner: timeout kills a grandchild that called setsid");
+    if (pid > 0) kill(static_cast<pid_t>(pid), SIGKILL);   // do not leave it behind if the check failed
+}
+#endif
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -143,6 +187,9 @@ int main(int argc, char** argv) {
     test_relative_argv0_is_rejected();
     test_missing_executable_throws();
     test_timeout_kills_child(self);
+#ifndef _WIN32
+    test_timeout_kills_setsid_grandchild(self);
+#endif
     test_large_output_on_both_streams(self);
     test_output_cap_is_a_failure(self);
     std::cout << (failures == 0 ? "ALL PASSED" : "FAILURES") << "\n";
