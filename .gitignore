@@ -53,3 +53,6 @@ scratch/
 # Personal persistent memory (memory_file in cipher.conf)
 cipher_memory.txt
 cipher_memory.txt.tmp
+
+# Recovered pipeline notes (kept local, never committed)
+/.recovery/
