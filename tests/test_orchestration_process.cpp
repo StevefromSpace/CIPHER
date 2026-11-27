@@ -68,8 +68,7 @@ int run_child(int argc, char** argv) {
         // Leaves a grandchild in its own session (outside the process group) that records its pid, then both sleep.
         if (fork() == 0) {
             setsid();
-            std::ofstream(argv[2]) << getpid() << "
-";
+            std::ofstream(argv[2]) << getpid() << " ";
             std::this_thread::sleep_for(std::chrono::seconds(30));
             _exit(0);
         }
