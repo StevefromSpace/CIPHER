@@ -5,7 +5,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cctype>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 
 namespace cipher::orchestration {
@@ -93,6 +95,21 @@ AgentStep ClaudeToolAgent::next(const std::string& task, const std::vector<ToolT
     return parse_agent_reply(result.text);
 }
 
+bool path_in_write_scope(WritePolicy policy, const std::string& raw) {
+    std::string path;
+    for (char c : raw) path += c == '\\' ? '/' : static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    while (path.rfind("./", 0) == 0) path.erase(0, 2);
+    // Prefix list mirrors default_worktree_policy()/default_docs_only_policy() blacklists.
+    std::vector<std::string> blocked = {".git", ".github", "tools/", "tests/", "cmakelists.txt", "docs/agent_role_contract.md"};
+    if (policy == WritePolicy::DocsOnly)
+        for (const char* extra : {"docs/release", "release", "license", "docs/license"}) blocked.push_back(extra);
+    for (const std::string& prefix : blocked)
+        if (path.rfind(prefix, 0) == 0) return false;
+    if (policy == WritePolicy::Default) return true;
+    const bool markdown = path.size() > 3 && path.compare(path.size() - 3, 3, ".md") == 0;
+    return markdown || path.rfind("docs/", 0) == 0;
+}
+
 ImplementationExecutor::ImplementationExecutor(ImplementationSettings settings, WorktreeAllocator& allocator,
                                                ProcessRunner& runner, ToolAgent& agent, RoleExecutor& fallback)
     : settings_(std::move(settings)), allocator_(allocator), runner_(runner), agent_(agent), fallback_(fallback) {}
@@ -156,6 +173,14 @@ RoleResult ImplementationExecutor::execute_implementation() {
         if (status.exit_code != 0) return failed("git status failed", &tools);
         if (status.stdout_text.empty()) return failed("agent made no changes", &tools);
         if (git({"add", "-A"}).exit_code != 0) return failed("git add failed", &tools);
+        // Scope post-check, independent of the write policy: staged paths vs HEAD (the base; the agent cannot commit).
+        const ProcessResult names = git({"diff", "--cached", "--name-only", "-z", "HEAD"});
+        if (names.exit_code != 0) return failed("git diff failed", &tools);
+        std::string out_of_scope;
+        std::istringstream list(names.stdout_text);
+        for (std::string name; std::getline(list, name, '\0');)
+            if (!path_in_write_scope(settings_.write_policy, name)) out_of_scope += " " + name;
+        if (!out_of_scope.empty()) return failed("out-of-scope paths changed:" + out_of_scope, &tools);
         // --no-verify/no signing: a repository hook or signing prompt must not run on behalf of the model.
         if (git({"-c", "user.name=CIPHER", "-c", "user.email=cipher@localhost", "-c", "commit.gpgsign=false",
                  "commit", "--no-verify", "-q", "-m", "cipher: implementation for issue " +
