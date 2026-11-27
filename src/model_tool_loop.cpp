@@ -4,6 +4,7 @@
 #include <cctype>
 #include <exception>
 #include <set>
+#include <sstream>
 #include <utility>
 
 namespace cipher {
@@ -70,16 +71,26 @@ bool has_control_char(const std::string& text) {
     return std::any_of(text.begin(), text.end(), [](unsigned char c) { return c < 0x20 || c == 0x7f; });
 }
 
+// Fail-closed folding for the verification gate: ASCII letters fold by case; every non-ASCII byte becomes one
+// placeholder, so a name that differs only by non-ASCII case (for example UTF-8 U+00C9 vs U+00E9) still
+// matches and demands a read. It over-gates other same-shape names, never under-gates.
+// shortcut: a case pair whose UTF-8 lengths differ (for example U+00DF vs U+1E9E) is not matched.
 std::string lowered(const std::string& text) {
     std::string result = text;
-    for (char& c : result) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (char& c : result) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        c = u >= 0x80 ? '' : static_cast<char>(std::tolower(u));
+    }
     return result;
 }
 
 // Adds the paths of the files in a filesystem.list result, relative to the listed folder. Folder names end with '/'.
-void add_listed_files(std::string folder, const std::string& listing, std::vector<std::string>& paths) {
+// A capped listing ("... N more not shown") hides names, so the folder is remembered as truncated.
+void add_listed_files(std::string folder, const std::string& listing, std::vector<std::string>& paths,
+                      std::vector<std::string>& truncated_folders) {
     while (!folder.empty() && folder.back() == '/') folder.pop_back();
     if (folder == ".") folder.clear();
+    if (listing.find("\n... ") != std::string::npos || listing.rfind("... ", 0) == 0) truncated_folders.push_back(folder);
     std::size_t start = 0;
     while (start < listing.size()) {
         std::size_t end = listing.find('\n', start);
@@ -113,6 +124,26 @@ std::string first_unread_named_file(const std::string& question, const std::vect
         const std::size_t slash = path.rfind('/');
         const std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
         if (read_paths.count(path) == 0 && mentions_word(question, name)) return path;
+    }
+    return "";
+}
+
+// Fail-closed for a truncated listing: any question word shaped like a file name ("name.ext") that was not read at a
+// path inside such a folder counts as named-but-unlisted and must be read first.
+// shortcut: names without a dot are not caught; upgrade with paging in filesystem.list.
+std::string first_unread_name_in_truncated_folder(const std::string& question, const std::vector<std::string>& folders,
+                                                  const std::set<std::string>& read_paths) {
+    if (folders.empty()) return "";
+    std::istringstream words(question);
+    std::string word;
+    while (words >> word) {
+        while (!word.empty() && std::ispunct(static_cast<unsigned char>(word.back())) && word.back() != '/') word.pop_back();
+        const std::size_t dot = word.find('.');
+        if (dot == std::string::npos || dot == 0 || dot + 1 >= word.size()) continue;
+        for (const std::string& folder : folders) {
+            const std::string path = folder.empty() ? word : folder + "/" + word;
+            if (read_paths.count(path) == 0) return path;
+        }
     }
     return "";
 }
@@ -185,6 +216,7 @@ std::string ModelToolLoop::run(const std::string& question) {
     std::set<std::string> seen_calls;
     std::vector<std::string> ran;
     std::vector<std::string> listed_files;
+    std::vector<std::string> truncated_folders;
     std::set<std::string> read_files;
     int failures = 0;
     int unverified_answers = 0;
@@ -202,7 +234,8 @@ std::string ModelToolLoop::run(const std::string& question) {
 
         const std::string reply = trim(response.text);
         if (reply.find(kToolRequestMarker) == std::string::npos) {
-            const std::string unread = first_unread_named_file(question, listed_files, read_files);
+            std::string unread = first_unread_named_file(question, listed_files, read_files);
+            if (unread.empty()) unread = first_unread_name_in_truncated_folder(question, truncated_folders, read_files);
             if (unread.empty()) return with_trace(response.text, ran);
             // The answer would be about a file CIPHER has not shown the model, so it is not accepted.
             // A correction needs a later round in which a tool may still run; the last round never runs one.
@@ -274,7 +307,7 @@ std::string ModelToolLoop::run(const std::string& question) {
                    " bytes and was not sent to the model.";
         }
         seen_calls.insert(call_key);
-        if (tool_id == "filesystem.list") add_listed_files(argument, result.output, listed_files);
+        if (tool_id == "filesystem.list") add_listed_files(argument, result.output, listed_files, truncated_folders);
         if (tool_id == "filesystem.read") read_files.insert(argument);
         ran.push_back(argument.empty() ? tool_id : tool_id + " " + argument);
         // An empty result is a successful run but not evidence of anything; say so.
