@@ -1,6 +1,6 @@
 # v0.6 Local Inference Runtime: Architecture Proposal
 
-Status: PROPOSED. Awaiting owner approval (design gate OPEN). No implementation exists in this document's PR.
+Status: APPROVED by owner (design gate closed; approved with the recommended answers to section 7 items 1-4, items 5-6 remain open and do not block phases 1-2). Implementation proceeds in the phases in section 4. No implementation exists in this document's PR.
 Scope: the smallest change that lets CIPHER answer a prompt with a model running **inside the CIPHER process on the owner's machine**, with no network path and no hosted dependency.
 
 Baseline: `main` at `304a458` (v0.1 to v0.5 merged, 10/10 CTest). Nothing in this document has been prototyped or build-verified; library facts marked *(verify)* must be checked against llama.cpp primary docs before phase 1.
