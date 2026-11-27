@@ -26,6 +26,7 @@
 //   orchestration_dir — folder for persistent `job` state and events (default: empty = job commands disabled)
 //   orchestration_repo / orchestration_base_sha / orchestration_worktree_root — enable `job task` (paid Claude agent)
 //   orchestration_model, orchestration_budget — Claude model and per-call USD cap for that agent
+//   orchestration_qa — comma list of QA profiles for jobs: check, build, ctest, python (default: check)
 //   ollama_port — 127.0.0.1 port of a local Ollama server for the `ask` command (default: 0 = disabled)
 //   model_tool_calls — true lets `ask` answers request time.now/system.info, each needing owner "yes" (default: false)
 //   memory_deny — repeatable; a pattern that refuses memory actions, e.g. `share *` (default: none)
@@ -93,6 +94,7 @@ struct Config {
     std::string orchestration_worktree_root; // Folder of job-<n> worktrees (repo+sha+root enable `job task`)
     std::string orchestration_model = "haiku";  // Claude model for the implementation agent
     std::string orchestration_budget = "0.25";  // Max USD per Claude call
+    std::string orchestration_qa = "check"; // QA profiles run by the job pipeline
     int         ollama_port = 0;             // 0 = `ask` disabled; otherwise 1-65535
     bool        model_tool_calls = false;    // Effective only when ollama_port is set
     std::vector<std::string> memory_deny;    // Blacklist patterns for memory actions ("<action> <id>")

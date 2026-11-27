@@ -18,6 +18,7 @@ struct RigConfig {
     std::filesystem::path worktree_root;   // folder holding job-<n> worktrees
     std::string model = "haiku";
     std::string max_budget_usd = "0.25";   // per claude call
+    std::string qa_profiles = "check";     // see qa_profile.hpp; unknown/unavailable profiles throw
 };
 
 // Production wiring for one issue: system process runner, git worktree backend, Claude-driven agent and the

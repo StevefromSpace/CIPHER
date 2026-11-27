@@ -1,6 +1,7 @@
 // PR creation, QA, mechanical review and CI observation. All fakes: scripted git/test runner and scripted gh runner.
 
 #include "cipher/orchestration/pipeline_roles.hpp"
+#include "cipher/orchestration/qa_profile.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -41,6 +42,7 @@ public:
     std::string head = kHead;
     std::string names;           // diff --name-only output
     std::string diff;            // diff output
+    std::string status_out;      // git status --porcelain output (non-empty = tracked files modified)
     int push_exit = 0;
     int test_exit = 0;
     int test_calls = 0, push_calls = 0;
@@ -55,6 +57,7 @@ public:
         }
         const std::string& sub = argv[4];
         if (sub == "rev-parse") r.stdout_text = head + "\n";
+        else if (sub == "status") r.stdout_text = status_out;
         else if (sub == "push") { ++push_calls; r.exit_code = push_exit; }
         else if (sub == "diff" && argv.size() > 5 && argv[5] == "--name-only") r.stdout_text = names;
         else if (sub == "diff") r.stdout_text = diff;
@@ -201,6 +204,36 @@ void test_qa() {
     check(is(bare.run(Role::Qa, nocmd.job), EventKind::Blocked), "QA without approved commands is blocked, not passed");
 }
 
+void test_qa_dirty_and_profiles() {
+    Rig dirty("qa7");
+    dirty.runner.names = "docs/x.md\n";
+    dirty.runner.status_out = " M src/a.cpp\n";
+    check(is(dirty.exec->run(Role::Qa, dirty.job), EventKind::Blocked), "QA that modified tracked files is blocked");
+
+    Rig ok("qa8");
+    ok.runner.names = "docs/x.md\n";
+    ok.exec->run(Role::Qa, ok.job);
+    std::ifstream in(ok.settings.evidence_file);
+    const std::string log((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    check(log.find("QA t @" + kHead + " exit=0") != std::string::npos, "evidence records command, exact SHA and exit");
+
+    const QaTools tools{"/g", "/cm", "/ct", "/py"};
+    const QaPlan plan = build_qa_plan("check, build,ctest,python", "/wt", "/bd", tools);
+    const std::vector<std::string> ids = {"check", "cmake-configure", "cmake-build", "ctest", "python-integrations",
+                                          "python-pipeline"};
+    check(plan.ids == ids, "profiles expand to ordered approved commands");
+    check(plan.commands.at("cmake-build")[0] == "/cm" && plan.commands.at("ctest")[2] == "/bd",
+          "commands use explicit executables and out-of-tree build dir");
+    for (const char* bad : {"", "bogus", "check,check", "ctest", "build,ctest,ctest"}) {
+        bool threw = false;
+        try { build_qa_plan(bad, "/wt", "/bd", tools); } catch (const std::invalid_argument&) { threw = true; }
+        check(threw, (std::string("rejected profile list '") + bad + "'").c_str());
+    }
+    bool missing = false;
+    try { build_qa_plan("build", "/wt", "/bd", QaTools{"/g", "", "", ""}); } catch (const std::invalid_argument&) { missing = true; }
+    check(missing, "missing tool is an error, not a skipped check");
+}
+
 void test_review() {
     Rig a("rv1");
     a.runner.names = "src/a.cpp\ntests/a_test.cpp\n";
@@ -259,6 +292,7 @@ void test_ci() {
 int main() {
     test_pr_creation();
     test_qa();
+    test_qa_dirty_and_profiles();
     test_review();
     test_ci();
     std::cout << (failures == 0 ? "ALL PASSED\n" : "FAILURES\n");

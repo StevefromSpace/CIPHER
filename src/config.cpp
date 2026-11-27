@@ -178,6 +178,9 @@ ConfigResult parse_lines(std::istream& stream) {
         } else if (key == "orchestration_budget") {
             result.config.orchestration_budget = value;
 
+        } else if (key == "orchestration_qa") {
+            result.config.orchestration_qa = value;
+
         } else if (key == "ollama_port") {
             int port = 0;
             if (!parse_port(value, port)) {
@@ -283,6 +286,7 @@ Config ConfigParser::defaults() noexcept {
     cfg.memory_file = "";
     cfg.filesystem_read_root = "";
     cfg.orchestration_dir = "";
+    cfg.orchestration_qa = "check";
     cfg.orchestration_repo = "";
     cfg.orchestration_base_sha = "";
     cfg.orchestration_worktree_root = "";

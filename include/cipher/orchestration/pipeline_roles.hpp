@@ -24,6 +24,7 @@ struct PipelineSettings {
     std::vector<std::string> qa_command_ids;             // run in order; all must exit 0
     std::filesystem::path evidence_file;                 // optional; findings are appended
     std::filesystem::path pr_body_file;                  // written by the executor before `gh pr create`
+    int qa_timeout_ms = 600000;                          // per QA command; timeout or output overflow is BLOCKED
     std::size_t max_changed_files = 50;                  // reviewer: more than this is NEEDS_HUMAN
 };
 

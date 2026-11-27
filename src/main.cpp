@@ -169,6 +169,7 @@ int main() {
                 rig.worktree_root = cfg.orchestration_worktree_root;
                 rig.model = cfg.orchestration_model;
                 rig.max_budget_usd = cfg.orchestration_budget;
+                rig.qa_profiles = cfg.orchestration_qa;
                 factory = [rig](int issue, const std::string& task) {
                     return std::make_unique<cipher::orchestration::ImplementationRig>(rig, issue, task);
                 };
