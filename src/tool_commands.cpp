@@ -135,7 +135,10 @@ bool ToolCommands::confirm(const ToolDefinition& definition, const std::string& 
     if (!std::getline(answers_, answer)) {
         return false;
     }
-    return trim(answer) == "yes";
+    if (!answer.empty() && answer.back() == '') {
+        answer.pop_back();
+    }
+    return answer == "yes";
 }
 
 } // namespace cipher
