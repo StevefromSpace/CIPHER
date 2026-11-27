@@ -388,3 +388,10 @@ For full architectural diagrams and long-term philosophical context, see [ARCHIT
 - **Rejected:** a plan-wide approval step (it would replace per-action governance); letting the model call a tool the offered list does not name; unbounded loops or retries; automatic retry of an action with side effects (no such tool is offered); letting a backend parse or run tools (the backend returns text only).
 - **Tests:** `tests/test_model_tool_loop.cpp` covers scripted backends, the Ollama path end to end with a fake HTTP transport, round and failure limits, the verification gate, the repeat guard and the memory policy. The loop suite is run by CI on Ubuntu and Windows.
 - **Limits:** see `docs/V1_ASSISTANT_LOOP.md`. The llama.cpp tool path is covered by scripted tests only; the Ollama path was also run against a real local model during development.
+
+### 25. Local Executor: Recorded Honestly, Small Model Not Shown to Work (Phase C)
+
+- **Status:** Accepted (2026-11-28). Code in PRs #76, #78, #79, #80; check in the C5 PR.
+- **Decision:** `orchestration_agent=local` stays an opt-in docs-only path. The real-model check is a manual validator outside CTest (`tests/local_executor_real_validation.cpp`), free and local, never run in CI.
+- **Result:** Ollama `qwen2.5:3b`, one-line docs edit in a throwaway repo, 3 of 3 runs `ImplementationFailed` (non-JSON reply; rejected `fs.edit`). The model was not tuned and the prompt was not changed to make it pass.
+- **Consequence:** docs claim the local path is test-verified with scripted backends only. A larger model or a full real-repo job is a separate, unrun step.

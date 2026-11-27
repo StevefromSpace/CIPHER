@@ -201,6 +201,10 @@ Reports in `CIPHER-upstream-research/reports/` cover OpenClaw, Dodaios, Leon, Op
 - Research decisions (`CIPHER-upstream-research/ARCHITECTURE_DECISION.md`, provenance in `THIRD_PARTY_NOTICES.md`): permission tiers and bounded context reimplemented clean-room, Leon tool progressive loading and OpenClaw dreaming reference-only, desktop control and messenger channels rejected. Python adapter loopback and timeout hardening already present in `integrations/contract.py` and tested.
 - Adaptation policy (owner decision, final): useful patterns from upstream assistant projects are studied, then reimplemented clean-room in CIPHER-owned C++17 interfaces and tested. Upstream source is not copied or vendored to meet this. The reimplemented patterns are `RiskTier` and `PermissionPolicy` (`Safe`/`Monitor`/`Ask`/`Block`, blacklist > whitelist > default tier) and `ContextBudget` (`max_prompt_bytes`, derived from OpenClaw's bounded context and Dodaios' risk tiers). `EventMessage` (modeled on OVOS-MSG-1) is reserved for the future voice path. Their provenance is recorded in `THIRD_PARTY_NOTICES.md`; the approved third-party policy is unchanged.
 
+### Phase C: local executor (C1-C4 MERGED: #76, #78, #79, #80; C5 recorded)
+
+- `orchestration_agent=local` implements docs-only issues through a local model. Verified by scripted tests. Real-model check on `qwen2.5:3b` (2026-11-28): 3 of 3 manual runs failed, so the 3B model is not shown to work; a larger local model and a real-repo job are untested. See `docs/PHASE_C_LOCAL_EXECUTOR.md`.
+
 ### Later: voice, interfaces, planning, learning, and self-improvement
 
 Each capability should be introduced behind tests, narrow permissions, observable behavior, and recovery paths. Model training and self-upgrading are advanced milestones, not prerequisites for a useful first version.
