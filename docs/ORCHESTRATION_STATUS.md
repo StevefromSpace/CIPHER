@@ -70,7 +70,7 @@ The Claude call is tool-less. It can answer Research and Architecture roles but 
 - No tool-enabled implementation executor, so no end-to-end run is possible.
 - The orchestration library is not wired into the `cipher` executable.
 - `GitWorktreeBackend` is tested against local temporary repositories, not against the real project repository.
-- The JSON read has not been run against open PRs with live checks, requested changes or `StatusContext` entries. Those paths are covered by synthetic tests only.
+- The JSON read has not been run against real open PRs with live checks, requested changes or `StatusContext` entries. Those paths are covered by synthetic tests only (`test_open_pr_synthetic` in `tests/test_orchestration_github_json.cpp`).
 - `gh` and `claude` paths must be supplied by the caller as absolute paths.
 - The budget flag is not a hard ceiling: a call capped at $0.05 once cost $0.138.
 
